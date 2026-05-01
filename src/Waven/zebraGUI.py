@@ -6,11 +6,25 @@ Created on Wed Mar 25 19:31:32 2025
 import tkinter as tk
 from tkinter import ttk, messagebox
 import os
+from .config import parse_literal
 from .WaveletGenerator import *
 from .LoadPinkNoise import *
 from .Analysis_Utils import *
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import sys
+
+
+def _parse_dirs(value):
+    """Parse one or more data directories from a GUI text field."""
+    try:
+        parsed = parse_literal(value, "Dirs")
+    except ValueError:
+        parsed = value
+    if parsed is None:
+        return []
+    if isinstance(parsed, (list, tuple)):
+        return [str(path) for path in parsed]
+    return [str(parsed)]
 
 
 def run(param_defaults, gabor_param):
@@ -31,7 +45,7 @@ def run(param_defaults, gabor_param):
 		Experiment Info: (mouse name, data, experiment number)
 		Number of Planes (int): number of acquisition planes.
 		Block End (int): timeframe where the experiment starts.
-		Number of Frames (int): number of frames stim 30 Hz -> 1800 frame/min.
+		Number of Frames (int): number of stimulus frames.
 		Number of Trials to Keep(int): Number of Trials to Keep.
 
     Parameters analysis:
@@ -63,31 +77,48 @@ def run(param_defaults, gabor_param):
             pass
 
     def create_gabor():
-        sigmas = eval(gabor_entries["Sigmas"].get())
-        frequencies = eval(gabor_entries["Frequencies"].get())
+        sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
+        frequencies = parse_literal(
+            gabor_entries["Frequencies"].get(),
+            "Frequencies",
+        )
         nx = int(gabor_entries["NX"].get())
         ny = int(gabor_entries["NY"].get())
         n_theta = int(gabor_entries["N_thetas"].get())
-        offsets = eval(gabor_entries["Phases"].get())
+        offsets = parse_literal(gabor_entries["Phases"].get(), "Phases")
         path_save = gabor_entries["Save Path"].get()
         xs = np.arange(nx)
         ys = np.arange(ny)
         thetas = np.array([(i * np.pi) / n_theta for i in range(n_theta)])
         sigmas = np.array(sigmas)
         offsets = np.array(offsets)
-        f = 0
-        if f == 0:
-            freq = False
+        frequencies = np.array(frequencies)
+        if frequencies.size and np.any(frequencies != 0):
+            L = makeFilterLibrary2(xs, ys, thetas, sigmas, offsets, frequencies)
         else:
-            freq = True
-        L = makeFilterLibrary(xs, ys, thetas, sigmas, offsets, f, freq)
+            frequency = frequencies[0] if frequencies.size else 0
+            L = makeFilterLibrary(
+                xs,
+                ys,
+                thetas,
+                sigmas,
+                offsets,
+                frequency,
+                freq=False,
+            )
         np.save(path_save, L)
         messagebox.showinfo("gabor library", "Done!")
 
     def run_wavelet():
-        sigmas = eval(gabor_entries["Sigmas"].get())
-        visual_coverage = eval(param_entries["Visual Coverage"].get())
-        analysis_coverage = eval(param_entries["Analysis Coverage"].get())
+        sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
+        visual_coverage = parse_literal(
+            param_entries["Visual Coverage"].get(),
+            "Visual Coverage",
+        )
+        analysis_coverage = parse_literal(
+            param_entries["Analysis Coverage"].get(),
+            "Analysis Coverage",
+        )
         movpath = param_entries["Movie Path"].get()
         lib_path = param_entries["Library Path"].get()
         nx = int(param_entries["NX"].get())
@@ -121,12 +152,21 @@ def run(param_defaults, gabor_param):
 
         try:
             path_directory = param_entries["Path Directory"].get()
-            dirs = [param_entries["Dirs"].get()]
-            exp_info = eval(param_entries["Experiment Info"].get())
-            sigmas = eval(param_entries["Sigmas"].get())
+            dirs = _parse_dirs(param_entries["Dirs"].get())
+            exp_info = parse_literal(
+                param_entries["Experiment Info"].get(),
+                "Experiment Info",
+            )
+            sigmas = parse_literal(param_entries["Sigmas"].get(), "Sigmas")
             sigmas = np.array(sigmas)
-            visual_coverage = eval(param_entries["Visual Coverage"].get())
-            analysis_coverage = eval(param_entries["Analysis Coverage"].get())
+            visual_coverage = parse_literal(
+                param_entries["Visual Coverage"].get(),
+                "Visual Coverage",
+            )
+            analysis_coverage = parse_literal(
+                param_entries["Analysis Coverage"].get(),
+                "Analysis Coverage",
+            )
             n_planes = int(param_entries["Number of Planes"].get())
             block_end = int(param_entries["Block End"].get())
             screen_x = int(param_entries["screen_x"].get())
@@ -150,16 +190,20 @@ def run(param_defaults, gabor_param):
         print(exp_info)
         print(dirs)
 
-        pathdata = dirs[0] + '/' + exp_info[0] + '/' + exp_info[1] + '/' + str(
-            exp_info[2])  # /media/sophie/Seagate Basic/datasets/SS002/2024-07-23/3'
-        pathsuite2p = pathdata + '/suite2p'
+        pathdata = os.path.join(
+            dirs[0],
+            exp_info[0],
+            exp_info[1],
+            str(exp_info[2]),
+        )
+        pathsuite2p = os.path.join(pathdata, 'suite2p')
 
         deg_per_pix = abs(xM - xm) / nx
         sigmas_deg = np.trunc(2 * deg_per_pix * sigmas * 100) / 100
 
         print(pathdata)
         print(pathsuite2p)
-        if spks_path == 'None':
+        if spks_path.strip().lower() in ("", "none", "null"):
             print('aligning datas')
             spks, spks_n, neuron_pos = loadSPKMesoscope(exp_info, dirs, pathsuite2p, block_end, n_planes, nb_frames,
                                                         threshold=1.25, last=True, method='frame2ttl')
@@ -179,7 +223,7 @@ def run(param_defaults, gabor_param):
             try:
                 spks = np.load(spks_path)
                 parent_dir = os.path.dirname(spks_path)
-                neuron_pos = np.load(os.join(parent_dir, 'pos.npy'))
+                neuron_pos = np.load(os.path.join(parent_dir, 'pos.npy'))
             except Exception as e:
                 messagebox.showerror("Error", f"File not found: {spks_path} {e}")
 
@@ -493,6 +537,3 @@ def run(param_defaults, gabor_param):
     btn_quit.grid(row=40, column=0, columnspan=2, pady=10)
 
     root.mainloop()
-
-
-

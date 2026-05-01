@@ -4,14 +4,19 @@ Created on Wed Mar 25 19:31:32 2025
 @author: Sophie Skriabine
 """
 
+import os
+
+import matplotlib
+if os.environ.get("WAVEN_NO_PLOTS") == "1":
+    matplotlib.use("Agg", force=True)
+else:
+    matplotlib.use("TkAgg", force=True)
+
 import skimage
 import numpy as np
 import matplotlib.pyplot as plt
-import os
 from skimage import transform
 import pickle
-import matplotlib
-matplotlib.use('TkAgg')
 from scipy.stats import pearsonr
 import torch
 from scipy import signal
@@ -30,17 +35,21 @@ from sklearn.cluster import spectral_clustering
 from sklearn.feature_extraction import image
 from sklearn.cluster import KMeans
 import cv2 as cv
-from .LoadPinkNoise import load_stimulus_simple_cell2
 import gc
 import matplotlib.gridspec as gridspec
 from sklearn.decomposition import NMF
-from tensorly.decomposition import non_negative_parafac
 import math
 import cv2
 from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import FuncFormatter
 import matplotlib.ticker as ticker
+import zarr
 
+DEFAULT_MOVIE_FRAME_RATE_HZ = 30
+SECONDS_PER_MINUTE = 60
+DEFAULT_FRAMES_PER_MINUTE = (
+    DEFAULT_MOVIE_FRAME_RATE_HZ * SECONDS_PER_MINUTE
+)
 
 
 def pi_formatter(x, pos):
@@ -66,7 +75,6 @@ def convolve_Stim(stim, time_trial1, tau=1.8):
     t0=0
     r = Decay(t_response,tau,t0)
     st=stim.reshape(stim.shape[0], -1)
-    # convolved_stim=np.concatenate([np.convolve(st[:, w],r,mode='full').astype('float16')[:stim.shape[0]] for w in range(st.shape[1])])
     convolved_stim = []
     for w in range(st.shape[1]):
         s = st[:, w]
@@ -148,7 +156,6 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos,  nx, ny, ns, visual_cove
         tuple : (receptive field matrix (nb_neurons * nx, ny, no, ns), best gabor params for each neurons (list shape 4(nx, ny, no, ns)* nb_neurons), best gabor with units in visual degree, max values array)
     """
     try:
-        # cc_f_1 = torch.corrcoef(torch.Tensor(np.concatenate((np.abs(stim.reshape(stim.shape[0], -1)).T, resp.T),axis=0).astype('float16')).cuda())  # , dtype='float16')
         cc_f_1 = torch.corrcoef(torch.Tensor(
             torch.concatenate((stim.reshape(stim.shape[0], -1).T, resp.T), axis=0)).cuda())  # , dtype='float16')
     except:
@@ -158,16 +165,6 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos,  nx, ny, ns, visual_cove
         cc_f_1 = torch.corrcoef(
             torch.Tensor(torch.concatenate((stim.reshape(stim.shape[0], -1).T, resp.T), axis=0)).cuda())
 
-    # try:
-        # cc_f_1 = torch.corrcoef(torch.Tensor(np.concatenate((np.abs(stim.reshape(stim.shape[0], -1)).T, resp.T),axis=0).astype('float16')).cuda())  # , dtype='float16')
-    # cc_f_1 = torch.corrcoef(torch.Tensor(np.concatenate((stim.reshape(stim.shape[0], -1).T, resp.T),axis=0)).cuda())# , dtype='float16')
-    # except:
-    #     print('cpu')
-    #     torch.cuda.empty_cache()
-    #     stim=torch.Tensor(stim)
-    #     resp = torch.Tensor(resp)
-    #     cc_f_1 = torch.corrcoef(
-    #         torch.Tensor(torch.concatenate((stim.reshape(stim.shape[0], -1).T, resp.T), axis=0)).cuda())
     print(cc_f_1.shape)
     cc_f_1 = cc_f_1.detach().cpu().numpy()
     if absolute:
@@ -177,9 +174,6 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos,  nx, ny, ns, visual_cove
     rfs = np.nan_to_num(rfs)
     print(rfs.shape)
     rfs = rfs.reshape(rfs.shape[0], nx, ny, 8, ns)#9,3
-    # rfs = rfs[:, :, :, :-1, :]
-    # rfssum = rfs.sum(axis=4)
-
     indices = []
     maxes = []
     for i in range(rfs.shape[0]):
@@ -188,12 +182,10 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos,  nx, ny, ns, visual_cove
         maxes.append(m)
 
     indices = np.array(indices)
-    # maxes=np.array(maxes)
     xmax = indices[:, 0]
     ymax = indices[:, 1]
     omax = indices[:, 2]
     smax = indices[:, 3]
-    # dmax = indices[:, 4]
     maxe=[xmax, ymax, omax, smax]#, dmax]
     xM, xm,yM, ym=visual_coverage
     omax_corr=orientation_correction_for_stretches(visual_coverage, nx, ny, omax*22.5)
@@ -249,11 +241,6 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos,  nx, ny, ns, visual_cove
             plt.xlabel('Azimuth')
             plt.ylabel('Elevation')
             plt.title('Screen positions')
-            #
-            # plt.figure()
-            # plt.scatter(neuron_pos[:, 1], neuron_pos[:, 0], s=5, c=dmax, cmap='jet')
-            # plt.colorbar()
-
         else:
             fil=maxes>0.2
             print('filtering')
@@ -416,8 +403,6 @@ def match_cumulative_cdf(source, template):
     tmpl_quantiles = np.cumsum(tmpl_counts) / template.size
 
     interp_a_values = np.interp(src_quantiles, tmpl_quantiles, tmpl_values)
-    # plt.figure()
-    # plt.plot(interp_a_values)
     return interp_a_values[src_unique_indices].reshape(source.shape)
 
 
@@ -461,11 +446,6 @@ def cart2pol4d(x, y, dp, dn):
                     else:
                         phi[i][j][k][l] = temp_phi[i][j][k][l]
     return rho, phi, dd, nn
-# def cart2pol(x, y):
-#     rho = np.sqrt(x**2 + y**2)
-#     phi = np.arctan2(y, x)
-#     return rho, phi
-
 def cart2pol3d(x, y, dp):
     xx, yy, dd = np.meshgrid(x,y, dp)
     rho = np.sqrt(xx**2 + yy**2)
@@ -507,17 +487,10 @@ def cart2pol_noise(x, y, n):
     return rho, phi
 
 def preferedDirection(videodata, spks, x, y, ori, w_i, w_r, window_size=5):
-    # v=videodata[:, x-window_size:x+window_size, y-window_size:y+window_size]
-    # v_=np.diff(v.astype(int), axis=0)
-    # plt.figure()
-    # plt.plot(abs(np.sum(v_, axis=(1, 2))))
     rho, phi=cart2pol(w_r, w_i)
     plt.figure()
     plt.plot(phi*180/np.pi)
     angle=phi*180/np.pi
-    # res = [phase_cross_correlation(v[i], v[i+1]) for i in range(8999)]
-    # angle=np.nan_to_num(np.array([np.arctan(res[i][0][1]/res[i][0][0]) for i in range(8999)]))*180/np.pi
-    # shift=np.array([np.sqrt(np.power(res[i][0][1], 2) + np.power(res[i][0][0], 2)) for i in range(8999)])
     pref_dir=np.mean((np.mean(spks[:, :, 9275], axis=0)>0)*angle*(abs(angle)>=ori-10))# to account for the measured error
     return angle, pref_dir
 
@@ -530,16 +503,6 @@ def PCcorrelation(spks, neuron_pos):
     plt.figure()
     plt.rcParams['axes.facecolor'] = 'none'
     plt.plot(pc1)
-    # torch.cuda.empty_cache()
-    # spks = torch.Tensor(spks)
-    # pc1=torch.Tensor(pc1).reshape(-1,1)
-    # cc_f_1 = torch.corrcoef(torch.Tensor(torch.concatenate((spks.reshape(-1, spks.shape[2]).T, pc1.T), axis=0)).cuda())
-    # cc_f_1=cc_f_1[-1][:-1].detach().cpu().numpy()
-    # plt.figure()
-    # plt.rcParams['axes.facecolor'] = 'none'
-    # plt.scatter(neuron_pos[:, 1], neuron_pos[:, 0], s=5, vmin=-0.0, vmax=0, c=abs(cc_f_1), cmap='Greys')
-    # plt.colorbar()
-    # return pc1.detach().cpu().numpy(),pc2, cc_f_1, Vh
     return pc1, pc2
 
 
@@ -552,23 +515,9 @@ def NeuronCorrelation(idx, spks, neuron_pos):
         print('sparsenoise sp045 ?')
         cc_ = torch.corrcoef(spks.cuda())
     cc_f_1=cc_[idx].detach().cpu().numpy()
-    # plt.figure()
-    # plt.rcParams['axes.facecolor'] = 'none'
-    # plt.scatter(neuron_pos[:, 1], neuron_pos[:, 0], s=5, c=abs(cc_f_1), vmin=0.08, vmax=0.1, cmap='Greys')
-    # plt.colorbar()
-    # plt.scatter(neuron_pos[idx, 1], neuron_pos[idx, 0], s=10, c='r')
 
     neurocorr = np.asarray(cc_f_1 >= 0.08).nonzero()[0]
-    # mean_pop_signal=np.mean(spks[:, :, neurocorr], axis=2)
     return cc_.detach().cpu().numpy(), neurocorr
-
-    # plt.figure()
-    # plt.rcParams['axes.facecolor']='none'
-    # plt.plot(np.mean(mean_pop_signal.T, axis=1), c='r')
-    # plt.twinx()
-    # plt.plot(Y, c='k')
-    # plt.twinx()
-    # plt.plot(np.mean(pc1.reshape(5, 9000), axis=0), c='b')
 
 
 
@@ -585,7 +534,6 @@ def predictSparseNoise(resp, stim, rfs, tp, save=False):
 
 
 def predictPinkNoise(maxes, vis_n, spks,rfs, tp, L, videodata, dt=50, save=False):
-    # rfs_model=rfs[0]
     rfs_model = np.zeros((spks.shape[-1], 27 , 11 , 8 ,4))
 
     for i in range(spks.shape[-1]):
@@ -600,9 +548,6 @@ def predictPinkNoise(maxes, vis_n, spks,rfs, tp, L, videodata, dt=50, save=False
     vis = r @ rfs_model.reshape(rfs_model.shape[0], -1)
     vis = vis.reshape(27,11,8, 4)
 
-
-    # vis = np.swapaxes(vis, 0, 1)
-
     vis_t = skimage.transform.resize(vis, (135, 54, 8, 4), order=5, anti_aliasing=True)
 
     fig, ax = plt.subplots(8, 4)
@@ -613,12 +558,6 @@ def predictPinkNoise(maxes, vis_n, spks,rfs, tp, L, videodata, dt=50, save=False
         ax[i, 3].imshow(vis_t[:, :, i, 3].T, cmap='coolwarm')
 
     vs = vis_t[:, :, :, 2].reshape(1, -1) @ L[:, :, :, 2, 0].reshape(-1, 135*54)
-    # plt.figure()
-    # plt.imshow(vs.reshape(54, 135), cmap='coolwarm')
-    #
-    # plt.figure()
-    # plt.imshow(np.mean(videodata[tp-dt:tp], axis=0))
-    # plt.title('videodata')
     print(np.corrcoef(vs, np.mean(videodata[tp-2*dt:tp-dt], axis=0).flatten()))
 
     if save:
@@ -626,13 +565,7 @@ def predictPinkNoise(maxes, vis_n, spks,rfs, tp, L, videodata, dt=50, save=False
         tifffile.imwrite('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520videodata.tif',
                          np.mean(videodata[tp-dt:tp], axis=0))
 
-    # plt.figure()
-    # plt.imshow(np.flip(np.flip(vs.reshape(54, 135), axis=0), axis=1), cmap='coolwarm')
-
     vc = vis_t.reshape(1, -1) @ L[:, :, :, :, 0].reshape(-1, 135 * 54)
-
-    # plt.figure()
-    # plt.imshow((vs+vc).reshape(54, 135), cmap='coolwarm')
     if save:
         tifffile.imwrite('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520reconstructed_1wavelet.tif',
                          (vs+vc).reshape(54, 135))
@@ -695,7 +628,6 @@ def DirectionSelectivityPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsam
         plt.figure()
         plt.rcParams['axes.facecolor'] = 'none'
         plt.plot(Y, c='k')
-        # plt.plot(pred + reg.intercept_[0], c='r')
         plt.twinx()
         plt.plot(tan_pos, c='b')
         plt.fill_between(np.arange(9000), tan_pos, color='b', alpha=0.2)
@@ -709,7 +641,6 @@ def DirectionSelectivityPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsam
         plt.figure()
         plt.rcParams['axes.facecolor'] = 'none'
         plt.plot(Y, c='k')
-        # plt.plot(pred + reg.intercept_[0], c='r')
         plt.twinx()
         plt.plot(ngng, c='y')
         plt.fill_between(np.arange(9000), ngng,  color='y',alpha=0.2)
@@ -720,7 +651,6 @@ def DirectionSelectivityPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsam
         plt.plot(png, c='b')
         plt.fill_between(np.arange(9000), png,  color='b',alpha=0.2)
         plt.twinx()
-        # plt.plot(signal.sosfilt(sos2,ngng)*w_c_downsampled[:, x, y, o, s][:-1])
 
 
         plt.figure()
@@ -758,12 +688,6 @@ def SinCosPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled, ncut):
     means = means.iloc[::-1]
     print(means.head())
     print(means['z'])
-    #
-    # plt.figure()
-    # plt.clf()
-    # sns.heatmap(means['z'].interpolate(method='linear',limit=2, limit_direction='both'), cmap='coolwarm')
-    # plt.title('Means of spks vs Features cos and sin')
-    # plt.tight_layout()
 
     z=means['z'].to_numpy()
     dx=np.array([0.5*(means['z'].columns.array[i].left+means['z'].columns.array[i].right) for i in range(nCut)])
@@ -780,13 +704,6 @@ def SinCosPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled, ncut):
     plt.plot(phi, rho, color='k', ls='none')
     plt.grid()
     plt.title('Means of spks polar coordinate')
-    #
-
-    # plt.figure()
-    # plt.clf()
-    # sns.heatmap(means['z_past'].interpolate(method='linear', limit=2, limit_direction='both'), cmap='coolwarm')
-    # plt.title('Means of spks vs Features cos and sin - Past')
-    # plt.tight_layout()
 
     z2=means['z_past'].to_numpy()
     dx=np.array([0.5*(means['z_past'].columns.array[i].left+means['z'].columns.array[i].right) for i in range(nCut)])
@@ -794,24 +711,10 @@ def SinCosPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled, ncut):
     theta2=np.arctan(dy[np.where(z2 == np.max(np.nan_to_num(z2)))[0][0]]/dx[np.where(z2 == np.max(np.nan_to_num(z2)))[1][0]])*180/np.pi
 
     rho2, phi2 = cart2pol(dx, dy)
-    # plt.figure()
-    # plt.rcParams['axes.facecolor'] = 'none'
-    # plt.subplot(projection="polar")
-    # plt.pcolormesh(phi2, rho2, z2[:-1, :-1], cmap='coolwarm', shading='flat')
-    # plt.plot(phi2, rho2, color='k', ls='none')
-    # plt.grid()
-    # plt.title('Means of spks Past polar coordinate')
 
     dtheta=theta1-theta2
     print(dtheta)
     return rho, phi, z, theta1, dx, dy
-    # data=data[data['sig']==1]
-    #
-    #
-    #
-    #
-    # plt.figure()
-    # sns.jointplot(x=w_i_downsampled[:, x, y, o, s].reshape(-1,1)[:, 0], y=w_r_downsampled[:, x, y, o, s].reshape(-1,1)[:,0], kind='kde', fill=True)
 
 
 def hanningconv(interp_grid, n):
@@ -831,8 +734,6 @@ def hanningconv3d(interp_grid, n):
     return hanning
 
 def interpolateData3d(z, dx, dy, dp, ncut, smooth=True):
-    # from scipy.interpolate import RegularGridInterpolator
-    # f= RegularGridInterpolator((dx, dp, dy), z)
     x_grid, y_grid, p_grid = np.meshgrid(dx, dy, dp)
 
     # get known values to set the interpolator
@@ -883,51 +784,25 @@ def SinCosPlot2(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, plotting=
     data['z']=Y
     data['z_past'] = Y_past
     cuts = pd.DataFrame({str(feature) + 'Bin': pd.cut(data[feature], nCut) for feature in [0, 1, 2, 3]})
-    # print('at first cuts are pandas intervalindex.')
-    # print(cuts.head())
-    # print(cuts.info())
     means = data.join(cuts).groupby(list(cuts)).mean()
     means = means.unstack(level=0)  # Use level 0 to put 0Bin as columns.
 
     # Reverse the order of the rows as the heatmap will print from top to bottom.
     means = means.iloc[::-1]
-    # print(means.head())
-    # print(means['z'])
-
-    # plt.figure()
-    # plt.clf()
-    # sns.heatmap(means['z'].interpolate(method='linear',limit=2, limit_direction='both'), cmap='coolwarm')
-    # plt.title('Means of spks vs Features cos and sin')
-    # plt.tight_layout()
 
     z=means['z'].to_numpy()
     dx=np.array([0.5*(means['z'].columns.array[i].left+means['z'].columns.array[i].right) for i in range(nCut)])
     dy=np.array([0.5*(means['z'].index.to_numpy()[i][0].left+means['z'].index.to_numpy()[i][0].right) for i in np.arange(0, nCut**3, nCut**2)])
     dp=np.array([0.5*(means['z'].index.to_numpy()[i][1].left+means['z'].index.to_numpy()[i][1].right) for i in np.arange(0, nCut**2, nCut)])
     dn = np.array([0.5*(means['z'].index.to_numpy()[i][2].left+means['z'].index.to_numpy()[i][2].right) for i in np.arange(0, nCut)])
-    # dp2 = np.array([0.5 * (cuts['2Bin'].array.to_numpy()[i].left + cuts['2Bin'].array.to_numpy()[1].right) for i in np.arange(0, nCut**3, nCut)])
-    # dn2=np.array([0.5*(cuts['3Bin'].array.to_numpy()[i].left+cuts['3Bin'].array.to_numpy()[i].right) for i in np.arange(0, nCut**4, nCut)])
-    # theta1=np.arctan(dy[np.where(z == np.max(np.nan_to_num(z)))[0][0]]/dx[np.where(z == np.max(np.nan_to_num(z)))[1][0]])*180/np.pi
-
-
-
-    # rho, phi = cart2pol(dx, dy)
     rho4d, phi4d, ddp4d, nn = cart2pol4d(dx, dy, dp, dn)
     rho3d, phi3d, ddp3d = cart2pol3d(dx, dy, dp)
     rho = rho3d[:, :, 0]
     phi=phi3d[:, :, 0]
     print(dx.shape, rho.shape)
     z1 = z.reshape(nCut, nCut, nCut, nCut)# dx , dp,dn, dy
-    # z1=np.moveaxis(z1, 3, 1)
     z = np.nanmean(z1, axis=2)
-    # H=[]
-    # for i in range(ncut)[::-1]:
-    #     hanning = interpolateData(z[:, i, :], dx, dy, int(ncut / 3), smooth=False)
-    #     H.append(hanning)
-    # H=np.array(H)
-    # H=hanningconv3d(H, int(ncut / 4))
     z = np.moveaxis(z, 1, 2)
-    # z = np.moveaxis(z, 0, 1)
     H=interpolateData3d(z, dx, dy, dp,smoothing_size)# ncut/3
 
     if plotting:
@@ -963,7 +838,6 @@ def SinCosPlot2(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, plotting=
     z=H
     zz=np.nanmean(z, axis=a)
     hanning=zz
-    # hanning= interpolateData(zz, dx, dy, int(ncut/3))
     if plotting:
         if a ==2:
             plt.figure()
@@ -987,33 +861,6 @@ def SinCosPlot2(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, plotting=
     if plotting:
         plt.figure()
         plt.plot(dp*180/np.pi, hanningzz)
-
-
-
-    #
-    #
-    # plt.figure()
-    # plt.clf()
-    # sns.heatmap(means['z_past'].interpolate(method='linear', limit=2, limit_direction='both'), cmap='coolwarm')
-    # plt.title('Means of spks vs Features cos and sin - Past')
-    # plt.tight_layout()
-
-    # z2=means['z_past'].to_numpy()
-    # dx=np.array([0.5*(means['z_past'].columns.array[i].left+means['z'].columns.array[i].right) for i in range(nCut)])
-    # dy=np.array([0.5*(means['z_past'].index.array[i].left+means['z'].index.array[i].right) for i in range(nCut)])
-    # theta2=np.arctan(dy[np.where(z2 == np.max(np.nan_to_num(z2)))[0][0]]/dx[np.where(z2 == np.max(np.nan_to_num(z2)))[1][0]])*180/np.pi
-
-    # rho2, phi2 = cart2pol(dx, dy)
-    # plt.figure()
-    # plt.rcParams['axes.facecolor'] = 'none'
-    # plt.subplot(projection="polar")
-    # plt.pcolormesh(phi2, rho2, z2[:-1, :-1], cmap='coolwarm', shading='flat')
-    # plt.plot(phi2, rho2, color='k', ls='none')
-    # plt.grid()
-    # plt.title('Means of spks Past polar coordinate')
-
-    # dtheta=theta1-theta2
-    # print(dtheta)
     z1 = np.moveaxis(z1, 3, 1)
     return rho3d, phi3d, ddp3d, nn, z, hanningzz, dx, dy, dp, dn
 
@@ -1045,22 +892,7 @@ def diffSinCosPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled):
     plt.figure()
     plt.plot(sin)
     plt.plot(sin_sos)
-
-    # sine = np.diff(signal.sosfilt(sos, w_i_downsampled[:, x, y, o, s]), append=0)
-    # cosine = np.diff(signal.sosfilt(sos, w_r_downsampled[:, x, y, o, s]), append=0)
     Y = np.mean(spks[:4, :], axis=0)[:, idx].reshape(-1, 1)
-    # import seaborn as sns
-    #
-    # pop=[]
-    # for i in range(9000):
-    #     k=np.ceil(Y[i, 0]*10).astype(int)
-    #     for kk in range(k):
-    #         pop.append([sin[i, 0], cos[i, 0]])
-    # pop=np.array(pop)
-    #
-    # import pandas as pd
-    # data = pd.DataFrame(pop, columns=['sin', 'cos'])
-    # sns.jointplot(data=data, x='cos', y='sin', kind='kde', fill=True, levels=15)
 
     nCut=30
     data=pd.DataFrame(np.concatenate([cos_sos, sin_sos], axis=1))#, columns=['sin', 'cos', 'sig'])
@@ -1084,9 +916,6 @@ def diffSinCosPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled):
     plt.tight_layout()
 
 
-    # data=data[data['sig']==1]
-
-
 
 
     plt.figure()
@@ -1101,14 +930,9 @@ def compute_sta(a, b, ran):
             a[ran:].reshape(1, -1) @ b[ran - dt1:b.shape[0] - dt1].reshape(b.shape[0]-ran, -1), axis=0) /
          torch.sum(a[ran:])).detach().cpu().numpy()
          for dt1 in range(ran)[::-1]]).reshape((ran,  27, 11, 8))#54, 135))
-    # c=c.detach().cpu().numpy()
     return c
 
 def spikeTrig(spk, w_i, w_r, w_c , ran):
-    # mu_sin=np.convolve(spk, w_r)/np.sum(spk)
-    # mu_cos = np.convolve(spk, w_i) / np.sum(spk)
-    # mu_complex = np.convolve(spk, w_c) / np.sum(spk)
-    # mu_sin=compute_sta(spk, w_i, ran)
     mu_sin=np.array(
         [np.sum(
             spk[ran:].T * w_i[ran-dt1:w_i.shape[0]-dt1])/
@@ -1128,28 +952,12 @@ def spikeTrig(spk, w_i, w_r, w_c , ran):
             for dt1 in range(ran)[::-1]])
 
 
-    # mu_sin=np.array([np.sum(spk[ran[1]:ran[0]] * w_i[ran[1] - dt1:ran[0] - dt1])/np.sum(spk[ran[1]:ran[0]]) for dt1 in range(ran[0]+1, ran[1]-1)])
-    # mu_cos = np.array(
-    #     [np.sum(spk[ran[1]:ran[0]] * w_r[ran[1] - dt1:ran[0] - dt1]) / np.sum(spk[ran[1]:ran[0]]) for dt1 in range(ran[0]+1, ran[1]-1)])
-    # mu_complex = np.array(
-    #     [np.sum(spk[ran[1]:ran[0]] * w_c[ran[1] - dt1:ran[0] - dt1]) / np.sum(spk[ran[1]:ran[0]]) for dt1 in range(ran[0]+1, ran[1]-1)])
-    # plt.figure()
-    # plt.rcParams['axes.facecolor'] = 'none'
-    # plt.plot(mu_sin)
-    # plt.plot(mu_cos)
-    # plt.plot(mu_complex)
-    # plt.legend(['sin', 'cos', 'complex'])
     return mu_sin, mu_cos, mu_complex
 
 def compute_stc(a, b, mu_b, ran, dt1, dt2):
     a=torch.Tensor(a).cuda()
     b=torch.Tensor(b).cuda()
     mu_b = torch.Tensor(mu_b).cuda()
-    # c=(torch.sum(
-    #     (a[ran:].reshape(1, -1)  @  (b[ran - dt1:b.shape[0] - dt1] - mu_b[dt1]).reshape(b.shape[0]-ran, -1)).T
-    #     @
-    #     (a[ran:].reshape(1, -1) @ (b[ran - dt2:b.shape[0] - dt2] - mu_b[dt2]).reshape(b.shape[0]-ran, -1)), axis=1)
-    #         / torch.sum(a[ran:])).detach().cpu().numpy().astype('float16')
     c = (
         torch.matmul(a[ran - dt1:a.shape[0] - dt1].reshape(1, -1) ,(b[ran - dt1:b.shape[0] - dt1] - mu_b[mu_b.shape[0]-1-dt1]).reshape(b.shape[0] - ran, -1)).T
         @
@@ -1164,31 +972,7 @@ def CovspikeTrig(spk, w, mu, ran):
         for dt2 in range(ran):
             print(dt1, dt2)
             Css[dt1,:, dt2, :] =compute_stc(spk, w, mu, ran, dt1, dt2).astype('float16')
-            # Css[dt1, dt2] = (np.sum(
-            #     spk[ran:].reshape(1, -1) @ (w[ran - dt1:w.shape[0] - dt1] - mu[dt1]).reshape(mu.shape[0]-ran, -1) @ (w[ran - dt2:w.shape[0] - dt2] - mu[dt2]).reshape(mu.shape[0]-ran, -1).T)
-            #                  / np.sum(spk[ran:]))
-            # Css[dt1, dt2]=(np.sum(
-            #                 spk[ran:]*(w[ran-dt1:w.shape[0]-dt1]-mu[dt1])*(w[ran-dt2:w.shape[0]-dt2]-mu[dt2]))
-            #               / np.sum(spk[ran:]))
-
-    # plt.figure()
-    # plt.imshow(Css)
-    # plt.colorbar()
-    # Css=np.moveaxis(Css, 2, 1)
     return Css
-# def CovspikeTrig(spk, w, mu, ran, dt):
-#     Css=np.zeros((np.max(abs(np.array(ran))), np.max(abs(np.array(ran)))))
-#     ran=np.max(abs(np.array(ran)))
-#     for dt1 in range(-15,15):
-#         for dt2 in range(-15,15):
-#             Css[dt1+15, dt2+15]=np.sum(spk[ran:-ran]*(w[ran-dt1:-(ran+dt1)]-mu[dt])*(w[ran-dt2:-(ran+dt2)]-mu[dt]))/np.sum(spk[ran:-ran])
-#
-#     # plt.figure()
-#     # plt.imshow(Css)
-#     # plt.colorbar()
-#     return Css
-
-
 def CovspikeTrigC(spk, w_i, w_r, mu_i, mu_r, ran):
     Css=np.zeros((np.max(abs(np.array(ran))), np.max(abs(np.array(ran)))))
     ran=np.max(abs(np.array(ran)))
@@ -1198,38 +982,13 @@ def CovspikeTrigC(spk, w_i, w_r, mu_i, mu_r, ran):
                             spk[ran:]*(w_i[ran-dt1:w_i.shape[0]-dt1]-mu_i[dt1])*(w_r[ran-dt2:w_r.shape[0]-dt2]-mu_r[dt2]), axis=0)
                           / np.sum(spk[ran:]))
 
-    # plt.figure()
-    # plt.imshow(Css)
-    # plt.colorbar()
     return Css
-# def CovspikeTrigC(spk, w_i, w_r, mu_i, mu_r, ran, dti, dtr):
-#     Css=np.zeros((np.max(abs(np.array(ran))), np.max(abs(np.array(ran)))))
-#     ran = np.max(abs(np.array(ran)))
-#     for dt1 in range(-15,15):
-#         for dt2 in range(-15,15):
-#             Css[dt1+15, dt2+15]=np.sum(spk[ran:-ran]*(w_i[ran-dt1:-(ran+dt1)]-mu_i[dt1])*(w_r[ran-dt2:-(ran+dt2)]-mu_r[dt2]))/np.sum(spk[ran:-ran])
-#
-#     # plt.figure()
-#     # plt.imshow(Css)
-#     # plt.colorbar()
-#     return Css
 
 
 
 def getSVDPolar(idx, spk, ncut, args, plotting=False, more_smooth=False, smoothing_size=5):
     rho, phi, dd, ns, zz, hanz, dx, dy, dp, dn= args
     hanz=hanz[::-1]
-    #
-    # ztemp=zz.flatten()[np.asarray(np.logical_not(np.isnan(zz.flatten()))).nonzero()[0]]
-    # r=rho.flatten()[np.asarray(np.logical_not(np.isnan(zz.flatten()))).nonzero()[0]]
-    # p=phi.flatten()[np.asarray(np.logical_not(np.isnan(zz.flatten()))).nonzero()[0]]
-
-    # f = interpolate.LinearNDInterpolator(np.stack((r, p)).T, ztemp)
-    # zinterp=f(rho.flatten(), phi.flatten())
-    # plt.figure()
-    # plt.imshow(zinterp.reshape((ncut, ncut)))
-
-    # f = interpolate.LinearNDInterpolator(np.stack((rho.flatten(), phi.flatten())).T, zz.flatten().T)
     f = interpolate.LinearNDInterpolator(np.stack((rho.flatten(), phi.flatten(), dd.flatten())).T, zz.flatten().T)
     if more_smooth:
         s=ncut
@@ -1239,25 +998,17 @@ def getSVDPolar(idx, spk, ncut, args, plotting=False, more_smooth=False, smoothi
         nspace = np.linspace(np.min(ns), np.max(ns), s)
 
         xx, yy, tt = np.meshgrid(rhospace, phispace, dphispace)
-        # znew=interpolate.interpn((rho, phi, dd, ns), zz, np.stack((xx.flatten(), yy.flatten(), tt.flatten())).T)
         znew=f(xx.flatten(), yy.flatten(), tt.flatten()).reshape((s, s, s))
         mask = [~np.isnan(znew)][0]
         x = xx[mask].reshape(-1)
         y = yy[mask].reshape(-1)
         t = tt[mask].reshape(-1)
-        # n= nn[mask].reshape(-1)
         points = np.array([x, y, t]).T
         values = znew[mask].reshape(-1)
 
         # generate interpolated grid data
         interp_grid = griddata(points, np.nan_to_num(values), (xx, yy, tt), method='nearest')
-        # plt.figure()
-        # plt.imshow(np.nanmean(interp_grid, axis=2))
         interp_grid=hanningconv3d(interp_grid, smoothing_size)
-        # plt.figure()
-        # plt.imshow(np.nanmean(interp_grid, axis=2))
-
-        # interp_grid_3d=interp_grid.flatten().reshape(-1, 1)*hanz.reshape(1, -1)
         if plotting:
             plt.figure()
             plt.pcolormesh(rhospace, phispace, np.nanmean(interp_grid, axis=2)[:-1, :-1],  cmap='coolwarm')
@@ -1268,7 +1019,6 @@ def getSVDPolar(idx, spk, ncut, args, plotting=False, more_smooth=False, smoothi
 
         f = interpolate.LinearNDInterpolator(np.stack((xx.flatten(), yy.flatten(), tt.flatten())).T, interp_grid.flatten().T)
 
-        # interp_grid=np.nanmean(interp_grid, axis=3)
         u, s, v = svds(np.nanmean(interp_grid, axis=2), 2)
         u1, s, v1 = svds(np.nan_to_num(interp_grid.reshape(-1, ncut)), 2)
         if plotting:
@@ -1369,14 +1119,6 @@ def getNonLinearModel2(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, pl
 
     rr, pp, dd, nn, zz, hanz, dx, dy, dp, dn= SinCosPlot2(idx, spk, w_i, w_r,dphi,noise,  ncut,smoothing_size, plotting=plotting)
 
-
-    # zz2=np.nanmean(z, axis=1)
-    # mean_rho = binned_statistic(np.nan_to_num(rho.flatten()), np.nan_to_num(zz2.flatten()),
-    #                             statistic='max',
-    #                             bins=10)
-    # mean_phi = binned_statistic(np.nan_to_num(phi.flatten()), np.nan_to_num(zz2.flatten()),
-    #                             statistic='max',
-    #                             bins=10)
     args=(rr, pp,dd, nn, zz, hanz, dx, dy, dp, dn)
 
     print(plotting)
@@ -1391,10 +1133,6 @@ def getNonLinearModel2(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, pl
         print('no plotting')
         v, u, m_dp, s, f=arg2
 
-        # plt.figure()
-        # plt.plot(mean_rho[1][1:], mean_rho[0])
-        # plt.figure()
-        # plt.plot(mean_phi[1][1:], mean_phi[0])
         return v, u, m_dp, s, f
 
 
@@ -1402,14 +1140,6 @@ def getNonLinearModel2(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, pl
 
 
 def computeNonlin(f, rho, phi, dphi):
-
-    # R = np.interp(rh, mean_rho[1][1:], mean_rho[0])
-    # P = np.interp(ph, mean_phi[1][1:], mean_phi[0])
-    # dP= np.interp(dphi, dp[::-1], m_dphi[::-1])
-    #
-    # resp = R * P * dP
-
-    # return resp, R, P, dP
     nonlinres=np.nan_to_num(f(rho, phi, dphi))#*dP.reshape(-1))
     return nonlinres
 
@@ -1421,7 +1151,6 @@ def computeNonlinMultiplicative(rh, ph, mean_rho, mean_phi, dphi,dp, m_dphi, ncu
     R = np.interp(rh, rhospace, mean_rho).reshape(-1)
     P = np.interp(ph, phispace, mean_phi).reshape(-1)
     dP= np.interp(dphi, dp[::-1], m_dphi[::-1]).reshape(-1)
-    #
     nonlinres = R * P * dP
 
     return nonlinres
@@ -1435,14 +1164,10 @@ def sigmoid(X1, *args):#a, b, w1, w2, w3): # Sigmoid A With Offset
     b=args[1]
     c=args[2]
     w=np.array([args[i] for i in range(3, len(args))]).reshape(1, -1)
-    # print(w.shape, X1.shape)
     x=np.dot(w, X1.T)
-    # x1=w1*X1[:, 0]
-    # x2=w2*X1[:, 1]
-    # x3=w3*X1[:, 2]
-    # x=x1+x2+x3
     return  (c / (1.0 + np.exp(-a * (x-b)))).reshape(-1)
-# function for genetic algorithm to minimize (sum of squared error)
+
+
 def relu(X1,*args): # Sigmoid A With Offset
     a = args[0]
     w = np.array([args[i] for i in range(1, len(args))]).reshape(1, -1)
@@ -1455,7 +1180,6 @@ def fitnonlin(X1, y_train, func):
         warnings.filterwarnings("ignore")  # do not print warnings by genetic algorithm
         val = func(X1, *parameterTuple)
         return np.sum((y_train - val) ** 2.0)
-        # return explained_variance_score(y_train, val, multioutput='uniform_average')
 
     def generate_Initial_Parameters(nb_params):
         # min and max used for bounds
@@ -1472,15 +1196,11 @@ def fitnonlin(X1, y_train, func):
             parameterBounds.append([0, 100]) # search bounds for c
             for n in range(nb_params):
                 parameterBounds.append([-1e1, 1e1])
-            # parameterBounds.append([-1e1, 1e1])
-            # parameterBounds.append([-1e1, 1e1])
         elif func==relu:
             print('relu')
             parameterBounds.append([-2 * maxX, 2 * maxX])  # search bounds for a
             for n in range(nb_params):
                 parameterBounds.append([-1e1, 1e1])
-            # parameterBounds.append([-1e1, 1e1])
-            # parameterBounds.append([-1e1, 1e1])
         print(parameterBounds)
         # "seed" the numpy random number generator for repeatable results
         result = differential_evolution(sumOfSquaredError, parameterBounds, seed=2)
@@ -1498,9 +1218,6 @@ def fitnonlin(X1, y_train, func):
     modelPredictions = func(X1, *fittedParameters)
     if func==sigmoid:
         dx=np.linspace(-1, 5, 100)
-        # s=func(np.array([dx,np.zeros(100), np.zeros(100)]).T,  *fittedParameters)
-        # plt.figure()
-        # plt.plot(dx, s)
 
     absError = modelPredictions - y_train
 
@@ -1685,10 +1402,6 @@ def PlotSelfCorrelation(w_c_downsampled,neuron_pos, pos_ori, ns=4):
     for i in range(8):
         for j in range(ns):
             ax[i, j].imshow(rfs_idx[:, :, i, j].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
-        # ax[i, 0].imshow(r[:, :, i, 0].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
-        # ax[i, 1].imshow(r[:, :, i, 1].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
-        # ax[i, 2].imshow(r[:, :, i, 2].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
-        # ax[i, 3].imshow(r[:, :, i, 3].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
 
 
 def Plot_RF(rfs_idx, ns=4, title=''):
@@ -1702,9 +1415,6 @@ def Plot_RF(rfs_idx, ns=4, title=''):
     for i in range(8):
         for j in range(ns):
             ax[i, j].imshow(rfs_idx[:, :, i, j].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
-        # ax[i, 1].imshow(rfs_idx[:, :, i, 1].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
-        # ax[i, 2].imshow(rfs_idx[:, :, i, 2].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
-        # ax[i, 3].imshow(rfs_idx[:, :, i, 3].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
 
 
 
@@ -1790,8 +1500,6 @@ def hanningconvnd(interp_grid, n):
 from scipy.interpolate import NearestNDInterpolator,LinearNDInterpolator
 from scipy.ndimage import gaussian_filter
 def interpolateDatand(z, dx, dy, dp, dx_h, dy_h, dp_h, ncut, smooth=True):
-    # from scipy.interpolate import RegularGridInterpolator
-    # f= RegularGridInterpolator((dx, dp, dy), z)
     x_grid, y_grid, p_grid,xh_grid, yh_grid, ph_grid = np.meshgrid(dx, dy, dp,dx_h, dy_h, dp_h)
 
     # get known values to set the interpolator
@@ -1811,9 +1519,6 @@ def interpolateDatand(z, dx, dy, dp, dx_h, dy_h, dp_h, ncut, smooth=True):
     interp_grid = interp(x_grid, y_grid, p_grid, xh_grid, yh_grid, ph_grid)
     if smooth:
         interp_grid=gaussian_filter(interp_grid, sigma=ncut)
-    # interp_grid = griddata(points, np.nan_to_num(values), (x_grid, y_grid, p_grid, xh_grid, yh_grid, ph_grid), method='linear')
-    # if smooth:
-    #     interp_grid = hanningconvnd(interp_grid, ncut)
     interp = LinearNDInterpolator(list(zip(x_grid.reshape(-1), y_grid.reshape(-1), p_grid.reshape(-1), xh_grid.reshape(-1), yh_grid.reshape(-1), ph_grid.reshape(-1))), interp_grid)
 
     return interp_grid, interp
@@ -1855,138 +1560,21 @@ def getNonLinearModel3(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, pl
     return f
 
 
-def getmetrics(x, y, n):
-    ev = explained_variance_score(np.mean(y.reshape(n, 1800), axis=0), x, multioutput='uniform_average')
-    feve = FEVE(y.reshape(n, 1800), x)
-    cc=np.corrcoef(np.mean(y.reshape(n, 1800), axis=0), x)
+def getmetrics(x, y, n, frames_per_minute=None):
+    if frames_per_minute is None:
+        frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
+    frames_per_minute = int(frames_per_minute)
+    ev = explained_variance_score(
+        np.mean(y.reshape(n, frames_per_minute), axis=0),
+        x,
+        multioutput='uniform_average',
+    )
+    feve = FEVE(y.reshape(n, frames_per_minute), x)
+    cc = np.corrcoef(np.mean(y.reshape(n, frames_per_minute), axis=0), x)
     print(feve)
     print(ev)
     print(cc[0][1])
     return feve, ev,cc
-
-
-
-def GetNeuronVisresponse(idx,w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib, spks,n_min, double_wavelet_model, dt1=9000, train_idx=[0, 2, 4], test_idx=[1, 3], lastmin=True, func=relu, sigma=7, plotting=False) :
-    gc.collect()
-    spk = spks[:, :n_min*1800, idx]
-    if lastmin:
-        dt1=n_min*1800
-    y_train = spks[train_idx, :dt1, idx]
-    y_test = spks[test_idx, :dt1, idx]
-    rho, phi = getpolar(w_i, w_r)  # [:dt1]
-
-    f, f_h, d, d_h, c, c_h, hmp, hmp_h, plot= getPhiRho(y_train[:, :dt1], w_i[:dt1], w_r[:dt1], dphi[:dt1], w_i_inhib[:dt1], w_r_inhib[:dt1], dphi_inhib[:dt1], plotting=plotting, sigma=sigma)
-
-
-
-
-    rho_h, phi_h = getpolar( w_i_inhib, w_r_inhib)#[:dt1]
-    pred = f(rho, phi, dphi)
-
-    pred_h = f_h(rho_h, phi_h, dphi_inhib.reshape(-1, 1))#[:dt1]
-
-
-    X1 = np.concatenate([(np.concatenate(
-        (pred[:dt1],pred_h[:dt1]), axis=1))
-        for rep in train_idx])
-
-    X1 = np.nan_to_num(X1)
-
-    y_train = np.concatenate([spks[r, :dt1, idx] for r in train_idx])
-    y_test = np.concatenate([spks[r, :dt1, idx] for r in test_idx])
-
-    fittedParameters, pcov, res = fitnonlin(X1, y_train, func)
-
-
-
-    print('prediction on training set : ')
-    res1 = res  # + (w_pc*pcs_test[:, 0])
-    res2 = np.mean(res1.reshape(len(train_idx), dt1), axis=0)
-
-    ev = explained_variance_score(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2, multioutput='uniform_average')
-    feve = FEVE(y_train.reshape(len(train_idx), dt1), res2)
-    cc_train=np.corrcoef(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2)[0][1]
-    print(feve)
-    print(ev)
-    print(cc_train)
-
-
-
-    print('prediction acress repeats : ')
-
-    X1 = np.concatenate([(np.concatenate(
-        (pred[:dt1], pred_h[:dt1]), axis=1))
-        for rep in test_idx])
-    X1 = np.nan_to_num(X1)
-    print(X1.shape)
-
-    unrectified = np.mean(X1[:, 0].reshape(len(test_idx), dt1), axis=0)
-    unrectified2 = np.mean(X1[:, 1].reshape(len(test_idx), dt1), axis=0)
-    res = func(X1, *fittedParameters)
-    print(res.shape,unrectified.shape)
-
-
-    res1 = res  # + (w_pc*pcs_test[:, 0])
-    w = 0
-    if double_wavelet_model:
-        res2 = np.mean(res1.reshape(len(test_idx), dt1), axis=0)
-    else:
-        print('single wavelet')
-        res21=unrectified
-        cc1 = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res21)[0,1]
-        print(cc1)
-        res22 = unrectified2
-        cc2 = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res22)[0,1]
-        print(cc2)
-        if cc1>=cc2:
-            print('1st')
-            res2=unrectified
-        else:
-            print('2nd')
-            w = 1
-            res2=unrectified2
-
-    ev = explained_variance_score(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2, multioutput='uniform_average')
-    feve = FEVE(y_test.reshape(len(test_idx), dt1), res2)
-    cc = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2)
-
-    print(feve)
-    print(ev)
-    print(cc)
-
-    if lastmin:
-        print('prediction last minute : ')
-
-        tp_test=14400#10800#int(np.round(0.66*dt1))
-
-
-        X1 = np.concatenate([(np.concatenate(
-            (pred[tp_test:], pred_h[tp_test:]), axis=1))
-            for rep in test_idx])
-
-        X1 = np.nan_to_num(X1)
-
-        y_test = np.concatenate([spks[r, tp_test:, idx] for r in train_idx])
-        res = func(X1, *fittedParameters)
-        res1 = res  # + (w_pc*pcs_test[:, 0])
-        reslastmin = np.mean(res1.reshape(len(test_idx), 3600), axis=0)
-        # res3 = match_cumulative_cdf(res2, np.mean(y_test.reshape(2, 1800), axis=0))
-        print(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0).shape, reslastmin.shape)
-        evlastmin= explained_variance_score(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0), reslastmin, multioutput='uniform_average')
-        fevelastmin = FEVE(y_test.reshape(len(test_idx), dt1-tp_test), reslastmin)
-        cclastmin=np.corrcoef(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0), reslastmin)[0,1]
-
-        print(feve)
-        print(ev)
-        print(cclastmin)
-        gc.collect()
-    else:
-        cclastmin=0
-        evlastmin=0
-        fevelastmin=0
-        reslastmin=0
-    return res2, [feve, ev, cc, cc_train, cclastmin], fittedParameters, [d, c, hmp, d_h, c_h, hmp_h], plot, unrectified, w
-
 
 def getpolar(cos, sin):
     rho = np.sqrt(cos ** 2 + sin ** 2)
@@ -2050,6 +1638,8 @@ def approx_Matrix(X, plotting=False):
     return X_approx, (U1, U2, U3)
 
 def approx_Matrix2(X, smoothing_factor=0.75, plotting=False):
+    from tensorly.decomposition import non_negative_parafac
+
     weights, factors = non_negative_parafac(X, rank=1, init='random', normalize_factors=False)
     U1, U2, U3 = factors
     print(U1.shape, U2.shape, U3.shape)
@@ -2086,7 +1676,6 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
 
     H = []
     H_ = []
-    # a=abs(max(cos.min(), cos.max(), sin.min(), sin.max()))
     a = abs(max(rho.min(), rho.max()))
     c=abs(max( phi.min(), phi.max()))
     print('cos : ', cos.min(), cos.max())
@@ -2103,13 +1692,11 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     print(a, b, c, d)
     if b==0:
         b==1
-    # E = [np.linspace(-a, a, ncut+1), np.linspace(-a, a, ncut+1), np.linspace(-b, b, ncut+1)]
     E = [np.linspace(0, a, ncut + 1), np.linspace(0, c, ncut + 1), np.linspace(-b, b, ncut + 1)]
     Ecs = [np.linspace(-d, d, ncut + 1), np.linspace(-d, d, ncut + 1)]
     Hcs = []
     Hcs_ = []
     for i in range(spk.shape[0]):
-        # print(i)
         Y = spk[i].reshape(-1, 1)
         data = np.concatenate([rho, phi, dphi], axis=1)  # , columns=['sin', 'cos', 'sig'])
         datacs= np.concatenate([cos, sin], axis=1)
@@ -2117,11 +1704,6 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
         histo_, edges_ = np.histogramdd(datacs, bins=Ecs)
         Hcs.append(histo)
         Hcs_.append(histo_)
-        # if i==0:
-        #     histo, edges = np.histogramdd(data, bins=ncut, density=False, weights=Y[:, 0])
-        #     histo_, edges_ = np.histogramdd(data, bins=edges)
-        #     E=edges
-        # else:
         histo, edges = np.histogramdd(data, bins= E, density=False, weights=Y[:, 0])
         histo_, edges_ = np.histogramdd(data, bins= E)
         H.append(histo)
@@ -2133,7 +1715,6 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     print(Zcs.shape)
     H = np.nanmean(np.array(H), axis=0)
     H_ = np.nanmean(np.array(H_), axis=0)
-    # Z=H/H_
     H=np.concatenate((H, H, H), axis=1)
     H_ = np.concatenate((H_, H_, H_), axis=1)
     Z = hanningconv3d(H, sigma) /hanningconv3d(H_, sigma)
@@ -2151,11 +1732,9 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     indices=np.stack([xcenters[indices[0]], ycenters[indices[1]], zcenters[indices[2]]])
     filled_data0 = interp(*indices)
     filled_data2, plot = approx_Matrix2(filled_data0,None, plotting=plotting)
-    # interp = NearestNDInterpolator(np.transpose((xcenters[mask[0]], ycenters[mask[1]], zcenters[mask[2]])), filled_data[mask])
     plots = [plot[0], np.append(plot[1], plot[1][0]), plot[2]]
 
     filled_data=np.concatenate((filled_data0,filled_data0, filled_data0), axis=1)
-    # filled_data = hanningconv3d(filled_data, ncut)
 
 
 
@@ -2166,12 +1745,7 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     cv= circular_variance(np.linspace(0, 360, 20), pp.reshape(-1, 1))
     complexity = 1-cv[1][0]#abs(np.max(pp)) / abs(np.mean(pp))
 
-
-    # plot=[np.mean(filled_data, axis=(2, 1)), np.mean(filled_data, axis=(2, 0))[20:41], np.mean(filled_data, axis=(0, 1))]
     if plotting:
-        # plt.figure()
-        # plt.hist(Zcs.flatten())
-
         fig = plt.figure(figsize=(16, 6))
         gs = gridspec.GridSpec(2, 2, figure=fig)
         plt.rcParams.update({
@@ -2292,7 +1866,6 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
       
     H = []
     H_ = []
-    # a=abs(max(cos.min(), cos.max(), sin.min(), sin.max()))
     a = abs(max(rho_h.min(), rho_h.max()))
     c = abs(max(phi_h.min(), phi_h.max()))
     if a == 0:
@@ -2300,10 +1873,8 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     b = abs(max(dphi_h.min(), dphi_h.max()))
     if b == 0:
         b == 1
-    # E = [np.linspace(-a, a, ncut+1), np.linspace(-a, a, ncut+1), np.linspace(-b, b, ncut+1)]
     E = [np.linspace(0, a, ncut + 1), np.linspace(0, c, ncut + 1), np.linspace(-b, b, ncut + 1)]
     for i in range(spk.shape[0]):
-        # print(i)
         Y = spk[i].reshape(-1, 1)
         data = np.concatenate([rho_h, phi_h, dphi_h], axis=1)  # , columns=['sin', 'cos', 'sig'])
         histo, edges = np.histogramdd(data, bins=E, density=False, weights=Y[:, 0])
@@ -2344,20 +1915,21 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     
     
 
-def GetNeuronVisresponse(idx,w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib, spks,n_min, double_wavelet_model, dt1=9000, train_idx=[0, 2, 4], test_idx=[1, 3], lastmin=False, func=relu, sigma=7, plotting=False) :
+def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
+                         spks, n_min, double_wavelet_model, dt1=9000,
+                         train_idx=[0, 2, 4], test_idx=[1, 3],
+                         lastmin=False, func=relu, sigma=7, plotting=False,
+                         frames_per_minute=None) :
     gc.collect()
-    spk = spks[:, :n_min*1800, idx]
+    if frames_per_minute is None:
+        frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
+    frames_per_minute = int(frames_per_minute)
+    spk = spks[:, :n_min * frames_per_minute, idx]
     if lastmin:
-        dt1=n_min*1800
+        dt1 = n_min * frames_per_minute
     y_train = spks[train_idx, :dt1, idx]
     y_test = spks[test_idx, :dt1, idx]
     rho, phi = getpolar(w_i, w_r)  # [:dt1]
-    # plt.figure()
-    # plt.plot(dphi[8500:9000])
-    # plt.plot(phi[8500:9000])
-    # plt.plot(np.unwrap(phi[8500:9000]))
-
-    # f, f_h = getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib)
     f, f_h, d, d_h, c, c_h, hmp, hmp_h, plot= getPhiRho(y_train[:, :dt1], w_i[:dt1], w_r[:dt1], dphi[:dt1], w_i_inhib[:dt1], w_r_inhib[:dt1], dphi_inhib[:dt1], plotting=plotting, sigma=sigma)
 
 
@@ -2365,91 +1937,37 @@ def GetNeuronVisresponse(idx,w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib, s
 
     rho_h, phi_h = getpolar( w_i_inhib, w_r_inhib)#[:dt1]
     pred = f(rho, phi, dphi)
-    # plt.figure()
-    # plt.plot(pred[8600:9000])
-    # plt.title('pred')
     pred_h = f_h(rho_h, phi_h, dphi_inhib.reshape(-1, 1))#[:dt1]
 
-    # pred = f(w_r[:dt1], w_i[:dt1], dphi[:dt1])
-    # pred_h = f_h(w_r_inhib[:dt1], w_i_inhib[:dt1], dphi_inhib[:dt1].reshape(-1, 1))
-    # pred_ortho = f_h(w_r_ortho[:dt1], w_i_ortho[:dt1], dphi_ortho[:dt1].reshape(-1, 1))
-    # pred_h=np.zeros(pred_h.shape)
-    # pred_h=w_c
-    # print(pred.shape)
-    # print(np.concatenate((pred,pred_h), axis=1).shape)
     X1 = np.concatenate([(np.concatenate(
         (pred[:dt1],pred_h[:dt1]), axis=1))
         for rep in train_idx])
-    # print(X1.shape)
-    # plt.figure()
-    # plt.plot(X1[:, 0].reshape(len(train_idx), dt1)[:, 8600:9000].T)
-    # plt.title('X1')
-
-
-    # X1 = np.concatenate([(np.concatenate(
-    #     (w_i[:dt1, :], w_i_inhib[:dt1, :], w_r[:dt1, :], w_r_inhib[:dt1, :], w_c[:dt1, :], w_c_inhib[:dt1, :]), axis=1))
-    #                      for rep in [0, 2, 4]])
     X1 = np.nan_to_num(X1)
 
     y_train = np.concatenate([spks[r, :dt1, idx] for r in train_idx])
     y_test = np.concatenate([spks[r, :dt1, idx] for r in test_idx])
-    ## non lin fit
-    # try:
     fittedParameters, pcov, res = fitnonlin(X1, y_train, func)
-
-    # except RuntimeError:
-    #     print(RuntimeError)
-
-
-    # Params.append(fittedParameters)
 
     print('prediction on training set : ')
     res1 = res  # + (w_pc*pcs_test[:, 0])
     res2 = np.mean(res1.reshape(len(train_idx), dt1), axis=0)
-    # res3 = match_cumulative_cdf(res2, np.mean(y_train.reshape(len(train_idx), dt1), axis=0))
     ev = explained_variance_score(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2, multioutput='uniform_average')
     feve = FEVE(y_train.reshape(len(train_idx), dt1), res2)
-    # plt.figure()
-    # plt.plot(np.mean(y_train.reshape(len(train_idx), dt1), axis=0))
-    # plt.plot(res2)
-    # plt.title(('training set'))
     cc_train=np.corrcoef(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2)[0][1]
     print(feve)
     print(ev)
     print(cc_train)
 
-    # r2_train.append([ev, np.corrcoef(np.mean(y_train.reshape(3, dt1), axis=0), res2)[0][1], feve])
-
-
-
-    # r2_lastmin.append([ev, np.corrcoef(np.mean(y_test.reshape(2, 1800), axis=0), res2)[0][1]])
-    # r2_lastmin.append([ev, np.corrcoef(np.mean(y_test.reshape(2, 1800), axis=0), res2)[0][1], feve])
-
     print('prediction acress repeats : ')
-    # X1 = np.concatenate([(np.concatenate(
-    #     (w_i[:dt1, :], w_i_inhib[:dt1, :], w_r[:dt1, :], w_r_inhib[:dt1, :], w_c[:dt1, :], w_c_inhib[:dt1, :]), axis=1))
-    #                      for rep in [1, 3]])
-    # pred = f(w_r[:dt1], w_i[:dt1], dphi[:dt1])
-    # pred_h = f_h(w_r_inhib[:dt1], w_i_inhib[:dt1], dphi_inhib[:dt1].reshape(-1, 1))
-    # pred_h = np.zeros(pred_h.shape)
     X1 = np.concatenate([(np.concatenate(
         (pred[:dt1], pred_h[:dt1]), axis=1))
         for rep in test_idx])
     X1 = np.nan_to_num(X1)
     print(X1.shape)
-    # plt.figure()
-    # plt.plot(X1[:, 0].reshape(len(train_idx), dt1)[:, 8600:9000].T)
-    # plt.title('X1_0')
-    # plt.figure()
-    # plt.plot(X1[:, 1].reshape(len(train_idx), dt1)[:, 8600:9000].T)
-    # plt.title('X1_1')
     unrectified = np.mean(X1[:, 0].reshape(len(test_idx), dt1), axis=0)
     unrectified2 = np.mean(X1[:, 1].reshape(len(test_idx), dt1), axis=0)
     res = func(X1, *fittedParameters)
     print(res.shape,unrectified.shape)
-    # plt.figure()
-    # plt.scatter(res.flatten(), X1[:, 0].flatten())
-    # plt.title('relu ?')
 
     res1 = res  # + (w_pc*pcs_test[:, 0])
     w = 0
@@ -2470,62 +1988,39 @@ def GetNeuronVisresponse(idx,w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib, s
             print('2nd')
             w = 1
             res2=unrectified2
-        # res2 = unrectified
-    # res3 = match_cumulative_cdf(res2, np.mean(y_test.reshape(2, dt1), axis=0))
     ev = explained_variance_score(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2, multioutput='uniform_average')
     feve = FEVE(y_test.reshape(len(test_idx), dt1), res2)
     cc = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2)
-    # if plotting:
-    #     X1 = np.concatenate([(np.concatenate(
-    #         (w_r, w_i, w_i_inhib, w_r_inhib), axis=1))
-    #         for rep in train_idx])
-    #     fittedParameters_temp, pcov_temp, res_temp = fitnonlin(X1, y_train, func)
-    #
-    #
-    #     plt.figure()
-    #     plt.plot(np.mean(y_test.reshape(len(test_idx), dt1), axis=0))
-    #     plt.plot(res2)
-    #     plt.plot(res_temp)
-    #     plt.title(('across repeats'))
     print(feve)
     print(ev)
     print(cc)
 
-    # if lastmin:
     print('prediction last minute : ')
-    # X1 = np.concatenate([(np.concatenate(
-    #     (w_i[7200:, :], w_i_inhib[7200:, :], w_r[7200:, :], w_r_inhib[7200:, :], w_c[7200:, :], w_c_inhib[7200:, :]),
-    #     axis=1)) for rep in [1, 3]])
-    tp_test=14400#10800#int(np.round(0.66*dt1))
-
-    # pred = f(w_r[tp_test:], w_i[tp_test:], dphi[tp_test:])
-    # pred_h = f_h(w_r_inhib[tp_test:], w_i_inhib[tp_test:], dphi_inhib[tp_test:].reshape(-1, 1))
-    # pred_ortho = f_h(w_r_ortho[7200:], w_i_ortho[7200:], dphi_ortho[7200:].reshape(-1, 1))
-    # pred_h = np.zeros(pred_h.shape)
-    # pred_ortho = np.zeros(pred_ortho.shape)
+    tp_test = dt1 + frames_per_minute
+    print(tp_test, dt1)
     X1 = np.concatenate([(np.concatenate(
-        (pred[tp_test:], pred_h[tp_test:]), axis=1))
+        (pred[tp_test:tp_test + frames_per_minute],
+         pred_h[tp_test:tp_test + frames_per_minute]), axis=1))
         for rep in test_idx])
 
     X1 = np.nan_to_num(X1)
-
-    y_test = np.concatenate([spks[r, tp_test:, idx] for r in train_idx])
+    print(pred.shape)
+    y_test = np.concatenate([
+        spks[r, tp_test:tp_test + frames_per_minute, idx]
+        for r in train_idx
+    ])
     res = func(X1, *fittedParameters)
     res1 = res  # + (w_pc*pcs_test[:, 0])
-    reslastmin = np.mean(res1.reshape(len(test_idx), 3600), axis=0)
-    # res3 = match_cumulative_cdf(res2, np.mean(y_test.reshape(2, 1800), axis=0))
+    reslastmin = np.mean(res1.reshape(len(test_idx), frames_per_minute), axis=0)
     print(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0).shape, reslastmin.shape)
     evlastmin= explained_variance_score(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0), reslastmin, multioutput='uniform_average')
     fevelastmin = FEVE(y_test.reshape(len(test_idx), dt1-tp_test), reslastmin)
     cclastmin=np.corrcoef(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0), reslastmin)[0,1]
-    # plt.figure()
-    # plt.plot(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0))
-    # plt.plot(res2)
     print(feve)
     print(ev)
     print(cclastmin)
     gc.collect()
-    return res2, [feve, ev, cc, cc_train, cclastmin], fittedParameters, [d, c, hmp, d_h, c_h, hmp_h], plot, unrectified, w
+    return res2, [feve, ev, cc, cc_train, cclastmin], fittedParameters, [d, c, hmp, d_h, c_h, hmp_h], plot, unrectified, w, f
 
 
 def PredictNeuronsTest(wt_test, spks, idx, ncut, dt1=9000, func=relu):
@@ -2562,37 +2057,22 @@ def PredictNeuronsTest(wt_test, spks, idx, ncut, dt1=9000, func=relu):
     pred = interp(wt_test[:dt1])
     pred_h = np.zeros(pred.shape).reshape(-1, 1)
     pred = pred.reshape(-1, 1)
-    # pred_h=w_c
     X1 = np.concatenate([(np.concatenate(
         (pred, pred_h), axis=1))
         for rep in train_idx])
 
-    # X1 = np.concatenate([(np.concatenate(
-    #     (w_i[:dt1, :], w_i_inhib[:dt1, :], w_r[:dt1, :], w_r_inhib[:dt1, :], w_c[:dt1, :], w_c_inhib[:dt1, :]), axis=1))
-    #                      for rep in [0, 2, 4]])
     X1 = np.nan_to_num(X1)
 
     y_train = np.concatenate([spks[r, :dt1, idx] for r in train_idx])
     y_test = np.concatenate([spks[r, :dt1, idx] for r in test_idx])
-    ## non lin fit
-    # try:
     fittedParameters, pcov, res = fitnonlin(X1, y_train, func)
-    # except RuntimeError:
-    #     print(RuntimeError)
-
-    # Params.append(fittedParameters)
 
     print('prediction on training set : ')
     res1 = res  # + (w_pc*pcs_test[:, 0])
     res2 = np.mean(res1.reshape(len(train_idx), dt1), axis=0)
-    # res3 = match_cumulative_cdf(res2, np.mean(y_train.reshape(len(train_idx), dt1), axis=0))
     ev = explained_variance_score(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2,
                                   multioutput='uniform_average')
     feve = FEVE(y_train.reshape(len(train_idx), dt1), res2)
-    # plt.figure()
-    # plt.plot(np.mean(y_train.reshape(len(train_idx), dt1), axis=0))
-    # plt.plot(res2)
-    # plt.title(('training set'))
     print(feve)
     print(ev)
     print(np.corrcoef(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2))
@@ -2627,20 +2107,11 @@ def PlotTuningCurve(rfs, idx, visual_coverage, sigmas, screen_ratio, show=True):
         ax[2].plot(i*u[:, 1], c='k')
         ax[2].set_xticks([0, cc_f_1_xy.shape[0]], [xM, xm])
         ax[2].set_title('Azimuth (deg)')
-        # ax[1].plot(np.max(cc_f_1_xy, axis=0))
-        # ax[2].plot(np.max(cc_f_1_xy, axis=1))
-        # ax[1].plot(cc_f_1_xy[x, :])
         mm = max(cc_f_1_o.min(), cc_f_1_o.max(), key=abs)
 
         ax[3].plot(ori_tun, 'o-', c='k')
         ax[3].set_xticks([0, 4, 8], [0,90, 180])
         ax[3].set_title('Orientation (deg)')
-        # ax[3].set_ylim(bottom=0)
-        # if mm<=0:
-        #     ax[1].set_ylim(mm, 0)
-        # else:
-        #     ax[1].set_ylim(0, mm)
-        # ax[2].plot(abs(cc_f_1[:, s, f]))
         ax[4].plot(cc_f_1_o[o, :], 'o-', c='k')
         ax[4].set_xticks(np.arange(len(sigmas)), sigmas)
         ax[4].set_title('Size (deg)')
@@ -2759,7 +2230,6 @@ def stimresp_matrix(stimuli, responses, n_responses_per_stim = None):
         if n_responses_per_stim is None:
             n_responses_per_stim = (stimuli  == unique_stim[0]).sum()
         n_unique_stim = len(unique_stim)
-        # print(n_unique_stim)
         n_cells = responses.shape[1]
         stim_ids = []
         respmat = []
@@ -2770,7 +2240,6 @@ def stimresp_matrix(stimuli, responses, n_responses_per_stim = None):
                 continue
             respmat.append(responses[idxs])
             stim_ids.append(stim_id)
-        # respmat = respmat[~n.isnan(respmat).mean(axis=(1,2)).astype(bool)]
         return np.array(respmat), stim_ids
 
 
@@ -2845,7 +2314,6 @@ def getHVA(signMap, neuron_pos, thresh=0.3, sign=1):
 
     sm=signMap*255*signMap_binary
     markers2 = cv.watershed(cv2.merge((sm.astype('uint8'),sm.astype('uint8'),sm.astype('uint8'))), markers)
-    # sm[markers2 == -1] = [255, 0, 0]
     markers2_neurons=np.array([markers2[np.maximum(0, int(neuron_pos[i, 1])-1), np.maximum(0, int(neuron_pos[i, 0])-1)] for i in range(neuron_pos.shape[0])])#np.zeros_like(maxes[0, :])
     return markers2, markers2_neurons
 
@@ -2884,22 +2352,14 @@ def visualSignMap(phasemap1, phasemap2):
     gradmap1 = np.gradient(phasemap1)
     gradmap2 = np.gradient(phasemap2)
 
-    # gradmap1 = ni.filters.median_filter(gradmap1,100.)
-    # gradmap2 = ni.filters.median_filter(gradmap2,100.)
-
     graddir1 = np.zeros(np.shape(gradmap1[0]))
-    # gradmag1 = np.zeros(np.shape(gradmap1[0]))
 
     graddir2 = np.zeros(np.shape(gradmap2[0]))
-    # gradmag2 = np.zeros(np.shape(gradmap2[0]))
 
     for i in range(phasemap1.shape[0]):
         for j in range(phasemap2.shape[1]):
             graddir1[i, j] = math.atan2(gradmap1[1][i, j], gradmap1[0][i, j])
             graddir2[i, j] = math.atan2(gradmap2[1][i, j], gradmap2[0][i, j])
-
-            # gradmag1[i,j] = np.sqrt((gradmap1[1][i,j]**2)+(gradmap1[0][i,j]**2))
-            # gradmag2[i,j] = np.sqrt((gradmap2[1][i,j]**2)+(gradmap2[0][i,j]**2))
 
     vdiff = np.multiply(np.exp(1j * graddir1), np.exp(-1j * graddir2))
 
@@ -2927,25 +2387,6 @@ def getSignMap(neuron_pos, maxes, plotting=False):
 
     newx2d = newx.reshape(y_pos.shape[0], x_pos.shape[0])
     newy2d = newy.reshape(y_pos.shape[0], x_pos.shape[0])
-    # nanv = np.argwhere(np.isnan(newx.reshape(y_pos.shape[0], x_pos.shape[0])))
-    # if nanv.shape[0]>1:
-    #     nanval=True
-    #     while nanval:
-    #        nanv= np.argwhere(np.isnan(newx.reshape(y_pos.shape[0], x_pos.shape[0])))
-    #        tree_A=cKDTree(grid)
-    #        tree_B = cKDTree(nanv)
-    #        neighbourhood = tree_B.query_ball_tree(tree_A, 100)
-    #        for i in range(len(neighbourhood)):
-    #            try:
-    #                newx2d[nanv[i, 0], nanv[i, 1]] = np.nanmedian(newx[neighbourhood[i]])
-    #                newy2d[nanv[i, 0], nanv[i, 1]] = np.nanmedian(newy[neighbourhood[i]])
-    #            except:
-    #                print(i, 'no neighbour')
-    #
-    #        newx = newx2d.reshape(2, -1)
-    #        newy = newy2d.reshape(2, -1)
-    #        if np.argwhere(np.isnan(newx.reshape(y_pos.shape[0], x_pos.shape[0]))).shape[0] <= 1:
-    #            nanval = False
 
     newx2d_blur = filter_nan_gaussian_conserving2(newx2d, sigma=50)
     newy2d_blur = filter_nan_gaussian_conserving2(newy2d, sigma=50)
@@ -2953,16 +2394,6 @@ def getSignMap(neuron_pos, maxes, plotting=False):
     signMap = visualSignMap(newx2d_blur, newy2d_blur)
     signMap_blur = filter_nan_gaussian_conserving2(signMap, sigma=15)
     sign_map_neurons=np.array([signMap_blur[np.maximum(0, int(neuron_pos[i, 1])-1), np.maximum(0, int(neuron_pos[i, 0])-1)] for i in range(neuron_pos.shape[0])])#np.zeros_like(maxes[0, :])
-
-    # X = np.concatenate((neuron_pos, (1000 * sign_map_neurons > 0).reshape(-1, 1)), axis=1)
-    # labels = cluster.HDBSCAN(
-    #     min_samples=20,
-    #     min_cluster_size=100,
-    # ).fit_predict(X[(sign_map_neurons > 0), :])
-    # # clustered = (labels >= 0)
-    # # labels = labels[clustered]
-    # plt.figure()
-    # plt.scatter(neuron_pos[sign_map_neurons > 0, 1], neuron_pos[sign_map_neurons > 0, 0], c=labels, cmap='jet')
 
 
     if plotting:
@@ -2987,8 +2418,6 @@ import matplotlib.pyplot as plt
 from skimage.color import lab2rgb
 
 def TwoDimColorMap(X, Y, plotting=False):
-    # az = np.arange(0, 27 )  # azimuths (assumes one screen and a half)
-    # el = np.arange(-5.5, 5.5)  # elevations
     az = np.arange(0, 6)  # azimuths (assumes one screen and a half)
     el = np.arange(-1.5, 1.5)
     # I chose squares of size 8 just to illustrate the point:
@@ -3026,7 +2455,6 @@ def TwoDimColorMap(X, Y, plotting=False):
         plt.xlabel('Azimuth')
         plt.ylabel('Elevation')
         plt.title('Two-dimensional colormap of the screen')
-        # plt.show()
 
     col=rgbImage[Y, X]
     return col, rgbImage
@@ -3048,7 +2476,12 @@ def signaltonoiseScipy(a, axis=0, ddof=0):
     return np.where(sd == 0, 0, m/sd)
 
 
-def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000, n_min=5, double_wavelet_model=True, train_idx=[0, 2], test_idx=[1, 3], plotting=False):
+def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
+              n_min=5, double_wavelet_model=True, train_idx=[0, 2],
+              test_idx=[1, 3], plotting=False, frames_per_minute=None):
+    if frames_per_minute is None:
+        frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
+    frames_per_minute = int(frames_per_minute)
     Predictions=[]
     nonlinParams=[]
     RhoPhiParams=[]
@@ -3085,7 +2518,7 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000, n_min=5, d
         dphi[abs(dphi) >= 3] = np.nan
         nans, x = nan_helper(dphi)
         dphi[nans] = np.interp(x(nans), x(~nans), dphi[~nans])
-        #
+
         rp_inhib = np.array([cart2pol([w_r_inhib[i]], [w_i_inhib[i]]) for i in range(9000)])
         rho_inhib = rp_inhib[:, 0, 0, 0]
         phi_inhib = rp_inhib[:, 1, 0, 0]
@@ -3120,19 +2553,7 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000, n_min=5, d
                 colors.append(color)
                 ax.scatter(rho[i - 1:i + 1], phi[i - 1:i + 1], dphi[i - 1:i + 1], s=10,
                            color=color)  # dphi[1000:1100])#, color=colors)
-                # ax.plot(rho[i-1:i+1], phi[i-1:i+1], dphi[i-1:i+1], color=color)#dphi[1000:1100])#, color=colors)
-        #
-        # if plotting:
-        #     dt1 = 9000
-        #     noise = np.zeros(w_i.shape)
-        #     ncut = 20
-        #     ss = 20
-        #     m_rho, m_phi, m_dphi, s, f, arg = getNonLinearModel2(idx, np.mean(spks[:, :dt1, idx], axis=0), w_i[:dt1],
-        #                                                          w_r[:dt1],
-        #                                                          dphi[:dt1], noise[:dt1], ncut=ncut, smoothing_size=ss,
-        #                                                          plotting=True, more_smooth=True)  #
 
-        # vis_resp, a=GetNeuronVisresponse(idx,w_i, w_r, w_c, w_i_inhib, w_r_inhib, w_c_inhib, dphi.reshape(-1, 1), dphi_inhib.reshape(-1, 1), spks, dt1=7200, train_idx=[0, 2], test_idx=[1, 3], lastmin=True, func=relu)
         vis_resp, a, nonlinparams, rhophiparams, plots, unrectified, w, interp = GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib,
                                                                                           w_r_inhib,
                                                                                           dphi.reshape(-1, 1),
@@ -3143,9 +2564,9 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000, n_min=5, d
                                                                                           test_idx=test_idx,
                                                                                           double_wavelet_model=False,
                                                                                           lastmin=True, func=relu, sigma=15,
-                                                                                          plotting=False)
+                                                                                          plotting=False,
+                                                                                          frames_per_minute=frames_per_minute)
         print(rhophiparams)
-        # vis_resp, a,nonlinparams=GetNeuronVisresponseGRP(idx,w_i, w_r, w_c, w_i_inhib, w_r_inhib, w_c_inhib, dphi.reshape(-1, 1), dphi_inhib.reshape(-1, 1), spks, dt1=7200, train_idx=[0, 2], test_idx=[1, 3], lastmin=False, func=relu)
         Predictions.append(vis_resp)
         nonlinParams.append(nonlinparams)
         RhoPhiParams.append(rhophiparams)
@@ -3163,7 +2584,12 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
                     wavelet_path='/media/sophie/Expansion1/UCL/utils/2screens/10/',
                     savepath = '/home/sophie/Pictures/img zebra/supp/supp/', n_min=5, tt=[10, 18000],
                     memmapping=True, train_idx=[0, 2],test_idx=[1, 3],double_wavelet_model=False, lastmin=False,
-                    plotting=False ):
+                    plotting=False, frames_per_minute=None,
+                    hz=DEFAULT_MOVIE_FRAME_RATE_HZ ):
+    if frames_per_minute is None:
+        frames_per_minute = int(hz) * SECONDS_PER_MINUTE
+    frames_per_minute = int(frames_per_minute)
+    hz = int(hz)
     Predictions = []
     Metrics = []
     Params = []
@@ -3172,16 +2598,23 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
     OS = []
     xM, xm, yM, ym = visual_coverage
     interpolators = []
-    if memmapping:
-        tt = [0, 18000]
-        wavelets_i = np.load(wavelet_path + 'dwt_videodata2_i.npy', mmap_mode='r')[tt[0]:tt[1]]
-        wavelets_r = np.load(wavelet_path + 'dwt_videodata2_r.npy', mmap_mode='r')[tt[0]:tt[1]]
 
-        # load the files in cache to make the reading faster
-        _ = wavelets_i[:].sum()
-        _ = wavelets_r[:].sum()
+    if memmapping:
+        print('looking for wavelets zarr folder in : ', wavelet_path)
+        # ensure combined zarr exists for the two arrays (real/imag)
+        # if .zarr exist use them, else try to combine .npy files to zarr on disk-efficient way
+        try:
+            wavelets_i = zarr.open(wavelet_path + 'dwt_videodata2_i.zarr', mode='r')
+            wavelets_r = zarr.open(wavelet_path + 'dwt_videodata2_r.zarr', mode='r')
+        except Exception:
+            print('combining npy parts into zarr for imag using wavelets_io.py file ?')
+        print(wavelets_i.shape)
+
+        # do not load entire arrays to memory; access only slices when needed
     else:
-        wavelets = load_stimulus_simple_cell2(wavelet_path, tt=[0, 18000], downsampling=False)
+        from .LoadPinkNoise import load_stimulus_simple_cell2
+
+        wavelets = load_stimulus_simple_cell2(wavelet_path, tt=tt, downsampling=downsampling)
         wavelets_r = wavelets[0]
         wavelets_i = wavelets[1]
         del wavelets
@@ -3193,8 +2626,8 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
         x0 = np.minimum(x0, 130)
         y0 = np.minimum(y0, 49)
 
-        spk = np.mean(spks[:5, :nmin * 1800, idx], axis=0).reshape(-1, 1)
-        spk_train = np.mean(spks[[0, 2], :nmin * 1800, idx], axis=0).reshape(-1, 1)
+        spk = np.mean(spks[:5, :nmin * frames_per_minute, idx], axis=0).reshape(-1, 1)
+        spk_train = np.mean(spks[[0, 2], :nmin * frames_per_minute, idx], axis=0).reshape(-1, 1)
 
         x = x0
         y = y0
@@ -3210,19 +2643,19 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
         x = w
         y = w
 
-        wavelets_i = np.load(wavelet_path + 'dwt_videodata2_i.npy', mmap_mode='r')[tt[0]:nmin * 1800, xt:xt + (2 * w),
+        wavelets_i_ = wavelets_i[tt[0]:nmin * frames_per_minute, xt:xt + (2 * w),
         yt:yt + (2 * w), :, :, :]
-        wavelets_i = np.array(wavelets_i)
-        wavelets_r = np.load(wavelet_path + 'dwt_videodata2_r.npy', mmap_mode='r')[tt[0]:nmin * 1800, xt:xt + (2 * w),
+        wavelets_i_ = np.array(wavelets_i_)
+        wavelets_r_ = wavelets_r[tt[0]:nmin * frames_per_minute, xt:xt + (2 * w),
         yt:yt + (2 * w), :, :, :]
-        wavelets_r = np.array(wavelets_r)
+        wavelets_r_ = np.array(wavelets_r_)
 
         while div:
             print(x, y)
-            wavelets_complex = np.power(wavelets_r[:, x, y], 2) + np.power(wavelets_i[:, x, y], 2)
+            wavelets_complex = np.power(wavelets_r_[:, x, y], 2) + np.power(wavelets_i_[:, x, y], 2)
             cc_f_1 = torch.corrcoef(torch.Tensor(
                 torch.concatenate(
-                    (torch.Tensor(wavelets_complex.reshape(nmin * 1800, -1).T), torch.Tensor(spk_train.T)),
+                    (torch.Tensor(wavelets_complex.reshape(nmin * frames_per_minute, -1).T), torch.Tensor(spk_train.T)),
                     axis=0)).cuda()).detach().cpu().numpy()[-1:, :-1]
             cc_f_1 = cc_f_1.reshape(8, 5, 4)
             if plotting:
@@ -3232,12 +2665,11 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
             m = np.where(abs(cc_f_1) == np.max(abs(cc_f_1)))
             o, s, f = m[0][0], m[1][0], m[2][0]
 
-            wc = np.sqrt(np.power(wavelets_r[:, :, :, o, s, f], 2) + np.power(
-                wavelets_i[:, :, :, o, s, f], 2))
-            # wc=0
+            wc = np.sqrt(np.power(wavelets_r_[:, :, :, o, s, f], 2) + np.power(
+                wavelets_i_[:, :, :, o, s, f], 2))
             if r == 1:
-                wi = wavelets_i[:, :, :, o, s, f]
-                wr = wavelets_r[:, :, :, o, s, f]
+                wi = wavelets_i_[:, :, :, o, s, f]
+                wr = wavelets_r_[:, :, :, o, s, f]
                 wsin = np.max(wi)
                 wcos = np.max(wr)
                 m = np.argmax([wcos, wsin, np.max(wc)])
@@ -3257,7 +2689,7 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
                 ww = w_temp
 
             cc_f_1_xy = torch.corrcoef(torch.Tensor(
-                torch.concatenate((torch.Tensor(ww.reshape(nmin * 1800, -1).T), torch.Tensor(spk_train.T)),
+                torch.concatenate((torch.Tensor(ww.reshape(nmin * frames_per_minute, -1).T), torch.Tensor(spk_train.T)),
                                   axis=0)).cuda()).detach().cpu().numpy()[-1:, :-1]
             cc_f_1_xy = np.nan_to_num(cc_f_1_xy)
             cc_f_1_xy = cc_f_1_xy.reshape(2 * w, 2 * w)
@@ -3286,15 +2718,12 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
         torch.cuda.empty_cache()
         return (x1, y1, o, s, f)
 
-    # array([ 242,  276,  687, 1170, 1296, 1429, 1651, 2030, 2312, 2329, 2453,
-    #        2551, 2571, 3061, 3329, 3336, 3529, 3707, 4043, 4352])
     def findBestPos(x, y, o, s, nmin=5, plotting=False):
         x0 = np.maximum(x * 5, 5)
         y0 = np.maximum(y * 5, 5)
         x0 = np.minimum(x0, 130)
         y0 = np.minimum(y0, 49)
-        # spk = np.mean(spks[:, :nmin*1800, idx], axis=0).reshape(-1, 1)
-        spk_train = np.mean(spks[[0, 2], :nmin * 1800, idx], axis=0).reshape(-1, 1)
+        spk_train = np.mean(spks[[0, 2], :nmin * frames_per_minute, idx], axis=0).reshape(-1, 1)
         x = x0
         y = y0
         div = True
@@ -3303,11 +2732,11 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
         w = 10
         torch.cuda.empty_cache()
         while div:
-            wavelets_complex = np.power(wavelets_r[:nmin * 1800, x, y], 2) + np.power(wavelets_i[:nmin * 1800, x, y], 2)
+            wavelets_complex = np.power(wavelets_r[:nmin * frames_per_minute, x, y], 2) + np.power(wavelets_i[:nmin * frames_per_minute, x, y], 2)
             print(wavelets_complex.shape, spk_train.shape)
             cc_f_1 = torch.corrcoef(torch.Tensor(
                 torch.concatenate(
-                    (torch.Tensor(wavelets_complex.reshape(nmin * 1800, -1).T), torch.Tensor(spk_train.T)),
+                    (torch.Tensor(wavelets_complex.reshape(nmin * frames_per_minute, -1).T), torch.Tensor(spk_train.T)),
                     axis=0)).cuda()).detach().cpu().numpy()[-1:, :-1]
             cc_f_1 = cc_f_1.reshape(8, 5, 4)
             if plotting:
@@ -3317,15 +2746,14 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
             m = np.where(abs(cc_f_1) == np.max(abs(cc_f_1)))
             o, s, f = m[0][0], m[1][0], m[2][0]
 
-            wc = np.sqrt(np.power(wavelets_r[:nmin * 1800, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
+            wc = np.sqrt(np.power(wavelets_r[:nmin * frames_per_minute, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
             np.maximum(0, y0 - w):np.maximum(0, y0 - w) + (2 * w), o, s, f], 2) + np.power(
-                wavelets_i[:nmin * 1800, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
+                wavelets_i[:nmin * frames_per_minute, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
                 np.maximum(0, y0 - w):np.maximum(0, y0 - w) + (2 * w), o, s, f], 2))
-            # wc=0
             if r == 1:
-                wi = wavelets_i[:nmin * 1800, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
+                wi = wavelets_i[:nmin * frames_per_minute, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
                 np.maximum(0, y0 - w):np.maximum(0, y0 - w) + (2 * w), o, s, f]
-                wr = wavelets_r[:nmin * 1800, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
+                wr = wavelets_r[:nmin * frames_per_minute, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
                 np.maximum(0, y0 - w):np.maximum(0, y0 - w) + (2 * w), o, s, f]
                 wsin = np.max(wi)
                 wcos = np.max(wr)
@@ -3346,7 +2774,7 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
                 ww = w_temp
 
             cc_f_1_xy = torch.corrcoef(torch.Tensor(
-                torch.concatenate((torch.Tensor(ww.reshape(nmin * 1800, -1).T), torch.Tensor(spk_train.T)),
+                torch.concatenate((torch.Tensor(ww.reshape(nmin * frames_per_minute, -1).T), torch.Tensor(spk_train.T)),
                                   axis=0)).cuda()).detach().cpu().numpy()[-1:, :-1]
             cc_f_1_xy = np.nan_to_num(cc_f_1_xy)
             cc_f_1_xy = cc_f_1_xy.reshape(2 * w, 2 * w)
@@ -3377,7 +2805,7 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
         list_neurons= range(neuron_pos.shape[0])
     else:
         list_neurons=idxs
-    for idx in idxs:  # np.asarray(neuron_pos[:, 1]>600).nonzero()[0]:[1024, 732, 1789, 3279, 614]:#
+    for idx in list_neurons:  # np.asarray(neuron_pos[:, 1]>600).nonzero()[0]:[1024, 732, 1789, 3279, 614]:#
         gc.collect()
         torch.cuda.empty_cache()
         print(idx)
@@ -3401,19 +2829,17 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
                                                int(np.round(s1)), nmin=n_min)
 
         if memmapping:
-            wavelets_i = np.load(wavelet_path + 'dwt_videodata2_i.npy', mmap_mode='r')[tt[0]:n_min * 1800, x, y, :, :, :]
-            wavelets_i = np.array(wavelets_i)
-            wavelets_r = np.load(wavelet_path + 'dwt_videodata2_i.npy', mmap_mode='r')[tt[0]:n_min * 1800, x, y, :, :, :]
-            wavelets_r = np.array(wavelets_r)
-            wc = np.sqrt(np.power(wavelets_r, 2) + np.power(
-                wavelets_i, 2))
+            wavelets_i_ = wavelets_i[tt[0]:n_min * frames_per_minute, x, y, :, :, :]
+            wavelets_r_ = wavelets_r[tt[0]:n_min * frames_per_minute, x, y, :, :, :]
+            wc = np.sqrt(np.power(wavelets_r_, 2) + np.power(
+                wavelets_i_, 2))
         else:
-            wc = np.sqrt(np.power(wavelets_r[:n_min * 1800, x, y, :, :, :], 2) + np.power(
-                wavelets_i[:n_min * 1800, x, y, :, :, :], 2))
+            wc = np.sqrt(np.power(wavelets_r[:n_min * frames_per_minute, x, y, :, :, :], 2) + np.power(
+                wavelets_i[:n_min * frames_per_minute, x, y, :, :, :], 2))
 
         cc_f_1_o = torch.corrcoef(torch.Tensor(
-            torch.concatenate((torch.Tensor(wc.reshape(n_min * 1800, -1).T),
-                               torch.Tensor(np.mean(spks[:, :n_min * 1800, idx], axis=0).reshape(1, -1))),
+            torch.concatenate((torch.Tensor(wc.reshape(n_min * frames_per_minute, -1).T),
+                               torch.Tensor(np.mean(spks[:, :n_min * frames_per_minute, idx], axis=0).reshape(1, -1))),
                               axis=0)).cuda()).detach().cpu().numpy()[-1:, :-1]
         cc_f_1_o = cc_f_1_o.reshape(8, 5, 4)
         pp = cc_f_1_o[:, s, f]
@@ -3430,29 +2856,25 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
             })
 
             if memmapping:
-                wavelets_i = np.load(wavelet_path + 'dwt_videodata2_i.npy', mmap_mode='r')[tt[0]:n_min * 1800, :, :, o, s, f]
-                wavelets_i = np.array(wavelets_i)
-                wavelets_r = np.load(wavelet_path + 'dwt_videodata2_r.npy', mmap_mode='r')[tt[0]:n_min * 1800, :, :, o, s, f]
-                wavelets_r = np.array(wavelets_r)
-                wc = np.sqrt(np.power(wavelets_r, 2) + np.power(
-                    wavelets_i, 2))
+                wavelets_i_ = wavelets_i[tt[0]:n_min * frames_per_minute, x, y, :, :, :]
+                wavelets_r_ = wavelets_r[tt[0]:n_min * frames_per_minute, x, y, :, :, :]
+                wc = np.sqrt(np.power(wavelets_r_, 2) + np.power(
+                    wavelets_i_, 2))
             else:
-                wc = np.sqrt(np.power(wavelets_r[:n_min * 1800, :, :, o, s, f], 2) + np.power(
-                    wavelets_i[:n_min * 1800, :, :, o, s, f], 2))
+                wc = np.sqrt(np.power(wavelets_r[:n_min * frames_per_minute, x, y, :, :, :], 2) + np.power(
+                    wavelets_i[:n_min * frames_per_minute, x, y, :, :, :], 2))
+
             cc_f_1_xy = torch.corrcoef(torch.Tensor(
-                torch.concatenate((torch.Tensor(wc.reshape(n_min * 1800, -1).T),
-                                   torch.Tensor(np.mean(spks[:, :n_min * 1800, idx], axis=0).reshape(1, -1))),
+                torch.concatenate((torch.Tensor(wc.reshape(n_min * frames_per_minute, -1).T),
+                                   torch.Tensor(np.mean(spks[:, :n_min * frames_per_minute, idx], axis=0).reshape(1, -1))),
                                   axis=0)).cuda()).detach().cpu().numpy()[-1:, :-1]
             cc_f_1_xy = cc_f_1_xy.reshape(135, 54)
-            # u, s__, v = svds(cc_f_1_xy, 2)
 
             elev_val = np.arange(cc_f_1_xy.shape[1])
             azi_val = np.arange(cc_f_1_xy.shape[0])
             azi_val = (abs(azi_val - cc_f_1_xy.shape[0]) * (abs(xM - xm) / cc_f_1_xy.shape[0])) + xm
             elev_val = (abs(elev_val - cc_f_1_xy.shape[1]) * (abs(yM - ym) / cc_f_1_xy.shape[1])) + ym
 
-            # if v[1][np.argmax(abs(v[1]))] < 0:
-            #     i = -1
             fig = plt.figure(figsize=(12, 1.2))  # en pouces
             fig.suptitle(str(idx), fontsize=16, ha='left', va='top')
             gs = GridSpec(1, 9, figure=fig)  # grille 1x8
@@ -3469,45 +2891,30 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
             for i in range(5, 9):
                 axe = fig.add_subplot(gs[0, i])
                 ax.append(axe)
-            # fig, ax = plt.subplots(1, 5, figsize=(15, 1.5), sharey=True)
-            # ax[0].imshow(cc_f_1_xy.T, cmap='coolwarm')
-            # ax[0].set_title(idx)
-            # ax[0].set_frame_on(False)
             i = 1
             ax[0].plot(azi_val[::1], i * cc_f_1_xy[:, y][::-1], c='k')
             ax[0].set_xticks([-45, 45, 135], [135, 45, -45])
-            # ax[0].set_title('Azimuth (deg)')
             ax[0].spines["top"].set_visible(False)
             ax[0].spines["right"].set_visible(False)
             ax[0].set_ylim(bottom=-np.max(abs(cc_f_1_xy)), top=np.max(abs(cc_f_1_xy)))
             ax[0].set_title('Azimuth (deg)')
 
             ax[2].plot(np.append(cc_f_1_o[:, s, f], cc_f_1_o[0, s, f]), 'o-', c='k', markersize=markersize)
-            # ax[2].set_ylim(bottom=-0.2, top=0.2)
             ax[2].set_xticks([0, 4, 8], [0, 90, 180])
-            # ax[2].set_title('Orientation (deg)')
             ax[2].spines["top"].set_visible(False)
             ax[2].spines["right"].set_visible(False)
             ax[2].set_title('Orientation (deg)')
 
             ax[1].plot(elev_val, i * cc_f_1_xy[x, :], c='k')
             ax[1].set_xticks([-30, 0, 30])
-            # ax[1].set_title('Elevation (deg)')
             ax[1].spines["top"].set_visible(False)
             ax[1].spines["right"].set_visible(False)
             ax[1].set_title('Elevation (deg)')
 
             mm = max(cc_f_1_o.min(), cc_f_1_o.max(), key=abs)
 
-            # if mm<=0:
-            #     ax[1].set_ylim(mm, 0)
-            # else:
-            #     ax[1].set_ylim(0, mm)
-            # ax[2].plot(abs(cc_f_1[:, s, f]))
             ax[3].plot(sigmas, cc_f_1_o[o, :, f], 'o-', c='k', markersize=markersize)
-            # ax[3].set_ylim(bottom=-0.2, top=0.2)
             ax[3].set_xticks([0, 5, 10, 15, 20])
-            # ax[3].set_title('Size (deg)')
             ax[3].spines["top"].set_visible(False)
             ax[3].spines["right"].set_visible(False)
             ax[3].set_title('Size (deg)')
@@ -3516,20 +2923,19 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
             ax[4].set_xticks(
                 np.floor(frequencies * np.array([100, 100, 100, 100])).astype(int) / np.array([100, 100, 100, 100]))
             ax[4].tick_params(axis='x', labelrotation=45)
-            # ax[4].set_title('Frequency (cdp)')
             ax[4].spines["top"].set_visible(False)
             ax[4].spines["right"].set_visible(False)
             ax[4].set_title('Frequency (cdp)')
 
         if memmapping:
-            w_i = np.load(wavelet_path + 'dwt_videodata2_i.npy', mmap_mode='r')[tt[0]:tt[1], x, y, o, s, f]
+            w_i = zarr.open(wavelet_path + 'dwt_videodata2_i.zarr', mode='r')[tt[0]:tt[1], x, y, o, s, f]
             w_i = np.array(w_i).reshape(-1, 1)
-            w_r = np.load(wavelet_path + 'dwt_videodata2_r.npy', mmap_mode='r')[tt[0]:tt[1], x, y, o, s, f]
+            w_r = zarr.open(wavelet_path + 'dwt_videodata2_r.zarr', mode='r')[tt[0]:tt[1], x, y, o, s, f]
             w_r = np.array(w_r).reshape(-1, 1)
 
-            w_i_inhib =  np.load(wavelet_path + 'dwt_videodata2_i.npy')[tt[0]:tt[1], x1, y1, o1, s1, f1]
+            w_i_inhib = zarr.open(wavelet_path + 'dwt_videodata2_i.zarr', mode='r')[tt[0]:tt[1], x1, y1, o1, s1, f1]
             w_i_inhib = np.array(w_i_inhib).reshape(-1, 1)
-            w_r_inhib =  np.load(wavelet_path + 'dwt_videodata2_r.npy')[tt[0]:tt[1], x1, y1, o1, s1, f1]
+            w_r_inhib = zarr.open(wavelet_path + 'dwt_videodata2_r.zarr', mode='r')[tt[0]:tt[1], x1, y1, o1, s1, f1]
             w_r_inhib = np.array(w_r_inhib).reshape(-1, 1)
         else:
             w_i = wavelets_i[:, x, y, o, s, f].reshape(-1, 1)  # +w_i_downsampled[:, x1, y1, o1, s1]
@@ -3544,18 +2950,16 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
         rp = np.array([cart2pol([w_r[i]], [w_i[i]]) for i in range(tt[1])])
         rho = rp[:, 0, 0, 0]
         phi = rp[:, 1, 0, 0]
-        # phi = np.unwrap(phi)
-        dphi = np.diff(np.unwrap(phi), prepend=0) * 30
+        dphi = np.diff(np.unwrap(phi), prepend=0) * hz
         dphi = np.clip(dphi, -2 * np.pi, 2 * np.pi)
-        # dphi[abs(dphi) >= 2*np.pi] = np.nan
         nans, dx = nan_helper(dphi)
         dphi[nans] = np.interp(dx(nans), dx(~nans), dphi[~nans])
-        #
+
         rp_inhib = np.array([cart2pol([w_r_inhib[i]], [w_i_inhib[i]]) for i in range(tt[1])])
         rho_inhib = rp_inhib[:, 0, 0, 0]
         phi_inhib = rp_inhib[:, 1, 0, 0]
         phi_inhib = np.unwrap(phi_inhib)
-        dphi_inhib = np.diff(np.unwrap(phi_inhib), prepend=0) * 30
+        dphi_inhib = np.diff(np.unwrap(phi_inhib), prepend=0) * hz
         dphi_inhib = np.clip(dphi_inhib, -2 * np.pi, 2 * np.pi)
         nans, dx = nan_helper(dphi_inhib)
         dphi_inhib[nans] = np.interp(dx(nans), dx(~nans), dphi_inhib[~nans])
@@ -3567,27 +2971,21 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
                                                                                               dphi.reshape(-1, 1),
                                                                                               dphi_inhib.reshape(-1,
                                                                                                                  1),
-                                                                                              spks, dt1=tt[1],
+                                                                                              spks, dt1=n_min * frames_per_minute,
                                                                                               n_min=n_min,
                                                                                               train_idx=train_idx,
                                                                                               test_idx=test_idx,
                                                                                               double_wavelet_model=double_wavelet_model,
                                                                                               lastmin=lastmin,
                                                                                               func=relu, sigma=15,
-                                                                                              plotting=False)
+                                                                                              plotting=False,
+                                                                                              frames_per_minute=frames_per_minute)
 
         if plotting:
             ncut = 20
-            # plt.rcParams.update({
-            #     "font.size": 8,
-            #     "svg.fonttype": "none"  # Texte éditable dans Inkscape
-            # })
-
-            # Tracer des courbes exemples
 
             a = abs(max(rho.min(), rho.max()))
             a_x = np.linspace(0, a, ncut)
-            # fig, ax = plt.subplots(1, 9, figsize=(15, 1.5))
             plot = plots[0]
             ax[5].plot(a_x, plot[0], c='k')
             ax[5].set_ylim(bottom=0, top=np.max(plot[0]))
@@ -3613,23 +3011,13 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
             ax[7].set_xticks([-1, 0, 1])
             ax[7].set_title('Drift (a.u.)')
 
-            # plt.tight_layout()
             fig.savefig(savepath + str(idx) + "new.svg", format="svg", bbox_inches="tight")
 
             pref_phase = b_x[np.argmax(plot[1])]
             pref_ori = thetas[o] * 180 / np.pi
             pref_size = sigmas[s]
 
-            # plt.figure()
-            # plt.rcParams.update({
-            #     "font.size": 8,
-            #     "svg.fonttype": "none"  # Texte éditable dans Inkscape
-            # })
-            # plt.imshow(
-            #     makeGaborFilter(x, y, pref_ori, pref_size, pref_phase, frequencies[f], 135, 54, plot=False, freq=True),
-            #     cmap='Greys')
             plt.title('Receptive field ' + str(idx))
-            # fig.savefig(savepath + str(idx) + "receptivefield.svg", format="svg", bbox_inches="tight")
 
         if plotting:
             star = 4500
@@ -3641,12 +3029,9 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
                 "svg.fonttype": "none"  # Texte éditable dans Inkscape
             })
             ax[2].plot(np.mean(spk, axis=0)[star:stop], c='k')
-            # ax[1].plot(w_r[star:stop])
-            # ax[0].plot(w_i[star:stop])
             ax[3].plot(rho[star:stop], c='k')
             ax3 = ax[3].twinx()
             ax3.plot(np.mean(spk, axis=0)[star:stop], c='k', linestyle='dotted')
-            # ax[4].plot(phi[star:stop])
             ax[4].plot(np.unwrap(phi[star:stop]), c='k')
             ax[4].yaxis.set_major_locator(ticker.MultipleLocator(base=2 * np.pi))
             ax[4].yaxis.set_major_formatter(FuncFormatter(pi_formatter))
@@ -3660,7 +3045,6 @@ def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_
             ax6 = ax[6].twinx()
             ax6.plot(np.mean(spk, axis=0)[star:stop], c='k', linestyle='--')
         print(rhophiparams)
-        # vis_resp, a,nonlinparams=GetNeuronVisresponseGRP(idx,w_i, w_r, w_c, w_i_inhib, w_r_inhib, w_c_inhib, dphi.reshape(-1, 1), dphi_inhib.reshape(-1, 1), spks, dt1=7200, train_idx=[0, 2], test_idx=[1, 3], lastmin=False, func=relu)
         Predictions.append(vis_resp)
         nonlinParams.append(nonlinparams)
         rhophiparams.append(ori_selectivity)
@@ -3697,7 +3081,3 @@ def plotNeuralRaster(spks):
     sorted_neurons = test[:, n_sort_ind[np.arange(0,  spks.shape[2],  1)]]
     plt.figure()
     plt.imshow(sorted_neurons.T, vmin=0, vmax=0.8, cmap='Greys')
-
-
-
-

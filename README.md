@@ -29,10 +29,14 @@ packages required:
 
 
 **installation procedure:**<br />
-in conda type :
+From the repository root, create and activate the conda environment,
+then install Waven in editable mode:
 
-  conda env create -f environment.yml<br />
-  python3 -m pip install --index-url https://test.pypi.org/simple/ --no-deps waven<br />
+```bash
+conda env create --solver libmamba -f environment.yml
+conda activate waven
+pip install -e .
+```
 
 
 **GUI Documentation:**<br />
@@ -210,4 +214,3 @@ An already made Gabor Library well suited for mice can be found here <>
 	tuning_curve=au.PlotTuningCurve(rfs_zebra, 2441, analysis_coverage, sigmas_deg, screen_ratio)
 ```
 	
-

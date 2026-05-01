@@ -3,15 +3,20 @@ Created on Wed Mar 25 19:31:32 2025
 
 @author: Sophie Skriabine
 """
+import os
+
+import matplotlib
+if os.environ.get("WAVEN_NO_PLOTS") == "1":
+    matplotlib.use("Agg", force=True)
+else:
+    matplotlib.use("TkAgg", force=True)
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import ndimage
 import scipy.io as sio
 import skimage
 from skimage import transform
-import os
-import matplotlib
-matplotlib.use('TkAgg')
 from skimage.measure import block_reduce
 import cv2
 import gc
@@ -323,4 +328,3 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path='/m
     WT = np.array(WT)
     WT = np.moveaxis(WT, 0, 4)
     np.save(folder_path+'/dwt_videodata_'+str(phase)+'.npy', WT)
-

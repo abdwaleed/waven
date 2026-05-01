@@ -3,6 +3,14 @@ Created on Wed Mar 25 19:31:32 2025
 
 @author: Sophie Skriabine
 """
+import os
+
+import matplotlib
+if os.environ.get("WAVEN_NO_PLOTS") == "1":
+    matplotlib.use("Agg", force=True)
+else:
+    matplotlib.use("TkAgg", force=True)
+
 import numpy as np
 from .suite2p.utils import cortex_lab_utils as clu
 from .suite2p.utils import timelinepy as tlu
@@ -11,10 +19,6 @@ from .suite2p.utils import utils as utils
 
 from skimage import transform
 
-import matplotlib
-matplotlib.use('TkAgg')
-
-import os
 import gc
 
 from torch.utils.data import DataLoader

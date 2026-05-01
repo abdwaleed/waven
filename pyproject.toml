@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "waven0.1"
-version = "0.0.1"
+name = "waven"
+version = "0.0.4"
 authors = [
   { name="Sophie Skriabine", email="sophie.skriabine@gmail.com" },
 ]
@@ -24,6 +24,8 @@ dependencies = [
     "seaborn",
     "tifffile",
     "torch",
+    "tensorly",
+    "zarr"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -31,3 +33,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["Waven*", "waven*"]

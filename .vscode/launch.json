@@ -1,0 +1,63 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run RF correlation plots",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/pipeline_correlation_plots.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        "--config",
+        "${workspaceFolder}/pipeline_config.json",
+        "--neuron-id",
+        "2441"
+      ],
+      "env": {
+        "MPLCONFIGDIR": "/tmp/waven-matplotlib"
+      }
+    },
+    {
+      "name": "Save RF correlation plots",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/pipeline_correlation_plots.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        "--config",
+        "${workspaceFolder}/pipeline_config.json",
+        "--neuron-id",
+        "2441",
+        "--save-dir",
+        "${workspaceFolder}/outputs/correlation_plots",
+        "--no-show"
+      ],
+      "env": {
+        "MPLBACKEND": "Agg",
+        "MPLCONFIGDIR": "/tmp/waven-matplotlib",
+        "WAVEN_NO_PLOTS": "1"
+      }
+    },
+    {
+      "name": "Run batch pipeline without plots",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/example.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        "--config",
+        "${workspaceFolder}/pipeline_config.json",
+        "--run",
+        "--no-plots"
+      ],
+      "env": {
+        "MPLBACKEND": "Agg",
+        "MPLCONFIGDIR": "/tmp/waven-matplotlib",
+        "WAVEN_NO_PLOTS": "1"
+      }
+    }
+  ]
+}

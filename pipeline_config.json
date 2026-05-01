@@ -1,0 +1,36 @@
+{
+  "gabor": {
+    "N_thetas": 8,
+    "Sigmas": [2, 3, 4, 5, 6, 8],
+    "Frequencies": [0.015, 0.04, 0.07, 0.1],
+    "Phases": [0, 90],
+    "NX": 135,
+    "NY": 54,
+    "Save Path": "/home/sophie/Documents/POSTDOC/TEMP/gabors_library.npy"
+  },
+  "analysis": {
+    "Path Directory": "/home/sophie/Projects/ZebrAnalysis/zebranalysis/ressources",
+    "Dirs": "/media/sophie/Seagate Basic/datasets",
+    "Experiment Info": ["SS002", "2024-07-23", 3],
+    "Number of Planes": 1,
+    "Block End": 0,
+    "screen_x": 4096,
+    "screen_y": 1536,
+    "NX": 135,
+    "NY": 54,
+    "Resolution": 1.3671,
+    "Sigmas": [2, 3, 4, 5, 6, 8],
+    "Sigmas Full Model": [2, 4, 6, 8, 10],
+    "Frequencies": [0.015, 0.04, 0.07, 0.1],
+    "Visual Coverage": [-135, 45, 34, -34],
+    "Analysis Coverage": [-135, 0, 34, -34],
+    "Hz": 30,
+    "Number of Frames": 18000,
+    "Number of Trials to Keep": 3,
+    "Movie Path": "/home/sophie/Documents/POSTDOC/TEMP/videos/perlin_stimulus_10min.mp4",
+    "Library Path": "/home/sophie/Documents/POSTDOC/TEMP/gabors_library.npy",
+    "Spks Path":"/home/sophie/Documents/POSTDOC/TEMP/ss002/spikes.npy",
+    "Full Model Wavelet Path": "/home/sophie/Documents/POSTDOC/TEMP",
+    "Full Model Save Path": "/home/sophie/Projects/ZebrAnalysis/zebranalysis/tests"
+  }
+}
