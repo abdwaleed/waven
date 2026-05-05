@@ -20,12 +20,17 @@ check out <https://github.com/mwshinn/zebra_noise><br />
 packages required:
 
 - python 3.8
-- scipy
+- matplotlib
+- numpy
+- opencv_python
 - scikit learn
-- skimage
+- scikit_image
+- scipy
 - tifffile
 - pandas
 - torch
+- tensorly
+- zarr
 
 
 **installation procedure:**<br />
@@ -38,6 +43,8 @@ conda activate waven
 pip install -e .
 ```
 
+**Example sctript:**<br />
+/example/run_waven_parts
 
 **GUI Documentation:**<br />
 https://docs.google.com/presentation/d/1nEv07CzCwYUoozucwwqi6qgS_t0jBy7KwqHKKoh2f2U/edit?usp=sharing<br />
@@ -59,13 +66,6 @@ Setting up the parameters**
 
 ```python
 	
-	import waven.WaveletGenerator as wg
-	import waven.Analysis_Utils as au
-	import waven.LoadPinkNoise as lpn
-	import waven.zebraGUI as ui
-	import numpy as np
-	import gc
-	import os
 
 	# List of default parameters for the Gabor Library
 	gabor_param={
@@ -94,11 +94,14 @@ Setting up the parameters**
 	    "Frequencies": "[0.015, 0.04, 0.07, 0.1]",
 	    "Visual Coverage":"[-135, 45, 34, -34]",
 	    "Analysis Coverage": "[-135, 0, 34, -34]",
+		"Hz": "30",
 	    "Number of Frames": "18000",
 	    "Number of Trials to Keep": "3",
 	    "Movie Path": "/home/sophie/Documents/POSTDOC/TEMP/videos/perlin_stimulus_10min.mp4",
 	    "Library Path": "/home/sophie/Documents/POSTDOC/TEMP/gabors_library.npy",
 	    "Spks Path": "None"
+		"Full Model Wavelet Path": "/home/sophie/Documents/POSTDOC/TEMP",
+		"Full Model Save Path": "/home/sophie/Projects/ZebrAnalysis/zebranalysis/tests"
 	}
 ```
 
@@ -133,6 +136,7 @@ Here is a quick explanation of each parameter:
 	    Sigmas (list): standart deviation of theb gabor filters expressed in pixels (radius of the gaussian half peak wigth).
 	    Visual Coverage (list): [azimuth left, azimuth right, elevation top , elevation bottom] in visual degree.
 	    Analysis Coverage (list): [azimuth left, azimuth right, elevation top , elevation bottom] in visual degree.
+		Hz: the frame rate of the moplayed movie
 	    Movie Path: path to the stimulus (.mp4)
 	    Library Path: path to Gabor library (same as save path if ran)
 	    Spks Path (opt): path to the spks.npy file to skip the alignement procedure, if set ignores Parameter alignment
@@ -141,8 +145,13 @@ Here is a quick explanation of each parameter:
 
 2. **To run the UI:**
 ```python
-	
-	ui.run(param_defaults,gabor_param)
+	import waven
+
+	config = waven.PipelineConfig.from_json(Path('path to pipeline_config.json'))
+	waven.gui.run(
+    config.analysis.to_gui_mapping(),
+    config.gabor.to_gui_mapping(),
+)
 ```
 documentation can be found here <https://docs.google.com/presentation/d/1nEv07CzCwYUoozucwwqi6qgS_t0jBy7KwqHKKoh2f2U/edit?usp=sharing>
 
@@ -150,67 +159,51 @@ documentation can be found here <https://docs.google.com/presentation/d/1nEv07Cz
 
 ```python
 
-	if f!=0:
-	    freq=True
-	else:
-	    freq=False
-	L = wg.makeFilterLibrary(xs, ys, thetas, sigmas, offsets, f, freq=freq)
-	np.save(path_save, L)
-	lib_path=path_save
+    library_path = create_gabor_library(config.gabor)
+    print(f"Created Gabor library: {library_path}")
 ```
 
 An already made Gabor Library well suited for mice can be found here <>
 
-4. **Downsampling and adjusting the range of visual coverage to your analysis:**
+4. ** Running the wavelet decomposition :**
 
 ```python
+
+	config = waven.PipelineConfig.from_json(Path('path to pipeline_config.json'))
+	library_path = config.analysis.library_path
 	
-	if (visual_coverage!=analysis_coverage):
-	    visual_coverage=np.array(visual_coverage)
-	    analysis_coverage=np.array(analysis_coverage)
-	    ratio_x=1-((visual_coverage[0]-visual_coverage[1])-(analysis_coverage[0]-analysis_coverage[1]))/(visual_coverage[0]-visual_coverage[1])
-	    ratio_y=1-((visual_coverage[2]-visual_coverage[3])-(analysis_coverage[2]-analysis_coverage[3]))/(visual_coverage[2]-visual_coverage[3])
-	else:
-	    ratio_x=1
-	    ratio_y=1
-
-	## downsamples and wavelet transforms the stimulus
-	wg.downsample_video_binary(movpath,visual_coverage,  analysis_coverage, shape=(ny, nx), chunk_size=1000, ratios=(ratio_x, ratio_y))
-	path=os.path.dirname(movpath)
-	videodata=np.load(movpath[:-4]+'_downsampled.npy')
-
-	wg.waveletDecomposition(videodata, 0, sigmas, path, lib_path)
-	wg.waveletDecomposition(videodata, 1, sigmas, path, lib_path)
+	output_dir = prepare_stimulus_wavelets(
+        config.analysis,
+        library_path=library_path,
+    )
+	print(f"Prepared wavelets in: {output_dir}")
 ```
 
 5. **Loading you neural activity and neuron positions :**
 
 ```python
 	
-	spks=np.load(spks_path)
-	parent_dir = os.path.dirname(spks_path)
-	neuron_pos=np.load(os.join(parent_dir, 'pos.npy'))
-	## converts neuron position in microns
-	neuron_pos=lpn.correctNeuronPos(neuron_pos, resolution)
-```
+	spike_data = load_spikes_and_positions(config.analysis)
+
 	
-6. **Running the Analysis:**
+6. **Running the Quick receptive field Analysis:**
 
 ```python
 	
-	## the spikes data have to be time registered to the stimulus frames
-	respcorr_zebra = au.repetability_trial3(spks, neuron_pos, plotting=True)
-	wavelets0, wavelets1, wavelet_c = lpn.coarseWavelet(path,False, nx, ny, 27, 11, n_theta, ns)
+	rf_analysis = run_rf_analysis(
+		config.analysis,
+		config.gabor,
+		spike_data,
+		plotting=True,
+		neuron_id=2441,
+	)
+	print("RF correlation analysis complete")
 
-	## runs correlation analysis
-	rfs_zebra = au.PearsonCorrelationPinkNoise(wavelet_c.reshape(18000, -1), np.mean(spks[:, :18000], axis=0),
-		                                   neuron_pos, 27, 11, ns, analysis_coverage, screen_ratio, sigmas_deg,
-		                                   plotting=True)
-	## plot neuron receptive field
-	idx=2441
-	au.Plot_RF(rfs_zebra[0][idx],4, title=np.max(rfs_zebra[0][idx]))
+7. **Running the Full Model :**
 
-	## plots neuron tuning curves
-	tuning_curve=au.PlotTuningCurve(rfs_zebra, 2441, analysis_coverage, sigmas_deg, screen_ratio)
+```python
+
+	full_model = run_full_model(config, spike_data, rf_analysis, tt = [0, 36000])
+	print(f"Full model complete: {type(full_model).__name__}")
 ```
 	
