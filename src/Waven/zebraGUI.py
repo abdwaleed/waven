@@ -185,6 +185,7 @@ def run(param_defaults, gabor_param):
             n_theta = int(gabor_entries["N_thetas"].get())
         except Exception as e:
             messagebox.showerror("Error", f"Invalid input: {e}")
+            return
 
         print(visual_coverage, sigmas, ns)
         print(exp_info)
@@ -257,7 +258,7 @@ def run(param_defaults, gabor_param):
             canvas2.draw()
 
             rf2d, x_tuning, y_tuning, ori_tun, s_tuning = PlotTuningCurve(rfs_gabor,
-                                                                          neuron_id, visual_coverage, sigmas,
+                                                                          neuron_id, analysis_coverage, sigmas_deg,
                                                                           screen_ratio,
                                                                           show=False)  # Appeler la fonction de tracé de corrélation
             ax3[0].clear()
@@ -316,7 +317,7 @@ def run(param_defaults, gabor_param):
         # canvas.get_tk_widget().grid(row=1, column=1)
 
         # Charger les fichiers de wavelet et afficher les résultats de corrélation
-        parent_dir = os.path.dirname(movpath)
+        parent_dir = path_directory
         print(parent_dir)
         try:
             wavelets_downsampled = np.load(os.path.join(parent_dir, 'dwt_downsampled_videodata.npy'))
@@ -358,7 +359,9 @@ def run(param_defaults, gabor_param):
                                                                                   n_theta, ns)
 
         idx = 2441  # 2272
-        rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled.reshape(18000, -1), np.mean(spks[:, :18000], axis=0),
+        n_frames = min(nb_frames, w_c_downsampled.shape[0], spks.shape[1])
+        rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled[:n_frames].reshape(n_frames, -1),
+                                                np.mean(spks[:, :n_frames], axis=0),
                                                 neuron_pos, 27, 11, ns, analysis_coverage, screen_ratio, sigmas_deg,
                                                 plotting=True)
 
