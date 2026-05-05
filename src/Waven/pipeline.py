@@ -218,7 +218,7 @@ def load_spikes_and_positions(
         neuron_pos = np.load(pos_path)
         aligned_spikes = None
 
-    neuron_pos = lpn.correctNeuronPos(neuron_pos, analysis.resolution)
+    # neuron_pos = lpn.correctNeuronPos(neuron_pos, analysis.resolution)
     validate_spike_data(spikes, neuron_pos)
     return SpikeData(spikes=spikes, aligned_spikes=aligned_spikes, neuron_pos=neuron_pos)
 
