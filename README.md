@@ -184,6 +184,7 @@ An already made Gabor Library well suited for mice can be found here <>
 ```python
 	
 	spike_data = load_spikes_and_positions(config.analysis)
+```
 
 	
 6. **Running the Quick receptive field Analysis:**
@@ -198,6 +199,7 @@ An already made Gabor Library well suited for mice can be found here <>
 		neuron_id=2441,
 	)
 	print("RF correlation analysis complete")
+```
 
 7. **Running the Full Model :**
 
