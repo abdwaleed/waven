@@ -43,15 +43,14 @@ conda activate waven
 pip install -e .
 ```
 
-**Example sctript:**<br />
+**Example script**<br />
+
+check out
 /example/run_waven_parts
 
 **GUI Documentation:**<br />
 https://docs.google.com/presentation/d/1nEv07CzCwYUoozucwwqi6qgS_t0jBy7KwqHKKoh2f2U/edit?usp=sharing<br />
 
-
-**Example script**<br />
-check out example.py
 
 **GUI**<br />
 <p align="center">
@@ -163,7 +162,7 @@ documentation can be found here <https://docs.google.com/presentation/d/1nEv07Cz
     print(f"Created Gabor library: {library_path}")
 ```
 
-An already made Gabor Library well suited for mice can be found here <>
+An already made Gabor Library well suited for mice can be found on FigShare <https://doi.org/10.5522/04/31295536>
 
 4. ** Running the wavelet decomposition :**
 
@@ -178,6 +177,7 @@ An already made Gabor Library well suited for mice can be found here <>
     )
 	print(f"Prepared wavelets in: {output_dir}")
 ```
+For more effiscient analysis, we advise to save the resulting library as a zarr folder (check the wavelet_zarr.py script for more details) and to set the parameter "Full Model Wavelet Path" to the path of the zarr folder, this way the wavelet decomposition will be skipped when running the full model.
 
 5. **Loading you neural activity and neuron positions :**
 
