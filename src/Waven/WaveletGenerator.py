@@ -12,7 +12,6 @@ if os.environ.get("waven_NO_PLOTS") == "1":
     matplotlib.use("Agg", force=True)
 else:
     matplotlib.use("TkAgg", force=True)
-
 import itertools
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,6 +28,7 @@ import shutil
 import math
 from skimage.filters import gabor_kernel
 from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
 
 def is_high_ram_system(threshold_gb=24):
     """
@@ -391,29 +391,60 @@ def downsample_video_uint(path, shape=(54, 135)):
 
 
 @torch.no_grad()
-def getWTfromNPY(videodata, wavelet_slice, batch_size=100):
+def getWTfromNPY(videodata, wavelet_slice, batch_size=100, filter_chunk_size=1000):
     """
-    Optimized: Uses pinned memory and non-blocking CUDA transfers 
-    to overlap data movement with GPU compute.
+    Optimized: Dual-chunking. Uses pinned memory and non-blocking CUDA transfers,
+    and chunks BOTH the video frames and the wavelet library to prevent VRAM OOM.
     """
+    
     WT = []
-    # Load the specific slice directly to GPU
-    l = torch.tensor(wavelet_slice, dtype=torch.float16, device='cuda')
     
     # Pre-transpose and reshape the video data in one go on CPU
     video_flattened = videodata.reshape(videodata.shape[0], -1).T
     
+    # Flatten wavelet spatial dimensions to 2D: (total_filters, num_pixels)
+    # This makes it easy to chunk without breaking PyTorch's N-D broadcasting
+    orig_filter_shape = wavelet_slice.shape[:-1]
+    num_pixels = wavelet_slice.shape[-1]
+    
+    wavelet_flat = wavelet_slice.reshape(-1, num_pixels)
+    total_filters = wavelet_flat.shape[0]
+    
     for i in tqdm(range(0, video_flattened.shape[1], batch_size), desc="Processing Frame Batches"):
-        batch = video_flattened[:, i : i + batch_size]
+        # Make contiguous to prevent PyTorch pin_memory warnings on slices
+        batch = np.ascontiguousarray(video_flattened[:, i : i + batch_size])
         
         # Pin memory for async transfer
         batch_cpu = torch.from_numpy(batch).pin_memory()
-        
-        # non_blocking=True tells PyTorch to transfer over PCIe without halting the CPU
         batch_tensor = batch_cpu.to(device='cuda', dtype=torch.float16, non_blocking=True)
         
-        output = l @ batch_tensor 
-        WT.append(output.cpu().numpy().swapaxes(-1, -2)) 
+        batch_output = []
+        
+        # --- NEW: Chunk the filter library to cap VRAM usage ---
+        for j in range(0, total_filters, filter_chunk_size):
+            # Load only a safe chunk of the filters to the GPU
+            l_chunk = torch.tensor(wavelet_flat[j : j + filter_chunk_size], dtype=torch.float16, device='cuda')
+            
+            # Matrix multiplication for this specific chunk
+            out_chunk = l_chunk @ batch_tensor 
+            
+            # Pull back to CPU immediately
+            batch_output.append(out_chunk.cpu().numpy())
+            
+            # Explicitly delete to free up the VRAM block for the next loop
+            del l_chunk, out_chunk
+        
+        # Reconstruct the full filter output for this frame batch (total_filters, current_batch_size)
+        full_batch_output = np.concatenate(batch_output, axis=0)
+        
+        # Reshape back to the original N-dimensional structure
+        full_batch_output = full_batch_output.reshape(*orig_filter_shape, -1)
+        
+        # Apply your original axis swapping
+        WT.append(full_batch_output.swapaxes(-1, -2))
+        
+        del batch_tensor, batch_cpu
+        torch.cuda.empty_cache()
         
     return np.concatenate(WT, axis=-1)
 
