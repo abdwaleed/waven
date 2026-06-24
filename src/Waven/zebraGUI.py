@@ -4,8 +4,10 @@ Created on Wed Mar 25 19:31:32 2025
 @author: Sophie Skriabine
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, filedialog, messagebox
+import json
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from .config import parse_literal
 from .WaveletGenerator import *
 from .LoadPinkNoise import *
@@ -33,33 +35,33 @@ def run(param_defaults, gabor_param):
 
     Parameters Gabor Library:
         N_thetas (int): number of orientatuion equally spaced between 0 and 180 degree.
-    	Sigmas (list): standart deviation of theb gabor filters expressed in pixels (radius of the gaussian half peak wigth).
-    	Frequencies (list): spatial frequencies expressed in pixels per cycles.
-    	Phases (list): 0 and pi/2.
-    	NX (int): number of azimuth positions (pix) (x shape of the downsampled stimuli).
-    	NY (int): number of elevation positions (pix) (y shape of the downsampled stimuli).
-    	Save Path (string): where to save the gabor library
+        Sigmas (list): standart deviation of theb gabor filters expressed in pixels (radius of the gaussian half peak wigth).
+        Frequencies (list): spatial frequencies expressed in pixels per cycles.
+        Phases (list): 0 and pi/2.
+        NX (int): number of azimuth positions (pix) (x shape of the downsampled stimuli).
+        NY (int): number of elevation positions (pix) (y shape of the downsampled stimuli).
+        Save Path (string): where to save the gabor library
 
     Parameters alignement:
-		Dirs (string): where the raw data are.
-		Experiment Info: (mouse name, data, experiment number)
-		Number of Planes (int): number of acquisition planes.
-		Block End (int): timeframe where the experiment starts.
-		Number of Frames (int): number of stimulus frames.
-		Number of Trials to Keep(int): Number of Trials to Keep.
+        Dirs (string): where the raw data are.
+        Experiment Info: (mouse name, data, experiment number)
+        Number of Planes (int): number of acquisition planes.
+        Block End (int): timeframe where the experiment starts.
+        Number of Frames (int): number of stimulus frames.
+        Number of Trials to Keep(int): Number of Trials to Keep.
 
     Parameters analysis:
-		screen_x: stimulus screen x size inn pixels.
-		screen_y: stimulus screen y size inn pixels.
-		NX (int): number of azimuth positions (pix) (x shape of the downsampled stimuli).
-    	NY (int): number of elevation positions (pix) (y shape of the downsampled stimuli).
-		Resolution (float): microscope resolution (um per pixels)
-		Sigmas (list): standart deviation of theb gabor filters expressed in pixels (radius of the gaussian half peak wigth).
-		Visual Coverage (list): [azimuth left, azimuth right, elevation top , elevation bottom] in visual degree.
-		Analysis Coverage": [azimuth left, azimuth right, elevation top , elevation bottom] in visual degree.
-		Movie Path: path to the stimulus (.mp4)
-		Library Path: path to Gabor library (same as save path if ran)
-		Spks Path (opt): path to the spks.npy file to skip the alignement procedure, if set ignores Parameter alignment
+        screen_x: stimulus screen x size inn pixels.
+        screen_y: stimulus screen y size inn pixels.
+        NX (int): number of azimuth positions (pix) (x shape of the downsampled stimuli).
+        NY (int): number of elevation positions (pix) (y shape of the downsampled stimuli).
+        Resolution (float): microscope resolution (um per pixels)
+        Sigmas (list): standart deviation of theb gabor filters expressed in pixels (radius of the gaussian half peak wigth).
+        Visual Coverage (list): [azimuth left, azimuth right, elevation top , elevation bottom] in visual degree.
+        Analysis Coverage": [azimuth left, azimuth right, elevation top , elevation bottom] in visual degree.
+        Movie Path: path to the stimulus (.mp4)
+        Library Path: path to Gabor library (same as save path if ran)
+        Spks Path (opt): path to the spks.npy file to skip the alignement procedure, if set ignores Parameter alignment
 
     Returns:
         neuron tuning graphs
@@ -317,7 +319,7 @@ def run(param_defaults, gabor_param):
         # canvas.get_tk_widget().grid(row=1, column=1)
 
         # Charger les fichiers de wavelet et afficher les résultats de corrélation
-        parent_dir = path_directory
+        parent_dir = os.path.dirname(movpath)
         print(parent_dir)
         try:
             wavelets_downsampled = np.load(os.path.join(parent_dir, 'dwt_downsampled_videodata.npy'))
@@ -455,7 +457,7 @@ def run(param_defaults, gabor_param):
     # Création de la fenêtre principale de l'interface
     root = tk.Tk()
     root.title("Neuron Analysis UI")
-    root.geometry("1500x1500")
+    root.geometry("1500x1000") # Resized slightly so it fits better on screens
     root.configure(bg="white")
 
     # Cadre pour les log (bas)
@@ -467,9 +469,34 @@ def run(param_defaults, gabor_param):
     sys.stdout = RedirectText(text_log)
     sys.stderr = RedirectText(text_log)
 
-    # Création d'un conteneur pour empiler frame_gabor et frame_params
-    frame_left = ttk.Frame(root)
-    frame_left.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+    # -------------------------------------------------------------
+    # FIXED: Added a scrollable canvas wrapper for the left panel
+    # -------------------------------------------------------------
+    container_left = ttk.Frame(root)
+    container_left.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+
+    canvas_left = tk.Canvas(container_left, bg="white", highlightthickness=0, width=420)
+    scrollbar_left = ttk.Scrollbar(container_left, orient="vertical", command=canvas_left.yview)
+    canvas_left.configure(yscrollcommand=scrollbar_left.set)
+
+    scrollbar_left.pack(side=tk.RIGHT, fill=tk.Y)
+    canvas_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    frame_left = ttk.Frame(canvas_left)
+    canvas_left.create_window((0, 0), window=frame_left, anchor="nw")
+
+    def on_frame_configure(event):
+        canvas_left.configure(scrollregion=canvas_left.bbox("all"))
+    frame_left.bind("<Configure>", on_frame_configure)
+
+    # Add Mouse Wheel Scrolling
+    def _on_mousewheel(event):
+        canvas_left.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    
+    # Only scroll when hovering over the left container to avoid scrolling the plots
+    container_left.bind("<Enter>", lambda _: canvas_left.bind_all("<MouseWheel>", _on_mousewheel))
+    container_left.bind("<Leave>", lambda _: canvas_left.unbind_all("<MouseWheel>"))
+    # -------------------------------------------------------------
 
     # Cadre pour les gabors (en haut)
     frame_gabor = ttk.LabelFrame(frame_left, text="Gabor Library", padding=10)
@@ -486,23 +513,10 @@ def run(param_defaults, gabor_param):
 
     # Appliquer un style blanc
     style = ttk.Style()
-    # style.configure("TFrame", background="white")
-    # style.configure("TLabel", background="white")
-    # style.configure("TLabelFrame", background="white")
     available_themes = style.theme_names()
-    # if "yaru" in available_themes:
-    #     print('style exist')
-    #     style.theme_use("default")
-    # else:
     style.theme_use("clam")  # Thème de secours
 
     print(style.theme_names())
-    # Personnalisation manuelle des widgets
-    # style.configure("TButton", font=("Arial", 12), padding=6)
-    # style.configure("TLabel", font=("Arial", 12), background="white")
-    # style.configure("TFrame", background="white")
-    # style.configure("TEntry", font=("Arial", 12), padding=5)
-    # style.configure("TLabelFrame", font=("Arial", 12, "bold"), background="white")
 
     root.configure(bg="white")
     frame_params.configure(style="TFrame")

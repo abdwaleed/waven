@@ -17,7 +17,7 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'Waven'
+project = 'waven'
 copyright = '2025, Sophie Skriabine'
 author = 'Sophie Skriabine'
 
@@ -65,5 +65,5 @@ html_theme_options = {
     "dark_logo": "image1630.png",
 }
 html_theme = "furo"
-html_title = "Waven"
+html_title = "waven"
 html_favicon = "image1630.png"

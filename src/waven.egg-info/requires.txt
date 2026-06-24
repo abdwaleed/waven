@@ -1,5 +1,6 @@
 matplotlib
 numpy
+numba
 opencv_python
 pandas
 scikit_image
@@ -8,3 +9,6 @@ scipy
 seaborn
 tifffile
 torch
+tensorly
+zarr
+numexpr

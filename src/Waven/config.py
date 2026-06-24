@@ -1,4 +1,4 @@
-"""Configuration helpers for Waven analysis pipelines.
+"""Configuration helpers for waven analysis pipelines.
 
 The GUI historically stores values as strings so they can be edited in
 text fields.  This module keeps that interface available while providing
@@ -394,7 +394,7 @@ class AnalysisConfig:
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    """Top-level configuration for a Waven analysis run."""
+    """Top-level configuration for a waven analysis run."""
 
     gabor: GaborConfig
     analysis: AnalysisConfig
@@ -418,13 +418,28 @@ class PipelineConfig:
 
     @classmethod
     def from_json(cls, path: Path) -> "PipelineConfig":
+        import os
         path = Path(path)
+        
+        # 1. Read the raw text instead of parsing right away
         with path.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        return cls.from_mappings(
-            payload.get("gabor", {}),
-            payload.get("analysis", {}),
-        )
+            raw_text = handle.read()
+            
+        # 2. Figure out the actual root directory automatically
+        # (Forcing forward slashes so Windows paths don't break JSON)
+        actual_root = os.getcwd().replace("\\", "/") 
+        
+        # 3. Swap your custom placeholder for the real path
+        resolved_text = raw_text.replace("{PROJECT_ROOT}", actual_root)
+        
+        # 4. Parse the dynamically updated text
+        payload = json.loads(resolved_text)
+        
+        # 5. Extract using either her expected keys OR your custom keys
+        gabor_params = payload.get("gabor") or payload.get("gabor_param", {})
+        analysis_params = payload.get("analysis") or payload.get("param_defaults", {})
+        
+        return cls.from_mappings(gabor_params, analysis_params)
 
 
 def default_pipeline_config() -> PipelineConfig:

@@ -2,7 +2,7 @@ import numpy as np
 import zarr
 from pathlib import Path
 
-from Waven.zarr_compat import load_array
+from waven.zarr_compat import load_array
 
 
 def test_load_prefers_zarr(tmp_path: Path):

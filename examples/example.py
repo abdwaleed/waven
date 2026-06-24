@@ -1,4 +1,4 @@
-"""Example entry point for the Waven analysis pipeline.
+"""Example entry point for the waven analysis pipeline.
 
 Run the GUI:
     python example.py
@@ -24,13 +24,13 @@ SRC_DIR = PROJECT_ROOT / "src"
 if SRC_DIR.exists() and str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from Waven.config import PipelineConfig, default_pipeline_config
-from Waven.pipeline import run_pipeline
+from waven.config import PipelineConfig, default_pipeline_config
+from waven.pipeline import run_pipeline
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse command-line options for GUI or batch execution."""
-    parser = argparse.ArgumentParser(description="Run Waven analysis.")
+    parser = argparse.ArgumentParser(description="Run waven analysis.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -89,7 +89,7 @@ def load_config(config_path: Optional[Path]) -> PipelineConfig:
 
 def run_gui(config: PipelineConfig) -> None:
     """Open the Tkinter GUI with the same typed defaults."""
-    from Waven import zebraGUI as ui
+    from waven import zebraGUI as ui
 
     ui.run(
         config.analysis.to_gui_mapping(),
@@ -116,7 +116,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         return
 
     if args.no_plots:
-        os.environ["WAVEN_NO_PLOTS"] = "1"
+        os.environ["waven_NO_PLOTS"] = "1"
         os.environ.setdefault("MPLBACKEND", "Agg")
 
     run_pipeline(

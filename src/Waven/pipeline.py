@@ -1,4 +1,4 @@
-"""High-level orchestration for Waven analysis.
+"""High-level orchestration for waven analysis.
 
 The functions here deliberately delegate numerical work to the existing
 modules.  Their job is to make execution explicit, reusable, and easier
@@ -430,7 +430,7 @@ def run_pipeline(
     plotting: bool = True,
     neuron_id: Optional[int] = 2441,
 ) -> PipelineOutputs:
-    """Run the configurable Waven analysis pipeline."""
+    """Run the configurable waven analysis pipeline."""
     outputs = PipelineOutputs()
     library_path = config.analysis.library_path
 

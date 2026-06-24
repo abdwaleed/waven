@@ -8,7 +8,7 @@ import os
 # ======================
 # CONFIG
 # ======================
-path = "/media/sophie/Expansion1/UCL/datatest/videos/2screens/30/"
+path = r'C:\Users\Abdelrahman\Documents\VISUAL STUDIO CODE PROJECTS\surf\gabor_analysis\waven\your_experiment\output\zarr'
 
 npy_i = os.path.join(path, "dwt_videodata2_i.npy")
 npy_r = os.path.join(path, "dwt_videodata2_r.npy")

@@ -25,11 +25,11 @@ from waven.plotting import (  # noqa: E402
     plot_sign_map,
     save_figures,
 )
-from waven.analysis_utils import PlotTuningCurve
+from waven.Analysis_Utils import PlotTuningCurve
 
 # def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 #     parser = argparse.ArgumentParser(
-#         description="Import Waven and run selected pipeline pieces."
+#         description="Import waven and run selected pipeline pieces."
 #     )
 #     parser.add_argument(
 #         "--config",
@@ -95,7 +95,7 @@ from waven.analysis_utils import PlotTuningCurve
 #     """Use a non-interactive backend only for file-only plotting."""
 #     os.environ.setdefault("MPLCONFIGDIR", "/tmp/waven-matplotlib")
 #     if no_show:
-#         os.environ["WAVEN_NO_PLOTS"] = "1"
+#         os.environ["waven_NO_PLOTS"] = "1"
 #         os.environ.setdefault("MPLBACKEND", "Agg")
 #
 #
@@ -116,7 +116,39 @@ from waven.analysis_utils import PlotTuningCurve
 #     args.rf = True
 #     args.plot_rf = True
 
-config = waven.PipelineConfig.from_json(Path('/home/sophie/Projects/ZebrAnalysis/zebranalysis/pipeline_config.json'))
+def find_config_file():
+    # 1. Dynamically locate the repository root directory
+    START_DIR = Path(__file__).resolve().parent
+    PROJECT_ROOT = START_DIR
+    for _ in range(5):
+        if (PROJECT_ROOT / "pipeline_config.json").exists():
+            break
+        PROJECT_ROOT = PROJECT_ROOT.parent
+    else:
+        PROJECT_ROOT = Path.cwd()
+
+    TEMPLATE_PATH = PROJECT_ROOT / "pipeline_config.json"
+    
+    # 2. Read the raw JSON file as a string
+    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        config_text = f.read()
+    
+    # 3. Swap the placeholder for your actual absolute path
+    # .as_posix() converts Windows backslashes (\) to forward slashes (/) 
+    # so they don't break the JSON format escape characters!
+    resolved_text = config_text.replace("{PROJECT_ROOT}", PROJECT_ROOT.as_posix())
+    
+    # 4. Save a hidden resolved copy locally
+    RESOLVED_PATH = PROJECT_ROOT / ".pipeline_config_resolved.json"
+    with open(RESOLVED_PATH, "w", encoding="utf-8") as f:
+        f.write(resolved_text)
+        
+    print(f"Successfully resolved paths relative to: {PROJECT_ROOT}")
+    
+    # 5. Feed the resolved file straight into the waven configuration loader
+    return waven.PipelineConfig.from_json(RESOLVED_PATH)
+
+config = find_config_file() # Replaced the hardcoded path by calling config_file searching function
 library_path = config.analysis.library_path
 create_library=False
 prepare_wavelets=False

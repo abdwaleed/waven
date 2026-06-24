@@ -37,7 +37,7 @@
       "env": {
         "MPLBACKEND": "Agg",
         "MPLCONFIGDIR": "/tmp/waven-matplotlib",
-        "WAVEN_NO_PLOTS": "1"
+        "waven_NO_PLOTS": "1"
       }
     },
     {
@@ -56,7 +56,7 @@
       "env": {
         "MPLBACKEND": "Agg",
         "MPLCONFIGDIR": "/tmp/waven-matplotlib",
-        "WAVEN_NO_PLOTS": "1"
+        "waven_NO_PLOTS": "1"
       }
     }
   ]

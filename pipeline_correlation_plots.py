@@ -29,7 +29,7 @@ from waven.plotting import (
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run Waven RF correlation analysis and plot maps."
+        description="Run waven RF correlation analysis and plot maps."
     )
     parser.add_argument(
         "--config",
@@ -65,7 +65,7 @@ def configure_backend(no_show: bool) -> None:
     """Use a non-interactive backend only for file-only plotting."""
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/waven-matplotlib")
     if no_show:
-        os.environ["WAVEN_NO_PLOTS"] = "1"
+        os.environ["waven_NO_PLOTS"] = "1"
         os.environ.setdefault("MPLBACKEND", "Agg")
 
 
@@ -74,7 +74,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     configure_backend(args.no_show)
 
     import matplotlib.pyplot as plt
-    from Waven import Analysis_Utils as au
+    from waven import Analysis_Utils as au
 
     config = PipelineConfig.from_json(args.config)
     spike_data = load_spikes_and_positions(config.analysis)

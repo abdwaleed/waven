@@ -1,6 +1,7 @@
 name: waven
 channels:
   - pytorch
+  - nvidia
   - conda-forge
   - defaults
 dependencies:
@@ -8,10 +9,12 @@ dependencies:
   - pip
   - setuptools>=61
   - wheel
+  - numexpr=2.8.4
 
   # Core numerical/scientific stack. NumPy is pinned below 2.0 because
   # suite2p/facemap/numba-style neuroscience tools often do not support NumPy 2.
   - numpy=1.26
+  - numba
   - scipy
   - pandas
   - scikit-image
@@ -31,6 +34,7 @@ dependencies:
 
   # Machine learning/model fitting.
   - pytorch=2.0.1
+  - pytorch-cuda=11.8
   - tensorly
 
   # GUI and notebook/dev convenience.

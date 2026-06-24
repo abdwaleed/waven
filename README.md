@@ -2,7 +2,7 @@
     <img src="https://github.com/skriabineSop/waven/blob/main/img/image1630.png" width="250" align="right"/>
 </div>
 
-**Waven**
+**waven**
 
 
 
@@ -16,7 +16,7 @@ can be found here <https://waven.readthedocs.io/en/latest/><br />
 check out <https://github.com/mwshinn/zebra_noise><br />
 
 
-**Waven Analysis package**<br />
+**waven Analysis package**<br />
 packages required:
 
 - python 3.8
@@ -35,7 +35,7 @@ packages required:
 
 **installation procedure:**<br />
 From the repository root, create and activate the conda environment,
-then install Waven in editable mode:
+then install waven in editable mode:
 
 ```bash
 conda env create --solver libmamba -f environment.yml

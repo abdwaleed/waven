@@ -16,6 +16,7 @@ requires-python = ">=3.8"
 dependencies = [
     "matplotlib",
     "numpy",
+    "numba",
     "opencv_python",
     "pandas",
     "scikit_image",
@@ -25,7 +26,8 @@ dependencies = [
     "tifffile",
     "torch",
     "tensorly",
-    "zarr"
+    "zarr",
+    "numexpr"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -35,4 +37,4 @@ classifiers = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["Waven*", "waven*"]
+include = ["waven*"]
