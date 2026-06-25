@@ -5,7 +5,7 @@ Created on Wed Mar 25 19:31:32 2025
 @co-author: Abdelrahman Abdelrahman
 """
 import os
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import matplotlib
 if os.environ.get("waven_NO_PLOTS") == "1":
@@ -13,6 +13,7 @@ if os.environ.get("waven_NO_PLOTS") == "1":
 else:
     matplotlib.use("TkAgg", force=True)
 import itertools
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import ndimage
@@ -29,25 +30,36 @@ import math
 from skimage.filters import gabor_kernel
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
+import psutil
 
-def is_high_ram_system(threshold_gb=24):
+def has_enough_ram(required_bytes, safety_margin=1.20):
     """
-    Safely checks total system RAM. 
-    Returns True if RAM >= threshold_gb, otherwise False.
+    Smart RAM checker. Evaluates CURRENTLY AVAILABLE system memory, 
+    not just total installed RAM. Returns True if you can safely run in-memory.
+    
+    Parameters:
+        required_bytes (int): The exact memory footprint of the upcoming array.
+        safety_margin (float): Multiplier to leave room for OS/PyTorch overhead.
     """
     try:
         import psutil
-        total_ram = psutil.virtual_memory().total / (1024**3)
+        # Get currently free, usable RAM
+        available_bytes = psutil.virtual_memory().available
     except ImportError:
-        # Fallback for Linux/Mac if psutil is not installed
-        try:
-            total_ram = (os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')) / (1024**3)
-        except ValueError:
-            # If all fails, assume low RAM for safety
-            total_ram = 16.0 
-            
-    print(f"System Check: Detected {total_ram:.1f} GB Total RAM.")
-    return total_ram >= threshold_gb
+        # Fallback if psutil is missing: Always play it safe and stream to disk
+        print("Warning: psutil not found. Defaulting to safe Disk-Streaming mode.")
+        return False
+        
+    required_gb = required_bytes / (1024**3)
+    available_gb = available_bytes / (1024**3)
+    
+    is_safe = available_bytes > (required_bytes * safety_margin)
+    
+    print(f"Memory Check: Operation needs {required_gb:.2f} GB. "
+          f"System has {available_gb:.2f} GB available. "
+          f"Route: {'IN-MEMORY' if is_safe else 'DISK-STREAMING'}")
+          
+    return is_safe
 
 
 def makeGaborFilter(i, j, angle, sigma, phase, f=0.4, lx=54, ly=135, plot=False, freq=True):
@@ -352,15 +364,22 @@ def downsample_video_uint(path, shape=(54, 135)):
     """
     Auto-scaling UInt Downsampler.
     """
-    high_ram = is_high_ram_system()
-    chunk_size = 1000 if high_ram else 300
-    max_workers = 4 if high_ram else 2
-
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
         raise IOError(f"Cannot open video file: {path}")
         
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    # Estimate bytes: total_frames * width * height * 1 byte (uint8) 
+    # Multiply by 2 as a buffer for the background threads
+    estimated_bytes = total_frames * shape[0] * shape[1] * 2 
+    
+    # Use our new smart checker!
+    high_ram = has_enough_ram(estimated_bytes)
+    
+    chunk_size = 1000 if high_ram else 300
+    max_workers = 4 if high_ram else 2
+
     futures = []
     frames_buffer = []
     
@@ -391,112 +410,49 @@ def downsample_video_uint(path, shape=(54, 135)):
 
 
 @torch.no_grad()
-def getWTfromNPY(videodata, wavelet_slice, batch_size=100, filter_chunk_size=1000):
+def getWTfromNPY(videodata, waveletLibrary, phase, WT_flat, s_idx, filter_chunk_size=1000):
     """
-    Optimized: Dual-chunking. Uses pinned memory and non-blocking CUDA transfers,
-    and chunks BOTH the video frames and the wavelet library to prevent VRAM OOM.
+    Highly scalable getWTfromNPY.
+    Streams output directly into a provided buffer (RAM or Disk) chunk-by-chunk.
     """
-    import torch
-    import numpy as np
-    from tqdm import tqdm
+    if not isinstance(videodata, torch.Tensor):
+        V_gpu = torch.tensor(videodata, dtype=torch.float32, device='cuda')
+    else:
+        V_gpu = videodata.to(device='cuda', dtype=torch.float32)
+
+    T = V_gpu.shape[0]
+    V_flat = V_gpu.view(T, -1).t() 
+    spatial_pixels = V_flat.shape[0] 
+
+    # --- DYNAMIC DIMENSION FIX ---
+    # Check if waveletLibrary has 6 dims (includes Frequencies) or 5 dims (Legacy)
+    if waveletLibrary.ndim == 6:
+        # Shape: (lx, ly, thetas, frequencies, phases, spatial)
+        # Defaults to the first frequency index (0) to prevent dimension explosion.
+        # If you want to analyze other frequencies, you can pass an f_idx parameter later.
+        lib_phase = waveletLibrary[:, :, :, 0, phase, :]
+    else:
+        # Shape: (lx, ly, thetas, phases, spatial)
+        lib_phase = waveletLibrary[:, :, :, phase, :] 
     
-    WT = []
+    # Flatten library structural dims for math
+    lib_np_flat = lib_phase.reshape(-1, spatial_pixels)
     
-    # Pre-transpose and reshape the video data in one go on CPU
-    video_flattened = videodata.reshape(videodata.shape[0], -1).T
-    
-    # Flatten wavelet spatial dimensions to 2D: (total_filters, num_pixels)
-    # This makes it easy to chunk without breaking PyTorch's N-D broadcasting
-    orig_filter_shape = wavelet_slice.shape[:-1]
-    num_pixels = wavelet_slice.shape[-1]
-    
-    wavelet_flat = wavelet_slice.reshape(-1, num_pixels)
-    total_filters = wavelet_flat.shape[0]
-    
-    for i in tqdm(range(0, video_flattened.shape[1], batch_size), desc="Processing Frame Batches"):
-        # Make contiguous to prevent PyTorch pin_memory warnings on slices
-        batch = np.ascontiguousarray(video_flattened[:, i : i + batch_size])
+    # This will now correctly lock to 58,320 instead of 116,640
+    num_filters = lib_np_flat.shape[0] 
+
+    # Process in chunks and write STRAIGHT to the destination buffer
+    for i in range(0, num_filters, filter_chunk_size):
+        end_idx = min(i + filter_chunk_size, num_filters)
         
-        # Pin memory for async transfer
-        batch_cpu = torch.from_numpy(batch).pin_memory()
-        batch_tensor = batch_cpu.to(device='cuda', dtype=torch.float16, non_blocking=True)
+        lib_chunk = torch.tensor(lib_np_flat[i:end_idx, :], dtype=torch.float32, device='cuda')
+        res_gpu = torch.matmul(lib_chunk, V_flat)
         
-        batch_output = []
+        # Write directly to the flattened view using the sigma index (s_idx)!
+        WT_flat[i:end_idx, :, s_idx] = res_gpu.cpu().numpy()
         
-        # --- NEW: Chunk the filter library to cap VRAM usage ---
-        for j in range(0, total_filters, filter_chunk_size):
-            # Load only a safe chunk of the filters to the GPU
-            l_chunk = torch.tensor(wavelet_flat[j : j + filter_chunk_size], dtype=torch.float16, device='cuda')
-            
-            # Matrix multiplication for this specific chunk
-            out_chunk = l_chunk @ batch_tensor 
-            
-            # Pull back to CPU immediately
-            batch_output.append(out_chunk.cpu().numpy())
-            
-            # Explicitly delete to free up the VRAM block for the next loop
-            del l_chunk, out_chunk
-        
-        # Reconstruct the full filter output for this frame batch (total_filters, current_batch_size)
-        full_batch_output = np.concatenate(batch_output, axis=0)
-        
-        # Reshape back to the original N-dimensional structure
-        full_batch_output = full_batch_output.reshape(*orig_filter_shape, -1)
-        
-        # Apply your original axis swapping
-        WT.append(full_batch_output.swapaxes(-1, -2))
-        
-        del batch_tensor, batch_cpu
+        del lib_chunk, res_gpu
         torch.cuda.empty_cache()
-        
-    return np.concatenate(WT, axis=-1)
-
-
-@torch.no_grad()
-def getWTfromNPY(videodata, waveletLibrary, phase, batch_size=256):
-    """
-    Batched GPU execution for maximum CUDA utilization. 
-    Strictly backwards compatible.
-    """
-    import torch
-    import gc
-    import numpy as np
-
-    # 1. Load only the specific phase slice to the GPU ONCE
-    # Original shape expected by legacy transform: L[:, :, :, phase]
-    L_gpu = torch.tensor(waveletLibrary[:, :, :, phase], dtype=torch.float32, device='cuda')
-    
-    num_frames = videodata.shape[0]
-    WT_list = []
-    
-    # 2. Batch process the frames to saturate the GPU
-    for i in range(0, num_frames, batch_size):
-        # Extract batch and flatten each frame
-        batch = videodata[i : min(i + batch_size, num_frames)]
-        
-        # Reshape to (pixels, batch_size) for matrix multiplication
-        batch_flat = batch.reshape(batch.shape[0], -1).T 
-        batch_gpu = torch.tensor(batch_flat, dtype=torch.float32, device='cuda')
-        
-        # 3. Massive parallel matrix multiplication: (L_dims, pixels) @ (pixels, batch_size)
-        output_gpu = L_gpu @ batch_gpu
-        
-        # Move back to CPU immediately to free VRAM
-        WT_list.append(output_gpu.cpu().numpy())
-        
-        del batch_gpu, output_gpu
-    
-    # Free the heavy library tensor
-    del L_gpu
-    torch.cuda.empty_cache()
-    gc.collect()
-    
-    # 4. Concatenate and restore original axis order
-    WT = np.concatenate(WT_list, axis=-1)
-    
-    # Original loop appended frames to axis 0. 
-    # np.concatenate on axis=-1 put frames at the end, so we move them to the front.
-    return np.moveaxis(WT, -1, 0)
 
 
 def waveletTransform(frame,phase, L):
@@ -513,42 +469,52 @@ def waveletTransform3D(frame, L):
 
 def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path='/media/sophie/Expansion1/UCL/datatest/gabors_library.npy'):
     """
-    Runs the wavelet decomposition.
-    Optimized: Uses memory-mapping to load the library safely without OOM errors,
-    and correctly passes the 3 required arguments to the batched GPU function.
+    Scalable wavelet decomposition engine. 
+    Dynamically routes to System RAM if available, or Disk-Streaming if RAM is low.
     """
-    import numpy as np
-    import os
-    import gc
-    
     print(f"Loading Gabor library from {library_path} (mmap_mode='r')...")
-    # mmap_mode='r' keeps the massive array on disk, only loading the chunks we need into RAM
     L = np.load(library_path, mmap_mode='r') 
     
-    WT_list = []
+    prefix_shape = L.shape[:3] # (lx, ly, thetas)
+    num_filters = int(np.prod(prefix_shape))
+    T = videodata.shape[0]
     
+    final_shape = prefix_shape + (T, len(sigmas))
+    
+    # FIX 1: Use Python's math.prod to prevent 32-bit integer overflow on Windows!
+    required_bytes = math.prod(final_shape) * 4 
+    
+    save_path = os.path.join(folder_path, f'dwt_videodata_{phase}.npy')
+    
+    # --- DYNAMIC HARDWARE ROUTING ---
+    if has_enough_ram(required_bytes, safety_margin=1.15):
+        WT_final = np.zeros(final_shape, dtype=np.float32)
+        use_mmap = False
+    else:
+        WT_final = np.lib.format.open_memmap(save_path, mode='w+', dtype=np.float32, shape=final_shape)
+        use_mmap = True
+
+    # FIX 2: Create a continuous view of the entire array ONCE.
+    # This prevents numpy from accidentally creating massive memory copies inside the loop.
+    WT_flat = WT_final.reshape(num_filters, T, len(sigmas))
+
     for s, ss in enumerate(sigmas):
         print(f"Processing sigma {s + 1}/{len(sigmas)}...")
         
-        # Extract the 5D slice exactly as the original code expected
-        l = L[:, :, :, s] 
+        # Pass the flattened view and the specific sigma index
+        getWTfromNPY(videodata, L[:, :, :, s], phase, WT_flat=WT_flat, s_idx=s)
         
-        # Call the optimized getWTfromNPY with the correct 3 arguments
-        wt = getWTfromNPY(videodata, l, phase)
-        WT_list.append(wt)
-        
-        # Free up memory explicitly between sigma iterations
         gc.collect() 
+        torch.cuda.empty_cache() 
         
-    WT = np.array(WT_list)
-    
-    # Original logic: move the sigma axis from 0 to 4 (the end)
-    WT = np.moveaxis(WT, 0, 4)
-    
-    # Save the output
-    save_path = os.path.join(folder_path, f'dwt_videodata_{phase}.npy')
-    np.save(save_path, WT)
-    print(f"Success! Saved wavelet decomposition to {save_path}")
+    if use_mmap:
+        WT_final.flush()
+        del WT_final, WT_flat
+        print(f"Success! Saved streamed disk array to {save_path}")
+    else:
+        print("Saving array to disk...")
+        np.save(save_path, WT_final)
+        print(f"Success! Saved RAM array to {save_path}")
 
 
 def getTrueRF(idx, rfs, L):

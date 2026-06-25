@@ -29,7 +29,7 @@
     "Movie Path": "{PROJECT_ROOT}/your_experiment/input/zebra_movie/zebra_movie.mp4",
     "Library Path": "{PROJECT_ROOT}/your_experiment/gabor-lib/gabors_library.npy",
     "Spks Path": "{PROJECT_ROOT}/your_experiment/input/alignment/spikes.npy",
-    "Full Model Wavelet Path": "{PROJECT_ROOT}/your_experiment/input/zarr",
+    "Full Model Wavelet Path": "{PROJECT_ROOT}/your_experiment/input/output",
     "Full Model Save Path": "{PROJECT_ROOT}/your_experiment/output"
   }
 }

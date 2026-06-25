@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "waven"
-version = "0.0.4"
+version = "0.1.0"
 authors = [
   { name="Sophie Skriabine", email="sophie.skriabine@gmail.com" },
+  { name="Abdelrahman A", email="abdwaleed.a@gmail.com" },
 ]
 description = "wavelet based analysis of neural spikes"
 readme = "README.md"
@@ -36,4 +37,4 @@ classifiers = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["waven*"]
+include = ["Waven*", "waven*"]
