@@ -12,17 +12,18 @@ License-File: LICENSE
 Requires-Dist: matplotlib
 Requires-Dist: numpy
 Requires-Dist: numba
-Requires-Dist: opencv_python
+Requires-Dist: opencv-python
 Requires-Dist: pandas
-Requires-Dist: scikit_image
-Requires-Dist: scikit_learn
+Requires-Dist: scikit-image
+Requires-Dist: scikit-learn
 Requires-Dist: scipy
 Requires-Dist: seaborn
 Requires-Dist: tifffile
-Requires-Dist: torch
+Requires-Dist: torch>=2.0.0
 Requires-Dist: tensorly
 Requires-Dist: zarr
 Requires-Dist: numexpr
+Requires-Dist: tqdm
 Dynamic: license-file
 
 <div>

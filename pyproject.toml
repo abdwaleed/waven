@@ -2,8 +2,6 @@
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
-
-
 [project]
 name = "waven"
 version = "0.0.4"
@@ -17,17 +15,18 @@ dependencies = [
     "matplotlib",
     "numpy",
     "numba",
-    "opencv_python",
+    "opencv-python",
     "pandas",
-    "scikit_image",
-    "scikit_learn",
+    "scikit-image",
+    "scikit-learn",
     "scipy",
     "seaborn",
     "tifffile",
-    "torch",
+    "torch>=2.0.0",
     "tensorly",
     "zarr",
-    "numexpr"
+    "numexpr",
+    "tqdm"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

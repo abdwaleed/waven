@@ -396,6 +396,9 @@ def getWTfromNPY(videodata, wavelet_slice, batch_size=100, filter_chunk_size=100
     Optimized: Dual-chunking. Uses pinned memory and non-blocking CUDA transfers,
     and chunks BOTH the video frames and the wavelet library to prevent VRAM OOM.
     """
+    import torch
+    import numpy as np
+    from tqdm import tqdm
     
     WT = []
     
@@ -447,6 +450,7 @@ def getWTfromNPY(videodata, wavelet_slice, batch_size=100, filter_chunk_size=100
         torch.cuda.empty_cache()
         
     return np.concatenate(WT, axis=-1)
+
 
 @torch.no_grad()
 def getWTfromNPY(videodata, waveletLibrary, phase, batch_size=256):

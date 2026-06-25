@@ -11,8 +11,8 @@ dependencies:
   - wheel
   - numexpr=2.8.4
 
-  # Core numerical/scientific stack. NumPy is pinned below 2.0 because
-  # suite2p/facemap/numba-style neuroscience tools often do not support NumPy 2.
+  # Core numerical/scientific stack. 
+  # NumPy is pinned below 2.0 for suite2p/numba compatibility.
   - numpy=1.26
   - numba
   - scipy
@@ -25,16 +25,16 @@ dependencies:
   - tifffile
   - imageio
   - pywavelets
+  - tqdm
 
   # Computer vision, array storage, and compression.
   - opencv
   - zarr
   - numcodecs
-  - tqdm
 
   # Machine learning/model fitting.
-  - pytorch=2.0.1
-  - pytorch-cuda=11.8
+  - pytorch>=2.0.0
+  - pytorch-cuda=12.1
   - tensorly
 
   # GUI and notebook/dev convenience.
