@@ -23,11 +23,12 @@ dependencies = [
     "scipy",
     "seaborn",
     "tifffile",
-    "torch>=2.0.0",
+    "torch>=2.1.2",
     "tensorly",
     "zarr",
     "numexpr",
-    "tqdm"
+    "tqdm",
+    "psutil"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -37,4 +38,4 @@ classifiers = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["Waven*", "waven*"]
+include = ["waven*"]

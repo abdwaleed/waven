@@ -10,6 +10,7 @@ dependencies:
   - setuptools>=61
   - wheel
   - numexpr=2.8.4
+  - psutil
 
   # Core numerical/scientific stack. 
   # NumPy is pinned below 2.0 for suite2p/numba compatibility.
@@ -33,7 +34,7 @@ dependencies:
   - numcodecs
 
   # Machine learning/model fitting.
-  - pytorch>=2.0.0
+  - pytorch>=2.1.2
   - pytorch-cuda=12.1
   - tensorly
 
