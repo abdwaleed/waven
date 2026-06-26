@@ -8,8 +8,9 @@ scikit-learn
 scipy
 seaborn
 tifffile
-torch>=2.0.0
+torch>=2.1.2
 tensorly
 zarr
 numexpr
 tqdm
+psutil

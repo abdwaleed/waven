@@ -1,9 +1,8 @@
-"""
-Created on Wed Mar 25 19:31:32 2025
+"""Receptive-field estimation, tuning analysis, and nonlinear Gabor models.
 
-@author: Sophie Skriabine
-@co-author: Abdelrahman Abdelrahman
-Optimized for Vectorization, Multiprocessing, and RAM-Safe Scaling
+Core numerics for correlating neural responses with wavelet stimulus features,
+fitting per-neuron nonlinear models, and running the high-resolution full model.
+GPU-accelerated paths fall back to CPU automatically when VRAM is exhausted.
 """
 
 import os
@@ -61,6 +60,8 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from joblib import Parallel, delayed
 
+from .performance import gpu_neuron_chunk_size, model_parallel_jobs
+
 DEFAULT_MOVIE_FRAME_RATE_HZ = 30
 SECONDS_PER_MINUTE = 60
 DEFAULT_FRAMES_PER_MINUTE = (
@@ -109,68 +110,67 @@ def max_by_index(idx, arr):
     return where_format, sub_arr.flat[flat_idx]
 
 
-def _safe_chunked_cross_corr(stim_flat, resp, chunk_size=1000):
+def _safe_chunked_cross_corr(stim_flat, resp, chunk_size=None):
+    """Pearson cross-correlation between stimulus features and neural responses.
+
+    Standardizes columns once, keeps the stimulus on the compute device for all
+    neuron chunks, and falls back from CUDA to CPU when VRAM is insufficient.
     """
-    Computes Pearson cross-correlation safely in chunks to guarantee zero memory crashes, 
-    leveraging GPU acceleration natively if VRAM allows.
-    """
-    T = stim_flat.shape[0]
-    P = stim_flat.shape[1]
-    N = resp.shape[1]
-    
-    # Standardize stimulus columns safely
+    n_time = stim_flat.shape[0]
+    n_features = stim_flat.shape[1]
+    n_neurons = resp.shape[1]
+
+    if chunk_size is None:
+        chunk_size = gpu_neuron_chunk_size(n_time, n_features)
+
     stim_mean = np.mean(stim_flat, axis=0, keepdims=True)
     stim_std = np.std(stim_flat, axis=0, keepdims=True, ddof=1)
     stim_std[stim_std == 0] = 1.0
     stim_norm = (stim_flat - stim_mean) / stim_std
-    
-    # OPTIMIZATION: np.empty is faster than np.zeros since we fully overwrite it
-    rfs = np.empty((N, P), dtype=np.float32) 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
-    if device == 'cuda':
+
+    rfs = np.empty((n_neurons, n_features), dtype=np.float32)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if device == "cuda":
         try:
-            # OPTIMIZATION: Transfer the static stimulus to GPU ONCE, not every chunk
-            s_t = torch.from_numpy(stim_norm).to(device)
-            for i in range(0, N, chunk_size):
-                resp_chunk = resp[:, i:i+chunk_size]
-                r_mean = np.mean(resp_chunk, axis=0, keepdims=True)
-                r_std = np.std(resp_chunk, axis=0, keepdims=True, ddof=1)
-                r_std[r_std == 0] = 1.0
-                r_norm = (resp_chunk - r_mean) / r_std
-                
-                r_t = torch.from_numpy(r_norm).to(device)
-                chunk_corr = (r_t.T @ s_t) / (T - 1)
-                rfs[i:i+chunk_size] = chunk_corr.cpu().numpy()
-                # OPTIMIZATION: Removed torch.cuda.empty_cache() here to prevent VRAM fragmentation
-                
-            del s_t, r_t, chunk_corr
+            stim_tensor = torch.from_numpy(stim_norm).to(device)
+            for start in range(0, n_neurons, chunk_size):
+                end = min(start + chunk_size, n_neurons)
+                resp_chunk = resp[:, start:end]
+                resp_mean = np.mean(resp_chunk, axis=0, keepdims=True)
+                resp_std = np.std(resp_chunk, axis=0, keepdims=True, ddof=1)
+                resp_std[resp_std == 0] = 1.0
+                resp_norm = (resp_chunk - resp_mean) / resp_std
+
+                resp_tensor = torch.from_numpy(resp_norm).to(device)
+                chunk_corr = (resp_tensor.T @ stim_tensor) / (n_time - 1)
+                rfs[start:end] = chunk_corr.cpu().numpy()
+                del resp_tensor, chunk_corr
+
+            del stim_tensor
         except RuntimeError:
-            # Automatic fallback to CPU if GPU runs out of VRAM
             torch.cuda.empty_cache()
-            device = 'cpu'
-            
-    if device == 'cpu':
-        for i in range(0, N, chunk_size):
-            resp_chunk = resp[:, i:i+chunk_size]
-            r_mean = np.mean(resp_chunk, axis=0, keepdims=True)
-            r_std = np.std(resp_chunk, axis=0, keepdims=True, ddof=1)
-            r_std[r_std == 0] = 1.0
-            r_norm = (resp_chunk - r_mean) / r_std
-            
-            chunk_corr = (r_norm.T @ stim_norm) / (T - 1)
-            rfs[i:i+chunk_size] = chunk_corr
-            
+            device = "cpu"
+
+    if device == "cpu":
+        for start in range(0, n_neurons, chunk_size):
+            end = min(start + chunk_size, n_neurons)
+            resp_chunk = resp[:, start:end]
+            resp_mean = np.mean(resp_chunk, axis=0, keepdims=True)
+            resp_std = np.std(resp_chunk, axis=0, keepdims=True, ddof=1)
+            resp_std[resp_std == 0] = 1.0
+            resp_norm = (resp_chunk - resp_mean) / resp_std
+            rfs[start:end] = (resp_norm.T @ stim_norm) / (n_time - 1)
+
     return rfs
 
 def PearsonCorrelation(stim, resp, neuron_pos, nx, ny, plotting=True):
+    """Correlate wavelet stimulus with responses and locate RF peaks per neuron."""
     stim_flat = np.abs(stim.reshape(stim.shape[0], -1))
-    
-    # Use memory-safe chunked calculations to bypass global torch.corrcoef explosion
-    rfs = _safe_chunked_cross_corr(stim_flat, resp, chunk_size=1000)
-    print((resp.shape[1] + stim_flat.shape[1], resp.shape[1] + stim_flat.shape[1])) 
 
-    # OPTIMIZATION: True in-place subtraction prevents allocating multiple massive temporary arrays
+    rfs = _safe_chunked_cross_corr(stim_flat, resp)
+    print((resp.shape[1] + stim_flat.shape[1], resp.shape[1] + stim_flat.shape[1]))
+
     rfs[rfs >= 0.99] -= 1.0
     np.nan_to_num(rfs, copy=False)
     rfs = rfs.reshape(rfs.shape[0], ny, nx)
@@ -206,15 +206,15 @@ def orientation_correction_for_stretches(visual_coverage, nx, ny, omax):
 
 
 def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, visual_coverage, screen_ratio, sigmas, fil=[0], absolute=False, plotting=False):
+    """RF correlation for pink-noise stimuli with retinotopy and tuning extraction."""
     stim_flat = stim.reshape(stim.shape[0], -1)
-    
-    rfs = _safe_chunked_cross_corr(stim_flat, resp, chunk_size=1000)
+
+    rfs = _safe_chunked_cross_corr(stim_flat, resp)
     print((resp.shape[1] + stim_flat.shape[1], resp.shape[1] + stim_flat.shape[1]))
-    
+
     if absolute:
         rfs = np.abs(rfs)
-        
-    # OPTIMIZATION: True in-place subtraction
+
     rfs[rfs >= 0.99] -= 1.0
     np.nan_to_num(rfs, copy=False)
     print(rfs.shape)
@@ -2551,19 +2551,17 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
 def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
               n_min=5, double_wavelet_model=True, train_idx=[0, 2],
               test_idx=[1, 3], plotting=False, frames_per_minute=None):
-    
+    """Fit the fast nonlinear Gabor-wavelet model for every neuron in parallel."""
     if frames_per_minute is None:
         frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
     frames_per_minute = int(frames_per_minute)
-    
+
     num_neurons = spks.shape[2]
-    
-    # Run loop in parallel. 
-    # CAUTION: If _process_single_neuron uses the GPU, n_jobs=-1 might cause a CUDA Out-Of-Memory crash.
-    # If a crash occurs, reduce n_jobs to 2 or 4 to safely maximize your VRAM.
-    parallel_results = Parallel(n_jobs=-1, backend="loky")(
+    n_jobs = model_parallel_jobs()
+
+    parallel_results = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(_process_single_neuron)(
-            idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, 
+            idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
             double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute
         ) for idx in range(num_neurons)
     )
@@ -2575,8 +2573,7 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
     Metrics = []
     interpolators = []
 
-    # Memory Optimization: Avoid zip(*parallel_results) which duplicates the entire dataset in RAM.
-    # Instead, we iterate sequentially and append, slicing the Metrics list exactly as you originally did.
+    # Append sequentially to avoid zip(*results) duplicating the full result set in RAM.
     for res in parallel_results:
         Predictions.append(res[0])
         nonlinParams.append(res[1])
@@ -2584,8 +2581,6 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         Metrics.append([res[3][0], res[3][1], res[3][2][0][1]])
         interpolators.append(res[4])
 
-    # Memory Optimization: Explicitly free the massive intermediate list from system RAM 
-    # BEFORE allocating the heavy NumPy arrays.
     del parallel_results
 
     # Convert to NumPy arrays and return, strictly backwards-compatible

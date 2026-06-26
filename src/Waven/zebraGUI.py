@@ -1,8 +1,7 @@
-"""
-Created on Wed Mar 25 19:31:32 2025
+"""Tkinter GUI for the waven Gabor-wavelet analysis pipeline.
 
-@author: Sophie Skriabine
-@co-author: Abdelrahman Abdelrahman
+Provides a staged workflow (Gabor bank → stimulus wavelets → neural RF analysis),
+live terminal output, and embedded matplotlib visualizations.
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -86,7 +85,59 @@ def _parse_dirs(value):
     return [str(parsed)]
 
 def run(param_defaults, gabor_param):
-    
+
+    GABOR_LABELS = {
+        "N_thetas": "Orientation Count",
+        "Sigmas": "Filter Sizes (px)",
+        "Frequencies": "Spatial Frequencies (cyc/px)",
+        "Phases": "Phases (degrees)",
+        "NX": "Stimulus Width (px)",
+        "NY": "Stimulus Height (px)",
+        "Save Path": "Gabor Library Output (.npy)",
+    }
+
+    ANALYSIS_LABELS = {
+        "Path Directory": "Wavelet Output Directory",
+        "Dirs": "Dataset Root Directory",
+        "Experiment Info": "Experiment ID (mouse, date, #)",
+        "Number of Planes": "Imaging Planes",
+        "Block End": "Session Block Start Frame",
+        "screen_x": "Display Width (px)",
+        "screen_y": "Display Height (px)",
+        "NX": "Analysis Grid Width (px)",
+        "NY": "Analysis Grid Height (px)",
+        "Resolution": "Microscope Resolution (µm/px)",
+        "Sigmas": "RF Filter Sizes (px)",
+        "Sigmas Full Model": "Full-Model Filter Sizes (px)",
+        "Frequencies": "Stimulus Frequencies (cyc/px)",
+        "Visual Coverage": "Visual Field Coverage (°)",
+        "Analysis Coverage": "Analysis Field Coverage (°)",
+        "Hz": "Stimulus Frame Rate (Hz)",
+        "Number of Frames": "Frames per Trial",
+        "Number of Trials to Keep": "Trials to Retain",
+        "Movie Path": "Stimulus Movie (.mp4)",
+        "Library Path": "Gabor Library Path (.npy)",
+        "Spks Path": "Pre-aligned Spikes (.npy, optional)",
+        "Full Model Wavelet Path": "Full-Model Wavelet Store",
+        "Full Model Save Path": "Full-Model Results Directory",
+        "Neuron ID": "Neuron Index",
+    }
+
+    FIELD_LABELS = {**GABOR_LABELS, **ANALYSIS_LABELS}
+
+    BROWSE_KIND = {
+        "Save Path": "file",
+        "Movie Path": "file",
+        "Library Path": "file",
+        "Spks Path": "file",
+        "Path Directory": "dir",
+        "Dirs": "dir",
+        "Full Model Wavelet Path": "dir",
+        "Full Model Save Path": "dir",
+    }
+
+    BROWSE_ICONS = {"file": "📄", "dir": "📁"}
+
     class RedirectText:
         def __init__(self, widget): self.widget = widget
         def write(self, string):
@@ -94,47 +145,53 @@ def run(param_defaults, gabor_param):
             self.widget.see(tk.END)
         def flush(self): pass
 
-    global loading_modal
-    loading_modal = None
+    task_state = {"name": None}
 
-    def set_ui_state(state):
-        global loading_modal
+    def show_terminal_half():
+        """Reveal the log pane and allocate the lower half of the window to it."""
+        if not frame_log.winfo_ismapped():
+            root_vpaned.add(frame_log, weight=1)
+        root.update_idletasks()
+        total_height = root_vpaned.winfo_height()
+        if total_height > 120:
+            root_vpaned.sashpos(0, max(200, int(total_height * 0.5)))
+
+    def begin_task(task_name):
+        task_state["name"] = task_name
+        show_terminal_half()
+        status_var.set(f"Running: {task_name}")
+        progress_bar.configure(mode="indeterminate")
+        progress_bar.start(12)
         for btn in all_buttons:
-            btn.config(state=state)
-        
-        if state == tk.DISABLED:
-            loading_modal = tk.Toplevel(root)
-            loading_modal.overrideredirect(True)
-            loading_modal.attributes("-topmost", True)
-            
-            w, h = 320, 120
-            x = root.winfo_x() + (root.winfo_width() // 2) - (w // 2)
-            y = root.winfo_y() + (root.winfo_height() // 2) - (h // 2)
-            loading_modal.geometry(f"{w}x{h}+{x}+{y}")
-            
-            loading_modal.configure(bg="#FFFFFF", highlightbackground="#0078D4", highlightcolor="#0078D4", highlightthickness=2)
-            tk.Label(loading_modal, text="Processing Data...", font=("Segoe UI Variable Display", 11, "bold"), bg="#FFFFFF", fg="#2B3A4A").pack(pady=(25, 10))
-            
-            pb = ttk.Progressbar(loading_modal, mode='indeterminate', length=250)
-            pb.pack()
-            pb.start(10)
-            root.update()
-        else:
-            if loading_modal:
-                loading_modal.destroy()
-                loading_modal = None
+            btn.config(state=tk.DISABLED)
+        print(f"\n--- {task_name} ---")
 
-    def run_in_thread(func):
+    def end_task():
+        progress_bar.stop()
+        progress_bar.configure(mode="determinate", value=0)
+        if task_state["name"]:
+            print(f"--- Finished: {task_state['name']} ---\n")
+        task_state["name"] = None
+        status_var.set("Ready")
+        for btn in all_buttons:
+            btn.config(state=tk.NORMAL)
+
+    def run_in_thread(func, task_name=None):
+        label = task_name or func.__name__.replace("_", " ").title()
+
         def wrapper(*args, **kwargs):
-            set_ui_state(tk.DISABLED)
+            root.after(0, lambda: begin_task(label))
+
             def thread_target():
                 try:
                     func(*args, **kwargs)
-                except Exception as e:
-                    print(f"Error: {e}")
+                except Exception as exc:
+                    print(f"Error: {exc}")
                 finally:
-                    root.after(0, lambda: set_ui_state(tk.NORMAL))
+                    root.after(0, end_task)
+
             threading.Thread(target=thread_target, daemon=True).start()
+
         return wrapper
 
     def create_gabor():
@@ -158,9 +215,10 @@ def run(param_defaults, gabor_param):
             frequency = frequencies[0] if frequencies.size else 0
             L = makeFilterLibrary(xs, ys, thetas, sigmas, offsets, frequency, freq=False)
         np.save(path_save, L)
-        print("Gabor Library Created Successfully.")
+        print(f"Gabor library saved to: {path_save}")
 
     def run_wavelet():
+        print("Step 1/2: Downsampling stimulus movie...")
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
         analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
@@ -182,22 +240,22 @@ def run(param_defaults, gabor_param):
         videodata = np.load(movpath[:-4] + '_downsampled.npy')
         videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
         waveletDecomposition(videodata, 0, sigmas, parent_dir, lib_path)
+        print("Step 2/2: Wavelet decomposition (imaginary phase)...")
         waveletDecomposition(videodata, 1, sigmas, parent_dir, lib_path)
-        print("Wavelet Transform Done.")
+        print(f"Wavelet coefficients written to: {parent_dir}")
 
-    def embed_interactive_figure(fig, parent_container):
-        frame = ttk.Frame(parent_container, style="TFrame")
-        frame.pack(side=tk.TOP, pady=15) 
-        
-        canvas = FigureCanvasTkAgg(fig, master=frame)
+    def embed_interactive_figure(fig, parent_container, title=None):
+        """Embed a matplotlib figure with navigation toolbar in ``parent_container``."""
+        section = ttk.LabelFrame(parent_container, text=title, padding=6) if title else ttk.Frame(parent_container, style="TFrame")
+        section.pack(side=tk.TOP, fill=tk.BOTH, expand=False, pady=8)
+
+        canvas = FigureCanvasTkAgg(fig, master=section)
         canvas.draw()
-        
-        toolbar = NavigationToolbar2Tk(canvas, frame)
-        toolbar.update()
-        
-        tk_widget = canvas.get_tk_widget()
-        tk_widget.pack(side=tk.TOP)
 
+        toolbar = NavigationToolbar2Tk(canvas, section)
+        toolbar.update()
+
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         return canvas
     
     def plot_data():
@@ -240,6 +298,7 @@ def run(param_defaults, gabor_param):
                 print(f"File not found: {e}")
                 return
 
+        print("Loading neural data and coarse wavelets...")
         respcorr = repetability_trial3(spks, neuron_pos, plotting=False)
         skewness = np.array(compute_skewness_neurons(spks, plotting=False))
         filter_mask = np.logical_and(respcorr >= 0.2, skewness <= 20)
@@ -261,25 +320,47 @@ def run(param_defaults, gabor_param):
                                                 plotting=False)
 
         def render_gui_plots():
-            for widget in frame_plot.winfo_children(): widget.destroy()
+            for widget in frame_plot.winfo_children():
+                widget.destroy()
             plt.close('all')
 
-            fig1, ax1 = plt.subplots(figsize=(6, 6), constrained_layout=True)
+            fig1, ax1 = plt.subplots(figsize=(6, 5), constrained_layout=True)
             ax1.scatter(neuron_pos[:, 0], neuron_pos[:, 1], c='k', alpha=0.3, label="Neurons", picker=True, rasterized=True)
-            ax1.set_title("Neuron Positions (um)")
+            ax1.set_title("Neuron Positions (µm)")
+            ax1.set_xlabel("X (µm)")
+            ax1.set_ylabel("Y (µm)")
 
-            fig2, ax2 = plt.subplots(figsize=(10, 3), constrained_layout=True)
-            ax2.set_title("Spike Train")
+            fig10, axes10 = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True)
+            ax10 = axes10.ravel()
+            maxes1 = rfs_gabor[2]
+            plt.rcParams['axes.facecolor'] = 'none'
 
-            fig3 = plt.figure(figsize=(8, 10), constrained_layout=True)
+            map_specs = [
+                (0, maxes1[0], 'jet', 'Azimuth (°)'),
+                (1, maxes1[1], 'jet_r', 'Elevation (°)'),
+                (2, maxes1[2], 'hsv', 'Orientation (°)'),
+                (3, maxes1[3], 'coolwarm', 'Size (°)'),
+            ]
+            for idx, values, cmap, title in map_specs:
+                scatter = ax10[idx].scatter(
+                    neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=values,
+                    cmap=cmap, alpha=filter_mask, rasterized=True,
+                )
+                fig10.colorbar(scatter, ax=ax10[idx], fraction=0.046)
+                ax10[idx].set_title(title)
+                ax10[idx].set_xlabel("X (µm)")
+                ax10[idx].set_ylabel("Y (µm)")
+
+            fig2, ax2 = plt.subplots(figsize=(10, 2.5), constrained_layout=True)
+            ax2.set_title("Trial-averaged Spike Train")
+
+            fig3 = plt.figure(figsize=(8, 9), constrained_layout=True)
             gs = fig3.add_gridspec(3, 2)
-            
             ax3_0 = fig3.add_subplot(gs[0, :])
             ax3_1 = fig3.add_subplot(gs[1, 0])
             ax3_2 = fig3.add_subplot(gs[1, 1])
             ax3_3 = fig3.add_subplot(gs[2, 0])
             ax3_4 = fig3.add_subplot(gs[2, 1])
-            
             ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4]
 
             def onpick(event):
@@ -318,33 +399,12 @@ def run(param_defaults, gabor_param):
 
             fig1.canvas.mpl_connect('pick_event', onpick)
 
-            fig10, ax10 = plt.subplots(1, 4, figsize=(12, 4), constrained_layout=True)
-            maxes1 = rfs_gabor[2]
-            plt.rcParams['axes.facecolor'] = 'none'
-            
-            m = ax10[0].scatter(neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=maxes1[0], cmap='jet', alpha=filter_mask, rasterized=True)
-            fig10.colorbar(m, ax=ax10[0])
-            ax10[0].set_title('Azimuth')
-            
-            m = ax10[1].scatter(neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=maxes1[1], cmap='jet_r', alpha=filter_mask, rasterized=True)
-            fig10.colorbar(m, ax=ax10[1])
-            ax10[1].set_title('Elevation (deg)')
-            
-            m = ax10[2].scatter(neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=maxes1[2], cmap='hsv', alpha=filter_mask, rasterized=True)
-            fig10.colorbar(m, ax=ax10[2])
-            ax10[2].set_title('Orientation')
-            
-            m = ax10[3].scatter(neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=maxes1[3], cmap='coolwarm', alpha=filter_mask, rasterized=True)
-            fig10.colorbar(m, ax=ax10[3])
-            ax10[3].set_title('Size (deg)')
-
             global canvas2, canvas3
-            
-            embed_interactive_figure(fig1, frame_plot)   
-            canvas2 = embed_interactive_figure(fig2, frame_plot) 
-            canvas3 = embed_interactive_figure(fig3, frame_plot)  
-            embed_interactive_figure(fig10, frame_plot)  
-            
+
+            embed_interactive_figure(fig1, frame_plot, title="Neuron Layout")
+            embed_interactive_figure(fig10, frame_plot, title="Population Retinotopy Maps")
+            canvas2 = embed_interactive_figure(fig2, frame_plot, title="Spike Train")
+            canvas3 = embed_interactive_figure(fig3, frame_plot, title="Selected Neuron Tuning")
             canvas_right.configure(scrollregion=canvas_right.bbox("all"))
 
             def click_RF():
@@ -403,24 +463,43 @@ def run(param_defaults, gabor_param):
         root.quit()
         root.destroy()
 
-    def popup_browser(entry_widget):
-        menu = tk.Menu(root, tearoff=0)
-        def set_file():
-            p = filedialog.askopenfilename()
-            if p:
-                entry_widget.delete(0, tk.END)
-                entry_widget.insert(0, p)
-        def set_folder():
-            p = filedialog.askdirectory()
-            if p:
-                entry_widget.delete(0, tk.END)
-                entry_widget.insert(0, p)
-        
-        menu.add_command(label="Select File...", command=set_file)
-        menu.add_command(label="Select Folder...", command=set_folder)
-        x = root.winfo_pointerx()
-        y = root.winfo_pointery()
-        menu.tk_popup(x, y)
+    def browse_path(entry_widget, kind):
+        """Open a file or directory picker appropriate for the field type."""
+        if kind == "file":
+            path = filedialog.askopenfilename(title="Select file")
+        else:
+            path = filedialog.askdirectory(title="Select directory")
+        if path:
+            entry_widget.delete(0, tk.END)
+            entry_widget.insert(0, path)
+
+    def add_config_row(parent, key, default, entries_dict, row, bg, labels_map):
+        """Render one labeled configuration row with an optional typed browse button."""
+        label_text = labels_map.get(key, key)
+        tk.Label(parent, text=label_text, bg=bg, fg=text_color, font=main_font).grid(
+            row=row, column=0, sticky="w", pady=3,
+        )
+
+        entry_wrap = ttk.Frame(parent, style="TFrame")
+        entry_wrap.grid(row=row, column=1, pady=3, padx=(10, 0), sticky="ew")
+        entry_wrap.columnconfigure(0, weight=1)
+
+        entry = tk.Entry(entry_wrap, relief="solid", bd=1)
+        entry.insert(0, default)
+        entry.grid(row=0, column=0, sticky="ew")
+        ToolTip(entry)
+        entries_dict[key] = entry
+
+        browse_kind = BROWSE_KIND.get(key)
+        if browse_kind:
+            icon = BROWSE_ICONS[browse_kind]
+            ttk.Button(
+                entry_wrap,
+                text=icon,
+                style="Browse.TButton",
+                width=3,
+                command=lambda e=entry, k=browse_kind: browse_path(e, k),
+            ).grid(row=0, column=1, padx=(5, 0))
 
     # --- Root Window Setup & Theming ---
     root = tk.Tk()
@@ -473,12 +552,16 @@ def run(param_defaults, gabor_param):
     # --- View Menu ---
     menubar = tk.Menu(root)
     view_menu = tk.Menu(menubar, tearoff=0)
-    def toggle_terminal():
-        if frame_log.winfo_ismapped(): frame_log.pack_forget()
-        else: frame_log.pack(side=tk.BOTTOM, fill=tk.X, padx=15, pady=(0, 15))
 
-    # --- Added toggle left panel logic ---
+    def toggle_terminal():
+        if frame_log.winfo_ismapped():
+            root_vpaned.forget(frame_log)
+        else:
+            root_vpaned.add(frame_log, weight=1)
+            show_terminal_half()
+
     left_panel_visible = [True]
+
     def toggle_left_panel():
         if left_panel_visible[0]:
             paned_window.forget(container_left)
@@ -492,19 +575,42 @@ def run(param_defaults, gabor_param):
     menubar.add_cascade(label="View", menu=view_menu)
     root.config(menu=menubar)
 
-    frame_log = ttk.LabelFrame(root, text="Terminal", padding=10)
-    frame_log.pack(side=tk.BOTTOM, fill=tk.X, padx=15, pady=(0, 15))
+    root_vpaned = ttk.PanedWindow(root, orient=tk.VERTICAL)
+    root_vpaned.pack(fill=tk.BOTH, expand=True, padx=15, pady=(15, 0))
+
+    content_root = ttk.Frame(root_vpaned)
+    root_vpaned.add(content_root, weight=3)
+
+    status_frame = ttk.Frame(content_root, style="TFrame")
+    status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=0, pady=(6, 0))
+    status_var = tk.StringVar(value="Ready")
+    ttk.Label(status_frame, textvariable=status_var, font=main_font).pack(side=tk.LEFT)
+    progress_bar = ttk.Progressbar(status_frame, mode="determinate", length=260, maximum=100)
+    progress_bar.pack(side=tk.RIGHT, padx=(8, 0))
+
+    paned_window = ttk.PanedWindow(content_root, orient=tk.HORIZONTAL)
+    paned_window.pack(fill=tk.BOTH, expand=True)
+
+    frame_log = ttk.LabelFrame(root_vpaned, text="Terminal", padding=10)
     log_scroll = ttk.Scrollbar(frame_log)
     log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-    text_log = tk.Text(frame_log, height=8, bg="#1E1E1E", fg="#CCCCCC", font=("Consolas", 10), yscrollcommand=log_scroll.set, relief="flat")
+    text_log = tk.Text(
+        frame_log, height=10, bg="#1E1E1E", fg="#CCCCCC",
+        font=("Consolas", 10), yscrollcommand=log_scroll.set, relief="flat",
+    )
     text_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     log_scroll.config(command=text_log.yview)
     sys.stdout = RedirectText(text_log)
     sys.stderr = RedirectText(text_log)
+    root_vpaned.add(frame_log, weight=1)
 
-    # --- Draggable PanedWindow System ---
-    paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
-    paned_window.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+    def _set_initial_terminal_height():
+        root.update_idletasks()
+        total_height = root_vpaned.winfo_height()
+        if total_height > 120:
+            root_vpaned.sashpos(0, int(total_height * 0.82))
+
+    root.after(250, _set_initial_terminal_height)
 
     def clamp_sash(event):
         max_left_width = 500
@@ -561,91 +667,104 @@ def run(param_defaults, gabor_param):
     container_right.bind("<Enter>", lambda _: canvas_right.bind_all("<MouseWheel>", _on_mousewheel_right))
     container_right.bind("<Leave>", lambda _: canvas_right.unbind_all("<MouseWheel>"))
 
-    # --- Group 1: Gabor Library ---
-    frame_gabor = ttk.LabelFrame(frame_left, text="Gabor Library", padding=15)
+    # --- 1 · Gabor filter bank ---
+    frame_gabor = ttk.LabelFrame(frame_left, text="1 · Gabor Filter Bank", padding=15)
     frame_gabor.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10), padx=10)
     frame_gabor.columnconfigure(1, weight=1)
-    
+
     gabor_entries = {}
     for i, (label, default) in enumerate(gabor_param.items()):
-        tk.Label(frame_gabor, text=label, bg=frame_color, fg=text_color, font=main_font).grid(row=i, column=0, sticky="w", pady=3)
-        
-        entry_wrap = ttk.Frame(frame_gabor, style="TFrame")
-        entry_wrap.grid(row=i, column=1, pady=3, padx=(10,0), sticky="ew")
-        entry_wrap.columnconfigure(0, weight=1)
-        
-        entry = tk.Entry(entry_wrap, relief="solid", bd=1)
-        entry.insert(0, default)
-        entry.grid(row=0, column=0, sticky="ew")
-        ToolTip(entry)
-        gabor_entries[label] = entry
-        
-        btn_browse = ttk.Button(entry_wrap, text="📁", style="Browse.TButton", width=3, command=lambda e=entry: popup_browser(e))
-        btn_browse.grid(row=0, column=1, padx=(5,0))
-        
-    btn_submit_gabor = ttk.Button(frame_gabor, text="Create Gabor Library", style="Primary.TButton", command=run_in_thread(create_gabor))
-    btn_submit_gabor.grid(row=len(gabor_param), column=0, columnspan=2, pady=(15,0), sticky="ew")
+        add_config_row(frame_gabor, label, default, gabor_entries, i, frame_color, GABOR_LABELS)
 
-    # --- Group 2: Model Parameters ---
-    frame_params = ttk.LabelFrame(frame_left, text="Model Parameters", padding=15)
+    btn_submit_gabor = ttk.Button(
+        frame_gabor,
+        text="Build Gabor Library",
+        style="Primary.TButton",
+        command=run_in_thread(create_gabor, "Gabor library construction"),
+    )
+    btn_submit_gabor.grid(row=len(gabor_param), column=0, columnspan=2, pady=(15, 0), sticky="ew")
+
+    # --- 2 · Stimulus wavelet pipeline ---
+    frame_processing = ttk.LabelFrame(frame_left, text="2 · Stimulus Wavelet Pipeline", padding=15)
+    frame_processing.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+    ttk.Label(
+        frame_processing,
+        text="Downsample the movie, then project it onto the Gabor bank (coarse wavelets for RF analysis).",
+        wraplength=380, background=frame_color, foreground=text_color, font=main_font,
+    ).pack(anchor="w", pady=(0, 8))
+
+    btn_submit_wavelet = ttk.Button(
+        frame_processing,
+        text="Run Wavelet Decomposition",
+        style="Primary.TButton",
+        command=run_in_thread(run_wavelet, "Stimulus wavelet decomposition"),
+    )
+    btn_submit_wavelet.pack(fill=tk.X, pady=3)
+
+    ttk.Separator(frame_processing, orient="horizontal").pack(fill=tk.X, pady=8)
+    ttk.Label(
+        frame_processing,
+        text="Optional: compress full-resolution wavelet arrays to Zarr for the high-detail full model (lower RAM).",
+        wraplength=380, background=frame_color, foreground=text_color, font=main_font,
+    ).pack(anchor="w", pady=(0, 8))
+
+    btn_convert_zarr = ttk.Button(
+        frame_processing,
+        text="Convert Wavelets NPY → Zarr",
+        style="Primary.TButton",
+        command=run_in_thread(convert_to_zarr_gui, "Wavelet Zarr conversion"),
+    )
+    btn_convert_zarr.pack(fill=tk.X, pady=3)
+
+    # --- Experiment configuration ---
+    frame_params = ttk.LabelFrame(frame_left, text="Experiment Configuration", padding=15)
     frame_params.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
     frame_params.columnconfigure(1, weight=1)
-    
+
     param_entries = {}
     for i, (label, default) in enumerate(param_defaults.items()):
-        tk.Label(frame_params, text=label, bg=frame_color, fg=text_color, font=main_font).grid(row=i, column=0, sticky="w", pady=3)
-        
-        entry_wrap = ttk.Frame(frame_params, style="TFrame")
-        entry_wrap.grid(row=i, column=1, pady=3, padx=(10,0), sticky="ew")
-        entry_wrap.columnconfigure(0, weight=1)
-        
-        entry = tk.Entry(entry_wrap, relief="solid", bd=1)
-        entry.insert(0, default)
-        entry.grid(row=0, column=0, sticky="ew")
-        ToolTip(entry)
-        param_entries[label] = entry
-        
-        btn_browse = ttk.Button(entry_wrap, text="📁", style="Browse.TButton", width=3, command=lambda e=entry: popup_browser(e))
-        btn_browse.grid(row=0, column=1, padx=(5,0))
+        add_config_row(frame_params, label, default, param_entries, i, frame_color, ANALYSIS_LABELS)
 
-    # --- Group 3: Analysis (Restructured) ---
-    frame_analysis = ttk.LabelFrame(frame_left, text="Analysis", padding=15)
+    # --- 3 · Neural & RF analysis ---
+    frame_analysis = ttk.LabelFrame(frame_left, text="3 · Neural & RF Analysis", padding=15)
     frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-    
-    btn_submit_plot = ttk.Button(frame_analysis, text="Run Primary Analysis", style="Success.TButton", command=run_in_thread(plot_data))
+
+    ttk.Label(
+        frame_analysis,
+        text="Uses coarse wavelets + aligned spikes to estimate population retinotopy and per-neuron tuning.",
+        wraplength=380, background=frame_color, foreground=text_color, font=main_font,
+    ).pack(anchor="w", pady=(0, 8))
+
+    btn_submit_plot = ttk.Button(
+        frame_analysis,
+        text="Run Coarse RF Analysis",
+        style="Success.TButton",
+        command=run_in_thread(plot_data, "Coarse receptive-field analysis"),
+    )
     btn_submit_plot.pack(fill=tk.X, pady=(0, 10))
 
-    # Clear visual distinction
-    separator = ttk.Separator(frame_analysis, orient='horizontal')
-    separator.pack(fill=tk.X, pady=10)
+    ttk.Separator(frame_analysis, orient="horizontal").pack(fill=tk.X, pady=8)
 
-    # Single RF Input Area
     rf_wrap = ttk.Frame(frame_analysis, style="TFrame")
     rf_wrap.pack(fill=tk.X, pady=(0, 10))
     rf_wrap.columnconfigure(1, weight=1)
-    
-    tk.Label(rf_wrap, text='Neuron ID:', bg=frame_color, fg=text_color, font=bold_font).grid(row=0, column=0, sticky="w", pady=3, padx=(0, 10))
-    
+
+    tk.Label(
+        rf_wrap, text=FIELD_LABELS["Neuron ID"], bg=frame_color,
+        fg=text_color, font=bold_font,
+    ).grid(row=0, column=0, sticky="w", pady=3, padx=(0, 10))
+
     entry_neuron = tk.Entry(rf_wrap, relief="solid", bd=1)
     entry_neuron.insert(0, '1173')
     entry_neuron.grid(row=0, column=1, sticky="ew")
     param_entries['Neuron ID'] = entry_neuron
 
-    btn_runRF = ttk.Button(frame_analysis, text="Run Single RF", style="Primary.TButton")
+    btn_runRF = ttk.Button(frame_analysis, text="Inspect Single Neuron", style="Primary.TButton")
     btn_runRF.pack(fill=tk.X)
 
-    # --- Group 4: Data Transformation (Restructured) ---
-    frame_processing = ttk.LabelFrame(frame_left, text="Data Transformation", padding=15)
-    frame_processing.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-
-    btn_submit_wavelet = ttk.Button(frame_processing, text="Run Wavelet Transform", style="Primary.TButton", command=run_in_thread(run_wavelet))
-    btn_submit_wavelet.pack(fill=tk.X, pady=3)
-
-    btn_convert_zarr = ttk.Button(frame_processing, text="Compress NPY to Zarr", style="Primary.TButton", command=run_in_thread(convert_to_zarr_gui))
-    btn_convert_zarr.pack(fill=tk.X, pady=3)
-
-    # --- Group 5: Export Options (Restructured) ---
-    frame_export = ttk.LabelFrame(frame_left, text="Export Options", padding=15)
+    # --- 4 · Export ---
+    frame_export = ttk.LabelFrame(frame_left, text="4 · Export", padding=15)
     frame_export.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
     btn_save_ret = ttk.Button(frame_export, text="Export Retinotopy Matrix", style="Primary.TButton", command=click_save)

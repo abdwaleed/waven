@@ -15,6 +15,7 @@ tensorly==0.9.0
 tifffile==2023.7.10
 torch==2.1.2+cu121
 numexpr==2.8.4
+customtkinter>=5.2.0
 
 # 3. Install the actual project in editable mode
 -e .

@@ -142,10 +142,18 @@ def create_gabor_library(config: GaborConfig) -> Path:
 def prepare_stimulus_wavelets(
     analysis: AnalysisConfig,
     library_path: Optional[Path] = None,
-    chunk_size: int = 1000,
+    chunk_size: Optional[int] = None,
 ) -> Path:
-    """Downsample the stimulus movie and save both wavelet phases."""
+    """Downsample the stimulus movie and save both wavelet phases.
+
+    Chunk size for video downsampling is chosen from available RAM when
+    ``chunk_size`` is omitted.
+    """
     from . import WaveletGenerator as wg
+    from .performance import video_downsample_chunk_size
+
+    if chunk_size is None:
+        chunk_size = video_downsample_chunk_size()
 
     library_path = library_path or analysis.library_path
     require_file(analysis.movie_path, "Stimulus movie")
@@ -193,8 +201,14 @@ def load_spikes_and_positions(
     analysis: AnalysisConfig,
     threshold: float = 1.25,
     method: str = "frame2ttl",
+    correct_positions: bool = True,
 ) -> SpikeData:
-    """Load spike responses and neuron positions from suite2p or npy files."""
+    """Load spike responses and neuron positions from suite2p or pre-aligned npy files.
+
+    When ``analysis.spks_path`` is set, reads ``spikes.npy`` and sibling ``pos.npy``
+    and skips suite2p alignment.  Otherwise loads from the configured experiment
+    directory and aligns trials via the Cortex Lab timeline.
+    """
     from . import LoadPinkNoise as lpn
 
     if analysis.spks_path is None:
@@ -210,21 +224,25 @@ def load_spikes_and_positions(
             last=True,
             method=method,
         )
+        if correct_positions:
+            neuron_pos = lpn.correctNeuronPos(neuron_pos, analysis.resolution)
     else:
         require_file(analysis.spks_path, "Spike file")
-        spikes = np.load(analysis.spks_path)
+        spikes = np.load(analysis.spks_path, mmap_mode="r")
         pos_path = analysis.spks_path.parent / "pos.npy"
         require_file(pos_path, "Neuron position file")
         neuron_pos = np.load(pos_path)
         aligned_spikes = None
 
-    # neuron_pos = lpn.correctNeuronPos(neuron_pos, analysis.resolution)
     validate_spike_data(spikes, neuron_pos)
     return SpikeData(spikes=spikes, aligned_spikes=aligned_spikes, neuron_pos=neuron_pos)
 
 
 def load_coarse_wavelets(analysis: AnalysisConfig, gabor: GaborConfig) -> WaveletData:
-    """Load or create the coarse wavelet arrays used for RF estimation."""
+    """Load or build coarse wavelet arrays used for receptive-field estimation.
+
+    Results are cached as ``dwt_downsampled_videodata.npy`` under the path directory.
+    """
     from . import LoadPinkNoise as lpn
 
     wavelets_r, wavelets_i, wavelets_complex = lpn.coarseWavelet(

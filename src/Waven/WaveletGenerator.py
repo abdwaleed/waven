@@ -1,11 +1,14 @@
-"""
-Created on Wed Mar 25 19:31:32 2025
+"""Gabor filter construction and GPU-accelerated wavelet decomposition.
 
-@author: Sophie Skriabine
-@co-author: Abdelrahman Abdelrahman
+This module builds the spatial filter bank, downsamples stimulus movies to the
+analysis grid, and projects video frames onto Gabor wavelets.  Large arrays are
+streamed to disk when free RAM is insufficient; filter–video products are
+computed in GPU batches sized from available VRAM.
 """
 import os
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+from typing import Optional
 
 import matplotlib
 if os.environ.get("waven_NO_PLOTS") == "1":
@@ -30,35 +33,30 @@ import math
 from skimage.filters import gabor_kernel
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
-import psutil
+from .performance import (
+    available_ram_bytes,
+    has_enough_ram as _has_enough_ram,
+    resolve_compute_device,
+    video_downsample_chunk_size,
+    wavelet_filter_chunk_size,
+)
 
-def has_enough_ram(required_bytes, safety_margin=1.20):
+
+def has_enough_ram(required_bytes: int, safety_margin: float = 1.20) -> bool:
+    """Return True when an array of ``required_bytes`` can live in free RAM.
+
+    Logs the chosen route (in-memory vs disk streaming) for transparency.
     """
-    Smart RAM checker. Evaluates CURRENTLY AVAILABLE system memory, 
-    not just total installed RAM. Returns True if you can safely run in-memory.
-    
-    Parameters:
-        required_bytes (int): The exact memory footprint of the upcoming array.
-        safety_margin (float): Multiplier to leave room for OS/PyTorch overhead.
-    """
-    try:
-        import psutil
-        # Get currently free, usable RAM
-        available_bytes = psutil.virtual_memory().available
-    except ImportError:
-        # Fallback if psutil is missing: Always play it safe and stream to disk
-        print("Warning: psutil not found. Defaulting to safe Disk-Streaming mode.")
-        return False
-        
+    available_bytes = available_ram_bytes()
     required_gb = required_bytes / (1024**3)
     available_gb = available_bytes / (1024**3)
-    
-    is_safe = available_bytes > (required_bytes * safety_margin)
-    
-    print(f"Memory Check: Operation needs {required_gb:.2f} GB. "
-          f"System has {available_gb:.2f} GB available. "
-          f"Route: {'IN-MEMORY' if is_safe else 'DISK-STREAMING'}", end="\n\n")
-          
+    is_safe = _has_enough_ram(required_bytes, safety_margin)
+    print(
+        f"Memory check: needs {required_gb:.2f} GB, "
+        f"{available_gb:.2f} GB free → "
+        f"{'in-memory' if is_safe else 'disk streaming'}",
+        end="\n\n",
+    )
     return is_safe
 
 
@@ -278,11 +276,22 @@ def _process_binary_chunk(frames_buffer, xi, xe, yi, ye, shape, actual_len):
     return (resized >= 0.5).astype(bool)
 
 
-def downsample_video_binary(path, visual_coverage, analysis_coverage, shape=(54, 135), chunk_size=1000, ratios=(1, 1)):
+def downsample_video_binary(
+    path,
+    visual_coverage,
+    analysis_coverage,
+    shape=(54, 135),
+    chunk_size: Optional[int] = None,
+    ratios=(1, 1),
+):
+    """Downsample a binary stimulus movie to the analysis grid via disk streaming.
+
+    Frames are read in chunks, cropped to the analysis field of view, resized
+    with anti-aliasing, and written to a memory-mapped ``_downsampled.npy`` file
+    so peak RAM stays bounded regardless of movie length.
     """
-    Zero-RAM footprint downsampling using memory-mapped arrays and chunking.
-    Fixed for scikit-image strict boolean anti-aliasing requirements.
-    """
+    if chunk_size is None:
+        chunk_size = video_downsample_chunk_size()
     import cv2
     import numpy as np
     import skimage.transform
@@ -410,48 +419,54 @@ def downsample_video_uint(path, shape=(54, 135)):
 
 
 @torch.no_grad()
-def getWTfromNPY(videodata, waveletLibrary, phase, WT_flat, s_idx, filter_chunk_size=1000):
+def getWTfromNPY(
+    videodata,
+    waveletLibrary,
+    phase,
+    WT_flat,
+    s_idx,
+    filter_chunk_size: Optional[int] = None,
+):
+    """Project video frames onto one Gabor scale, writing into ``WT_flat``.
+
+    The filter bank is applied in batches on the best available device (CUDA when
+    present, otherwise CPU).  Results stream directly into ``WT_flat`` so the
+    full wavelet tensor never has to exist on the GPU at once.
     """
-    Highly scalable getWTfromNPY.
-    Streams output directly into a provided buffer (RAM or Disk) chunk-by-chunk.
-    """
+    device = resolve_compute_device(prefer_gpu=True)
+    if filter_chunk_size is None:
+        filter_chunk_size = wavelet_filter_chunk_size()
+
     if not isinstance(videodata, torch.Tensor):
-        V_gpu = torch.tensor(videodata, dtype=torch.float32, device='cuda')
+        video_tensor = torch.as_tensor(videodata, dtype=torch.float32, device=device)
     else:
-        V_gpu = videodata.to(device='cuda', dtype=torch.float32)
+        video_tensor = videodata.to(device=device, dtype=torch.float32)
 
-    T = V_gpu.shape[0]
-    V_flat = V_gpu.view(T, -1).t() 
-    spatial_pixels = V_flat.shape[0] 
+    num_frames = video_tensor.shape[0]
+    video_flat = video_tensor.reshape(num_frames, -1).t()
+    spatial_pixels = video_flat.shape[0]
 
-    # --- DYNAMIC DIMENSION FIX ---
-    # Check if waveletLibrary has 6 dims (includes Frequencies) or 5 dims (Legacy)
+    # Libraries may be 6-D (with frequency) or 5-D (legacy); default to f_idx=0.
     if waveletLibrary.ndim == 6:
-        # Shape: (lx, ly, thetas, frequencies, phases, spatial)
-        # Defaults to the first frequency index (0) to prevent dimension explosion.
-        # If you want to analyze other frequencies, you can pass an f_idx parameter later.
         lib_phase = waveletLibrary[:, :, :, 0, phase, :]
     else:
-        # Shape: (lx, ly, thetas, phases, spatial)
-        lib_phase = waveletLibrary[:, :, :, phase, :] 
-    
-    # Flatten library structural dims for math
-    lib_np_flat = lib_phase.reshape(-1, spatial_pixels)
-    
-    # This will now correctly lock to 58,320 instead of 116,640
-    num_filters = lib_np_flat.shape[0] 
+        lib_phase = waveletLibrary[:, :, :, phase, :]
 
-    # Process in chunks and write STRAIGHT to the destination buffer
-    for i in range(0, num_filters, filter_chunk_size):
-        end_idx = min(i + filter_chunk_size, num_filters)
-        
-        lib_chunk = torch.tensor(lib_np_flat[i:end_idx, :], dtype=torch.float32, device='cuda')
-        res_gpu = torch.matmul(lib_chunk, V_flat)
-        
-        # Write directly to the flattened view using the sigma index (s_idx)!
-        WT_flat[i:end_idx, :, s_idx] = res_gpu.cpu().numpy()
-        
-        del lib_chunk, res_gpu
+    lib_flat = lib_phase.reshape(-1, spatial_pixels)
+    num_filters = lib_flat.shape[0]
+
+    for start in range(0, num_filters, filter_chunk_size):
+        end = min(start + filter_chunk_size, num_filters)
+        lib_chunk = torch.as_tensor(
+            lib_flat[start:end, :],
+            dtype=torch.float32,
+            device=device,
+        )
+        product = torch.matmul(lib_chunk, video_flat)
+        WT_flat[start:end, :, s_idx] = product.cpu().numpy()
+        del lib_chunk, product
+
+    if device == "cuda":
         torch.cuda.empty_cache()
 
 
@@ -468,9 +483,10 @@ def waveletTransform3D(frame, L):
 
 
 def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path):
-    """
-    Scalable wavelet decomposition engine. 
-    Dynamically routes to System RAM if available, or Disk-Streaming if RAM is low.
+    """Decompose a downsampled movie into Gabor wavelet coefficients.
+
+    Chooses in-memory or memory-mapped output based on ``has_enough_ram``, then
+    iterates over sigma scales and fills ``dwt_videodata_{phase}.npy``.
     """
     print(f"Loading Gabor library from {library_path} (mmap_mode='r')...", end="\n\n")
     L = np.load(library_path, mmap_mode='r') 

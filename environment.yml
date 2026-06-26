@@ -40,6 +40,7 @@ dependencies:
 
   # GUI and notebook/dev convenience.
   - tk
+  - customtkinter>=5.2.0
   - ipython
   - ipykernel
 

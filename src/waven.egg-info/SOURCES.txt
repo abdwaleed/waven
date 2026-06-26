@@ -8,6 +8,7 @@ src/waven/__init__.py
 src/waven/analysis_utils.py
 src/waven/config.py
 src/waven/gui.py
+src/waven/performance.py
 src/waven/pipeline.py
 src/waven/plotting.py
 src/waven/wavelet_io.py

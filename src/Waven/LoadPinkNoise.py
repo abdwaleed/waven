@@ -1,8 +1,8 @@
-"""
-Created on Wed Mar 25 19:31:32 2025
+"""Neural data loading, trial alignment, and coarse wavelet preparation.
 
-@author: Sophie Skriabine
-@co-author: Abdelrahman Abdelrahman
+Loads suite2p mesoscope outputs, aligns spike traces to stimulus frames via
+Cortex Lab timeline sync signals, and builds downsampled wavelet tensors used
+by receptive-field and nonlinear model stages.
 """
 import os
 import gc
@@ -20,37 +20,37 @@ else:
     matplotlib.use("TkAgg", force=True)
 
 import matplotlib.pyplot as plt
+import skimage.transform
 from .suite2p.utils import cortex_lab_utils as clu
 from .suite2p.utils import timelinepy as tlu
 from .suite2p.utils import utils as utils
+from .performance import coarse_wavelet_chunk_size, cpu_worker_count
 from .Analysis_Utils import *
 
 
 def load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=False):
+    """Combine real and imaginary wavelet phases into a normalized magnitude map."""
     w_r = wavelets_r.reshape((-1, ny, nx, 3, 9))
     w_i = wavelets_i.reshape((-1, ny, nx, 3, 9))
-    
-    # OPTIMIZATION: GPU-accelerated absolute value trick with Safe Memory Management
+
     if torch.cuda.is_available():
         try:
-            # SAFEGUARD: Prevents PyTorch from wasting RAM building a gradient history
             with torch.no_grad():
                 w_r_gpu = torch.from_numpy(w_r).cuda()
                 w_i_gpu = torch.from_numpy(w_i).cuda()
                 pn_wavelets_gpu = torch.abs(w_r_gpu) + torch.abs(w_i_gpu)
-                
+
                 sigma = 1
                 pn_wavelets_gpu = pn_wavelets_gpu.reshape((-1, ny, nx, 27))
                 sum_wavelets = torch.sum(pn_wavelets_gpu, dim=1, keepdim=True)
                 pn_wavelets_gpu = pn_wavelets_gpu / (sigma + sum_wavelets)
-                
+
                 pn_wavelets = pn_wavelets_gpu.cpu().numpy().reshape((-1, ny, nx, 3, 9))
-                
+
                 del w_r_gpu, w_i_gpu, pn_wavelets_gpu, sum_wavelets
                 torch.cuda.empty_cache()
         except RuntimeError:
-            # SAFEGUARD: If GPU OOMs, clear the cache and fallback to CPU without crashing
-            print("WARNING: GPU Out of Memory. Safely falling back to CPU...")
+            print("GPU out of memory during load_wavelets; falling back to CPU.")
             torch.cuda.empty_cache()
             pn_wavelets = np.abs(w_r) + np.abs(w_i)
             pn_wavelets = pn_wavelets.reshape((-1, ny, nx, 27))
@@ -63,7 +63,7 @@ def load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=False):
         sigma = 1
         pn_wavelets = pn_wavelets / (sigma + np.sum(pn_wavelets, axis=1, keepdims=True))
         pn_wavelets = np.reshape(pn_wavelets, (-1, ny, nx, 3, 9))
-        
+
     print(pn_wavelets.shape)
     del w_r, w_i
     gc.collect()
@@ -71,14 +71,17 @@ def load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=False):
     if direction:
         sh = np.array(wavelets_i.shape)
         sh[0] = sh[0] + 1
-        # SAFEGUARD: Prevent terminal spam and hangs from divide-by-zero scenarios
-        with np.errstate(divide='ignore', invalid='ignore'):
+        with np.errstate(divide="ignore", invalid="ignore"):
             ratio = wavelets_i / wavelets_r
-            phase = np.insert(np.nan_to_num(np.arctan(ratio)), [0], np.zeros((ny, nx, 3, 9)), 0).reshape(sh)
+            phase = np.insert(
+                np.nan_to_num(np.arctan(ratio)),
+                [0],
+                np.zeros((ny, nx, 3, 9)),
+                0,
+            ).reshape(sh)
         phase_diff = np.diff(phase, axis=0)
         return pn_wavelets, phase_diff
-    else:
-        return pn_wavelets
+    return pn_wavelets
 
 
 def load_stimulus(pathdir, wavelets_r, wavelets_i, nx=161, ny=60):
@@ -139,33 +142,50 @@ def load_stimulus(pathdir, wavelets_r, wavelets_i, nx=161, ny=60):
     return wavelets
 
 
-def load_stimulus_simple_cell(path='/media/sophie/Expansion1/UCL/datatest/', nx=27, ny=11, no=8, ns=6, nf=1, downsampling=False):
-    wavelets_r = np.load(os.path.join(path, 'dwt_videodata_0.npy'), mmap_mode='r')
-    wavelets_i = np.load(os.path.join(path, 'dwt_videodata_1.npy'), mmap_mode='r')
+def load_stimulus_simple_cell(
+    path="/media/sophie/Expansion1/UCL/datatest/",
+    nx=27,
+    ny=11,
+    no=8,
+    ns=6,
+    nf=1,
+    downsampling=False,
+):
+    """Load coarse wavelet phases from ``dwt_videodata_{0,1}.npy`` via memmap."""
+    wavelets_r = np.load(os.path.join(path, "dwt_videodata_0.npy"), mmap_mode="r")
+    wavelets_i = np.load(os.path.join(path, "dwt_videodata_1.npy"), mmap_mode="r")
     print(wavelets_r.shape)
-    
-    # OPTIMIZATION: Multiprocessing with Hang Safeguards and Hard RAM limits
+
     if downsampling:
         target_shape = (nx, ny, no, ns, nf)
-        
+
         def resize_chunk(chunk):
-            import numpy as np # Ensures local worker space has numpy
             from skimage import transform
-            return transform.resize(chunk, (chunk.shape[0],) + target_shape, anti_aliasing=True)
-            
-        # SAFEGUARD: Limit CPU threads strictly to prevent OS lockups from RAM over-allocation
-        safe_jobs = min(os.cpu_count() or 4, 4) 
-        
+
+            return transform.resize(
+                chunk,
+                (chunk.shape[0],) + target_shape,
+                anti_aliasing=True,
+            )
+
+        safe_jobs = cpu_worker_count(cap=4)
         chunks_r = np.array_split(wavelets_r, safe_jobs, axis=0)
-        # SAFEGUARD: backend='loky' prevents memory leaks, timeout prevents infinite hangs
-        wavelets_r_resized = Parallel(n_jobs=safe_jobs, backend='loky', timeout=3600)(delayed(resize_chunk)(c) for c in chunks_r)
+        wavelets_r_resized = Parallel(
+            n_jobs=safe_jobs,
+            backend="loky",
+            timeout=3600,
+        )(delayed(resize_chunk)(chunk) for chunk in chunks_r)
         wavelets_r = np.concatenate(wavelets_r_resized, axis=0)
         del wavelets_r_resized
         wavelets_r = np.swapaxes(wavelets_r, 2, 1)
         gc.collect()
 
         chunks_i = np.array_split(wavelets_i, safe_jobs, axis=0)
-        wavelets_i_resized = Parallel(n_jobs=safe_jobs, backend='loky', timeout=3600)(delayed(resize_chunk)(c) for c in chunks_i)
+        wavelets_i_resized = Parallel(
+            n_jobs=safe_jobs,
+            backend="loky",
+            timeout=3600,
+        )(delayed(resize_chunk)(chunk) for chunk in chunks_i)
         wavelets_i = np.concatenate(wavelets_i_resized, axis=0)
         del wavelets_i_resized
         wavelets_i = np.swapaxes(wavelets_i, 2, 1)
@@ -285,6 +305,11 @@ def align_rotary_encoder(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, 
 
 
 def align_datas(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, threshold=1.25, methods='frame2ttl', exptype='zebra', plotting=False):
+    """Segment neural activity into stimulus trials and resample onto frame grid.
+
+    Uses photodiode or TTL edges from ``Timeline.mat`` to delimit trials, then
+    interpolates z-scored spike traces onto ``Nb_frames`` bins per trial.
+    """
     tl, frame_times, input_ind, syncEcho_thresh = _extract_timeline_sync(exp_info, dirs, threshold, methods)
     
     print(methods, syncEcho_thresh)
@@ -410,7 +435,11 @@ def align_datas(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, th
 
 
 def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=3, Nb_frames=9000, first=False, last=True, threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra', w=0.0, plotting=False):
-    """Core logic to prevent duplicating the 80 lines of plane loading between Fluo and SPK."""
+    """Shared loader for fluorescence and deconvolved spike mesoscope data.
+
+    Reads suite2p plane outputs with memory mapping, extracts ROI positions from
+    ``stat.npy``, and delegates trial alignment to :func:`align_datas`.
+    """
     
     def load_plane_data(p, start_idx, end_idx):
         mask = np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)
@@ -513,6 +542,124 @@ def loadFluoMesoscope(exp_info, dirs, path, block_end, Nb_plane=3, Nb_frames=900
 
 def loadSPKMesoscope(exp_info, dirs, path, block_end, Nb_plane=3, Nb_frames=9000, first=False, last=True, 
                      threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra', w=0, plotting=False):
+    """Load deconvolved suite2p spikes and align them to stimulus trials."""
     return _base_load_mesoscope('spk', exp_info, dirs, path, block_end, Nb_plane, Nb_frames, 
                                 first, last, threshold, plane, method, exptype, w=w, plotting=plotting)
 
+
+def correctNeuronPos(neuron_pos, resolution=1.3671):
+    """Convert suite2p pixel coordinates to microns on a flattened cortical map.
+
+    Multi-plane mesoscope layouts stack planes vertically in pixel space.  This
+    function unwraps that tiling so neighbouring neurons share a continuous 2-D
+    coordinate system, then scales by ``resolution`` (µm per pixel).
+
+    Parameters
+    ----------
+    neuron_pos : ndarray, shape (n_neurons, 2)
+        ROI centroids in suite2p coordinates (row, column).
+    resolution : float
+        Microscope sampling resolution in µm per pixel.
+
+    Returns
+    -------
+    ndarray
+        Positions in microns on the unwrapped map.
+    """
+    neuron_pos = np.asarray(neuron_pos, dtype=np.float64).copy()
+    ly = np.ceil(np.max(neuron_pos[:, 0]) / 3)
+    lx = np.ceil(np.max(neuron_pos[:, 1]))
+
+    mid_plane = np.logical_and(neuron_pos[:, 0] > ly, neuron_pos[:, 0] <= 2 * ly)
+    neuron_pos[mid_plane] = neuron_pos[mid_plane] + np.array([-ly, lx])
+
+    top_plane = neuron_pos[:, 0] > 2 * ly
+    neuron_pos[top_plane] = neuron_pos[top_plane] + np.array([-2 * ly, 2 * lx])
+
+    return resolution * neuron_pos
+
+
+def coarseWavelet(
+    path,
+    downsampling,
+    nx0=135,
+    ny0=54,
+    nx=27,
+    ny=11,
+    no=8,
+    ns=6,
+    nf=1,
+    chunk_size=None,
+):
+    """Load or build spatially downsampled wavelets for receptive-field analysis.
+
+    Reads ``dwt_downsampled_videodata.npy`` when present; otherwise downsamples
+    ``dwt_videodata_{0,1}.npy`` in time chunks and caches the result to disk.
+
+    Returns
+    -------
+    w_r, w_i, w_c : ndarray
+        Real, imaginary, and power (r² + i²) wavelet tensors at coarse resolution.
+    """
+    if chunk_size is None:
+        chunk_size = coarse_wavelet_chunk_size()
+
+    cache_path = os.path.join(path, "dwt_downsampled_videodata.npy")
+    print("loading wavelets...")
+    if os.path.exists(cache_path):
+        print("already downsampled")
+        wavelets_downsampled = np.load(cache_path, mmap_mode="r")
+        w_r_downsampled = wavelets_downsampled[0]
+        w_i_downsampled = wavelets_downsampled[1]
+        w_c_downsampled = wavelets_downsampled[2]
+        return w_r_downsampled, w_i_downsampled, w_c_downsampled
+
+    print("downsampling")
+    wavelets_r, wavelets_i = load_stimulus_simple_cell(
+        path, nx, ny, no, ns, nf, downsampling
+    )
+    n_frames = wavelets_r.shape[0]
+    n_chunks = max(1, int(n_frames / chunk_size))
+
+    real_parts = []
+    imag_parts = []
+    power_parts = []
+
+    for chunk_index in range(n_chunks):
+        start = chunk_index * chunk_size
+        end = min((chunk_index + 1) * chunk_size, n_frames)
+        w_r = wavelets_r[start:end]
+        w_i = wavelets_i[start:end]
+        wavelets_complex = np.square(w_r) + np.square(w_i)
+
+        target_r = (w_r.shape[0], nx, ny, no, ns, nf)
+        w_r_downsampled = skimage.transform.resize(
+            w_r.reshape((-1, nx0, ny0, no, ns)),
+            target_r,
+            anti_aliasing=True,
+        )
+        w_i_downsampled = skimage.transform.resize(
+            w_i.reshape((-1, nx0, ny0, no, ns)),
+            target_r,
+            anti_aliasing=True,
+        )
+        w_c_downsampled = skimage.transform.resize(
+            wavelets_complex.reshape((-1, nx0, ny0, no, ns, nf)),
+            target_r,
+            anti_aliasing=True,
+        )
+        del w_r, w_i, wavelets_complex
+
+        real_parts.append(w_r_downsampled)
+        imag_parts.append(w_i_downsampled)
+        power_parts.append(w_c_downsampled)
+        gc.collect()
+
+    del wavelets_r, wavelets_i
+    w_r_downsampled = np.concatenate(real_parts, axis=0)
+    w_i_downsampled = np.concatenate(imag_parts, axis=0)
+    w_c_downsampled = np.concatenate(power_parts, axis=0)
+    del real_parts, imag_parts, power_parts
+
+    np.save(cache_path, [w_r_downsampled, w_i_downsampled, w_c_downsampled])
+    return w_r_downsampled, w_i_downsampled, w_c_downsampled

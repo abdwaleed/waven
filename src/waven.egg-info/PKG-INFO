@@ -1,8 +1,8 @@
 Metadata-Version: 2.4
 Name: waven
-Version: 0.0.4
+Version: 0.1.0
 Summary: wavelet based analysis of neural spikes
-Author-email: Sophie Skriabine <sophie.skriabine@gmail.com>
+Author-email: Sophie Skriabine <sophie.skriabine@gmail.com>, Abdelrahman A <abdwaleed.a@gmail.com>
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
@@ -19,11 +19,12 @@ Requires-Dist: scikit-learn
 Requires-Dist: scipy
 Requires-Dist: seaborn
 Requires-Dist: tifffile
-Requires-Dist: torch>=2.0.0
+Requires-Dist: torch>=2.1.2
 Requires-Dist: tensorly
 Requires-Dist: zarr
 Requires-Dist: numexpr
 Requires-Dist: tqdm
+Requires-Dist: psutil
 Dynamic: license-file
 
 <div>
