@@ -2,6 +2,7 @@
 Created on Wed Mar 25 19:31:32 2025
 
 @author: Sophie Skriabine
+@co-author: Abdelrahman Abdelrahman
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox

@@ -57,7 +57,7 @@ def has_enough_ram(required_bytes, safety_margin=1.20):
     
     print(f"Memory Check: Operation needs {required_gb:.2f} GB. "
           f"System has {available_gb:.2f} GB available. "
-          f"Route: {'IN-MEMORY' if is_safe else 'DISK-STREAMING'}")
+          f"Route: {'IN-MEMORY' if is_safe else 'DISK-STREAMING'}", end="\n\n")
           
     return is_safe
 
@@ -318,7 +318,7 @@ def downsample_video_binary(path, visual_coverage, analysis_coverage, shape=(54,
     frames_buffer = []
     frame_idx = 0
     
-    print(f"Downsampling {total_frames} frames directly to disk...")
+    print(f"Downsampling {total_frames} frames directly to disk...", end="\n\n")
     while True:
         ret, img = cap.read()
         if not ret:
@@ -467,12 +467,12 @@ def waveletTransform3D(frame, L):
     return output.detach().cpu().numpy()
 
 
-def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path='/media/sophie/Expansion1/UCL/datatest/gabors_library.npy'):
+def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path):
     """
     Scalable wavelet decomposition engine. 
     Dynamically routes to System RAM if available, or Disk-Streaming if RAM is low.
     """
-    print(f"Loading Gabor library from {library_path} (mmap_mode='r')...")
+    print(f"Loading Gabor library from {library_path} (mmap_mode='r')...", end="\n\n")
     L = np.load(library_path, mmap_mode='r') 
     
     prefix_shape = L.shape[:3] # (lx, ly, thetas)
@@ -499,7 +499,7 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path='/m
     WT_flat = WT_final.reshape(num_filters, T, len(sigmas))
 
     for s, ss in enumerate(sigmas):
-        print(f"Processing sigma {s + 1}/{len(sigmas)}...")
+        print(f"Processing sigma {s + 1}/{len(sigmas)}...", end="\n\n")
         
         # Pass the flattened view and the specific sigma index
         getWTfromNPY(videodata, L[:, :, :, s], phase, WT_flat=WT_flat, s_idx=s)
@@ -512,9 +512,9 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path='/m
         del WT_final, WT_flat
         print(f"Success! Saved streamed disk array to {save_path}")
     else:
-        print("Saving array to disk...")
+        print("Saving array to disk...", end="\n\n")
         np.save(save_path, WT_final)
-        print(f"Success! Saved RAM array to {save_path}")
+        print(f"Success! Saved RAM array to {save_path}", end="\n\n")
 
 
 def getTrueRF(idx, rfs, L):
