@@ -178,7 +178,7 @@ def align_ephys_data(
             raise Exception("Start timestamps array and End timestamps array are not of same size.")
 
         valid_times = ends - starts
-        ideal = stim_dur * 60 * fs
+        ideal = stim_dur * fs
         valid_mask = abs(valid_times - ideal) <= tolerance * ideal
 
         return starts[valid_mask], ends[valid_mask] 
@@ -194,7 +194,7 @@ def align_ephys_data(
         SAMPLING_RATE = pkl_data['metadata']['sampling_frequencies'][0]
         units = pkl_data['units']
 
-    STIMULUS_DURATION = 10 
+    STIMULUS_DURATION = 10 * 60 # IN SECONDS
 
     dio_files = get_dio_files(data_dir)
     pd_time, pd_state = choose_correct_din_file(dio_files, 3)
@@ -204,12 +204,28 @@ def align_ephys_data(
     start_times, end_times = validate_edges(start_times, end_times, STIMULUS_DURATION, SAMPLING_RATE, 0.01)
 
     neuron_pos, spikes = extract_pos_and_spikes(units, start_times, end_times, pd_time, pd_state, nb_frames)
+    
+    print(neuron_pos.shape)
+    print(spikes.shape)
+    np.save("pos.npy", neuron_pos)
+    np.save("spikes.npy", spikes)
 
     return AlignedNeuralData(
         spikes=spikes,
         neuron_pos=neuron_pos,
         aligned_spikes=None,
     )
+
+# TEST EPHYS CODE
+#import time
+#start_time = time.time()
+#align_ephys_data(r'C:\Users\Abdelrahman\Documents\VISUAL STUDIO CODE PROJECTS\surf\gabor-analysis\waven\your_experiment\input\ephys',
+#                 30 * 60 * 10,
+#                 30000)
+#end_time = time.time()
+#print(f"TIME: {end_time - start_time:.6f} seconds")
+#
+#raise SystemExit
 
 def load_aligned_spikes(
     workflow: str,
