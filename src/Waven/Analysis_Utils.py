@@ -205,7 +205,7 @@ def orientation_correction_for_stretches(visual_coverage, nx, ny, omax):
     return corrected_ori
 
 
-def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, visual_coverage, screen_ratio, sigmas, fil=[0], absolute=False, plotting=False):
+def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, visual_coverage, screen_ratio, sigmas, n_orientations=8, fil=[0], absolute=False, plotting=False):
     """RF correlation for pink-noise stimuli with retinotopy and tuning extraction."""
     stim_flat = stim.reshape(stim.shape[0], -1)
 
@@ -218,19 +218,22 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, visual_cover
     rfs[rfs >= 0.99] -= 1.0
     np.nan_to_num(rfs, copy=False)
     print(rfs.shape)
-    
-    rfs = rfs.reshape(rfs.shape[0], nx, ny, 8, ns)
-    
+
+    rfs = rfs.reshape(rfs.shape[0], nx, ny, n_orientations, ns)
+
     abs_rfs = np.abs(rfs)
     flat_abs_rfs = abs_rfs.reshape(abs_rfs.shape[0], -1)
     flat_max_idx = np.argmax(flat_abs_rfs, axis=1)
-    
+
     maxes = flat_abs_rfs[np.arange(abs_rfs.shape[0]), flat_max_idx]
-    xmax, ymax, omax, smax = np.unravel_index(flat_max_idx, (nx, ny, 8, ns))
-    
+    xmax, ymax, omax, smax = np.unravel_index(flat_max_idx, (nx, ny, n_orientations, ns))
+
     maxe = [xmax, ymax, omax, smax]
     xM, xm, yM, ym = visual_coverage
-    omax_corr = orientation_correction_for_stretches(visual_coverage, nx, ny, omax * 22.5)
+    degrees_per_orientation = 180.0 / n_orientations
+    omax_corr = orientation_correction_for_stretches(
+        visual_coverage, nx, ny, omax * degrees_per_orientation
+    )
     xmax_corr = (abs(xmax) * (abs(xm - xM) / nx)) + xM
     ymax_corr = (abs(ymax - ny) * (abs(yM - ym) / ny)) + ym
     

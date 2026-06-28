@@ -37,6 +37,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Optional JSON config with 'gabor' and 'analysis' sections.",
     )
     parser.add_argument(
+        "--workflow",
+        choices=["2p", "ephys"],
+        help="Data workflow when loading JSON config (2p or ephys).",
+    )
+    parser.add_argument(
         "--gui",
         action="store_true",
         help="Open the Tkinter GUI. This is the default when no action is given.",
@@ -80,27 +85,32 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def load_config(config_path: Optional[Path]) -> PipelineConfig:
+def load_config(
+    config_path: Optional[Path],
+    workflow: Optional[str] = None,
+) -> PipelineConfig:
     """Load JSON configuration or fall back to the example defaults."""
+    selected_workflow = workflow or "2p"
     if config_path is None:
-        return default_pipeline_config()
-    return PipelineConfig.from_json(config_path)
+        return default_pipeline_config(workflow=selected_workflow)
+    return PipelineConfig.from_json(config_path, workflow=selected_workflow)
 
 
-def run_gui(config: PipelineConfig) -> None:
+def run_gui(config: PipelineConfig, workflow: str | None = None) -> None:
     """Open the Tkinter GUI with the same typed defaults."""
     from waven import zebraGUI as ui
 
     ui.run(
         config.analysis.to_gui_mapping(),
         config.gabor.to_gui_mapping(),
+        workflow=workflow or config.workflow,
     )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Run GUI or batch mode."""
     args = parse_args(argv)
-    config = load_config(args.config)
+    config = load_config(args.config, workflow=args.workflow)
 
     no_batch_action = not any(
         [

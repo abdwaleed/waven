@@ -15,7 +15,7 @@ try:
 except ImportError:  # pragma: no cover - Python < 3.8 fallback
     from importlib_metadata import version  # type: ignore
 
-from .config import AnalysisConfig, GaborConfig, PipelineConfig, default_pipeline_config
+from .config import AnalysisConfig, GaborConfig, PipelineConfig, coarse_grid_dimensions, default_pipeline_config
 from .pipeline import (
     PipelineOutputs,
     RFAnalysisResult,
@@ -60,6 +60,7 @@ __all__ = [
     "SpikeData",
     "WaveletData",
     "create_gabor_library",
+    "coarse_grid_dimensions",
     "default_pipeline_config",
     "load_coarse_wavelets",
     "load_spikes_and_positions",

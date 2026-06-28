@@ -203,39 +203,32 @@ def load_spikes_and_positions(
     method: str = "frame2ttl",
     correct_positions: bool = True,
 ) -> SpikeData:
-    """Load spike responses and neuron positions from suite2p or pre-aligned npy files.
+    """Load spike responses and neuron positions for the configured workflow."""
+    from . import time_alignment as ta
 
-    When ``analysis.spks_path`` is set, reads ``spikes.npy`` and sibling ``pos.npy``
-    and skips suite2p alignment.  Otherwise loads from the configured experiment
-    directory and aligns trials via the Cortex Lab timeline.
-    """
-    from . import LoadPinkNoise as lpn
+    aligned = ta.load_aligned_spikes(
+        analysis.workflow,
+        experiment_info=analysis.experiment_info,
+        data_dir=analysis.data_dir,
+        data_dir_strings=list(analysis.data_dir_strings),
+        suite2p_dir=analysis.suite2p_dir,
+        block_end=analysis.block_end,
+        n_planes=analysis.n_planes,
+        nb_frames=analysis.nb_frames,
+        resolution=analysis.resolution,
+        sampling_rate=analysis.sampling_rate,
+        spks_path=analysis.spks_path,
+        threshold=threshold,
+        method=method,
+        correct_positions=correct_positions,
+    )
 
-    if analysis.spks_path is None:
-        require_directory(analysis.suite2p_dir, "suite2p directory")
-        spikes, aligned_spikes, neuron_pos = lpn.loadSPKMesoscope(
-            analysis.experiment_info,
-            list(analysis.data_dir_strings),
-            str(analysis.suite2p_dir),
-            analysis.block_end,
-            analysis.n_planes,
-            analysis.nb_frames,
-            threshold=threshold,
-            last=True,
-            method=method,
-        )
-        if correct_positions:
-            neuron_pos = lpn.correctNeuronPos(neuron_pos, analysis.resolution)
-    else:
-        require_file(analysis.spks_path, "Spike file")
-        spikes = np.load(analysis.spks_path, mmap_mode="r")
-        pos_path = analysis.spks_path.parent / "pos.npy"
-        require_file(pos_path, "Neuron position file")
-        neuron_pos = np.load(pos_path)
-        aligned_spikes = None
-
-    validate_spike_data(spikes, neuron_pos)
-    return SpikeData(spikes=spikes, aligned_spikes=aligned_spikes, neuron_pos=neuron_pos)
+    validate_spike_data(aligned.spikes, aligned.neuron_pos)
+    return SpikeData(
+        spikes=aligned.spikes,
+        aligned_spikes=aligned.aligned_spikes,
+        neuron_pos=aligned.neuron_pos,
+    )
 
 
 def load_coarse_wavelets(analysis: AnalysisConfig, gabor: GaborConfig) -> WaveletData:
@@ -250,8 +243,8 @@ def load_coarse_wavelets(analysis: AnalysisConfig, gabor: GaborConfig) -> Wavele
         False,
         nx0=analysis.nx,
         ny0=analysis.ny,
-        nx=27,
-        ny=11,
+        nx=analysis.coarse_nx,
+        ny=analysis.coarse_ny,
         no=gabor.n_thetas,
         ns=len(analysis.sigmas),
     )
@@ -290,12 +283,13 @@ def run_rf_analysis(
         stimulus,
         response,
         spike_data.neuron_pos,
-        27,
-        11,
+        analysis.coarse_nx,
+        analysis.coarse_ny,
         len(analysis.sigmas),
         analysis.analysis_coverage,
         analysis.screen_ratio,
         analysis.sigmas_deg,
+        n_orientations=gabor.n_thetas,
         plotting=plotting,
     )
 

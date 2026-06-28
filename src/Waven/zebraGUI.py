@@ -6,6 +6,7 @@ live terminal output, and embedded matplotlib visualizations.
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
+from pathlib import Path
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import threading
 import sys
@@ -20,7 +21,16 @@ try:
 except Exception:
     pass
 
-from .config import parse_literal
+from .config import (
+    AnalysisConfig,
+    DEFAULT_COMMON_PARAMS,
+    DEFAULT_EPHYS_PARAMS,
+    DEFAULT_TWO_PHOTON_PARAMS,
+    WORKFLOW_2P,
+    WORKFLOW_EPHYS,
+    coarse_grid_dimensions,
+    parse_literal,
+)
 from .WaveletGenerator import *
 from .LoadPinkNoise import *
 from .Analysis_Utils import *
@@ -75,16 +85,68 @@ class ToolTip(object):
         self.tipwindow = None
         if tw: tw.destroy()
 
-def _parse_dirs(value):
+def _parse_data_dir(value):
     try:
-        parsed = parse_literal(value, "Dirs")
+        parsed = parse_literal(value, "Dir")
     except ValueError:
         parsed = value
-    if parsed is None: return []
-    if isinstance(parsed, (list, tuple)): return [str(path) for path in parsed]
+    if parsed is None:
+        return []
+    if isinstance(parsed, (list, tuple)):
+        return [str(path) for path in parsed]
     return [str(parsed)]
 
-def run(param_defaults, gabor_param):
+
+def _prompt_workflow() -> str:
+    """Ask the user to choose a data workflow before opening the main GUI."""
+    dialog = tk.Tk()
+    dialog.title("Select Data Workflow")
+    dialog.geometry("420x180")
+    dialog.resizable(False, False)
+    dialog.configure(bg="#F0F3F7")
+
+    choice = {"workflow": None}
+
+    tk.Label(
+        dialog,
+        text="Which neural data type are you analyzing?",
+        bg="#F0F3F7",
+        fg="#2B3A4A",
+        font=("Segoe UI Variable Display", 11, "bold"),
+    ).pack(pady=(24, 12))
+
+    button_frame = tk.Frame(dialog, bg="#F0F3F7")
+    button_frame.pack(pady=8)
+
+    def select(workflow):
+        choice["workflow"] = workflow
+        dialog.destroy()
+
+    tk.Button(
+        button_frame,
+        text="Two-Photon (2p)",
+        width=18,
+        command=lambda: select(WORKFLOW_2P),
+    ).pack(side=tk.LEFT, padx=8)
+    tk.Button(
+        button_frame,
+        text="Electrophysiology (Ephys)",
+        width=22,
+        command=lambda: select(WORKFLOW_EPHYS),
+    ).pack(side=tk.LEFT, padx=8)
+
+    dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+    dialog.grab_set()
+    dialog.wait_window()
+
+    if choice["workflow"] is None:
+        raise SystemExit(0)
+    return choice["workflow"]
+
+
+def run(param_defaults, gabor_param, workflow=None):
+    if workflow is None:
+        workflow = _prompt_workflow()
 
     GABOR_LABELS = {
         "N_thetas": "Orientation Count",
@@ -97,8 +159,8 @@ def run(param_defaults, gabor_param):
     }
 
     ANALYSIS_LABELS = {
+        "Dir": "Data Directory (.tiff or .pkl/.din)",
         "Path Directory": "Wavelet Output Directory",
-        "Dirs": "Dataset Root Directory",
         "Experiment Info": "Experiment ID (mouse, date, #)",
         "Number of Planes": "Imaging Planes",
         "Block End": "Session Block Start Frame",
@@ -107,6 +169,7 @@ def run(param_defaults, gabor_param):
         "NX": "Analysis Grid Width (px)",
         "NY": "Analysis Grid Height (px)",
         "Resolution": "Microscope Resolution (µm/px)",
+        "Sampling Rate (samples / sec)": "Recording Sampling Rate (Hz)",
         "Sigmas": "RF Filter Sizes (px)",
         "Sigmas Full Model": "Full-Model Filter Sizes (px)",
         "Frequencies": "Stimulus Frequencies (cyc/px)",
@@ -123,6 +186,18 @@ def run(param_defaults, gabor_param):
         "Neuron ID": "Neuron Index",
     }
 
+    workflow_param_keys = AnalysisConfig.gui_param_keys(workflow)
+    merged_param_defaults = dict(DEFAULT_COMMON_PARAMS)
+    if workflow == WORKFLOW_2P:
+        merged_param_defaults.update(DEFAULT_TWO_PHOTON_PARAMS)
+    else:
+        merged_param_defaults.update(DEFAULT_EPHYS_PARAMS)
+    merged_param_defaults.update(param_defaults)
+    filtered_param_defaults = {
+        key: merged_param_defaults.get(key, "")
+        for key in workflow_param_keys
+    }
+
     FIELD_LABELS = {**GABOR_LABELS, **ANALYSIS_LABELS}
 
     BROWSE_KIND = {
@@ -131,7 +206,7 @@ def run(param_defaults, gabor_param):
         "Library Path": "file",
         "Spks Path": "file",
         "Path Directory": "dir",
-        "Dirs": "dir",
+        "Dir": "dir",
         "Full Model Wavelet Path": "dir",
         "Full Model Save Path": "dir",
     }
@@ -260,35 +335,66 @@ def run(param_defaults, gabor_param):
     
     def plot_data():
         try:
-            dirs = _parse_dirs(param_entries["Dirs"].get())
+            data_dirs = _parse_data_dir(param_entries["Dir"].get())
             exp_info = parse_literal(param_entries["Experiment Info"].get(), "Experiment Info")
             sigmas = np.array(parse_literal(param_entries["Sigmas"].get(), "Sigmas"))
             visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
             analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
-            n_planes = int(param_entries["Number of Planes"].get())
             block_end = int(param_entries["Block End"].get())
             nx = int(param_entries["NX"].get())
             ny = int(param_entries["NY"].get())
+            coarse_nx, coarse_ny = coarse_grid_dimensions(nx, ny)
+            n_orientations = int(gabor_entries["N_thetas"].get())
             ns = len(sigmas)
-            resolution = float(param_entries["Resolution"].get())
             spks_path = param_entries["Spks Path"].get()
             nb_frames = int(param_entries["Number of Frames"].get())
             movpath = param_entries["Movie Path"].get()
             screen_ratio = abs(visual_coverage[0] - visual_coverage[1]) / nx
             xM, xm, yM, ym = analysis_coverage
+            if workflow == WORKFLOW_2P:
+                n_planes = int(param_entries["Number of Planes"].get())
+                resolution = float(param_entries["Resolution"].get())
+                sampling_rate = None
+            else:
+                n_planes = None
+                resolution = None
+                sampling_rate = float(
+                    param_entries["Sampling Rate (samples / sec)"].get()
+                )
         except Exception as e:
             print(f"Invalid input: {e}")
             return
 
-        pathdata = os.path.join(dirs[0], exp_info[0], exp_info[1], str(exp_info[2]))
+        pathdata = os.path.join(data_dirs[0], exp_info[0], exp_info[1], str(exp_info[2]))
         pathsuite2p = os.path.join(pathdata, 'suite2p')
         deg_per_pix = abs(xM - xm) / nx
         sigmas_deg = np.trunc(2 * deg_per_pix * sigmas * 100) / 100
-        
+
         if spks_path.strip().lower() in ("", "none", "null"):
-            spks, spks_n, neuron_pos = loadSPKMesoscope(exp_info, dirs, pathsuite2p, block_end, n_planes, nb_frames, threshold=1.25, last=True, method='frame2ttl')
-            neuron_pos = correctNeuronPos(neuron_pos, resolution)
-            neuron_pos[:, 1] = abs(neuron_pos[:, 1] - np.max(neuron_pos[:, 1]))
+            from . import time_alignment as ta
+
+            try:
+                aligned = ta.load_aligned_spikes(
+                    workflow,
+                    experiment_info=exp_info,
+                    data_dir=Path(data_dirs[0]),
+                    data_dir_strings=data_dirs,
+                    suite2p_dir=Path(pathsuite2p),
+                    block_end=block_end,
+                    n_planes=n_planes,
+                    nb_frames=nb_frames,
+                    resolution=resolution,
+                    sampling_rate=sampling_rate,
+                    threshold=1.25,
+                    method='frame2ttl',
+                )
+            except NotImplementedError as exc:
+                print(exc)
+                return
+            spks = aligned.spikes
+            neuron_pos = aligned.neuron_pos
+            if workflow == WORKFLOW_2P:
+                neuron_pos[:, 1] = abs(neuron_pos[:, 1] - np.max(neuron_pos[:, 1]))
         else:
             try:
                 spks = np.load(spks_path)
@@ -316,7 +422,8 @@ def run(param_defaults, gabor_param):
         n_frames = min(nb_frames, w_c_downsampled.shape[0], spks.shape[1])
         rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled[:n_frames].reshape(n_frames, -1),
                                                 np.mean(spks[:, :n_frames], axis=0),
-                                                neuron_pos, 27, 11, ns, analysis_coverage, screen_ratio, sigmas_deg,
+                                                neuron_pos, coarse_nx, coarse_ny, ns, analysis_coverage, screen_ratio, sigmas_deg,
+                                                n_orientations=n_orientations,
                                                 plotting=False)
 
         def render_gui_plots():
@@ -454,7 +561,7 @@ def run(param_defaults, gabor_param):
             
         npy_dir = os.path.dirname(movpath)
         zarr_dir = npy_dir 
-        hz = 30 
+        hz = int(param_entries["Hz"].get())
         
         print(f"Starting Zarr conversion...\nTarget Directory: {npy_dir}")
         convert_npy_to_zarr(npy_dir, zarr_dir, hz)
@@ -503,7 +610,8 @@ def run(param_defaults, gabor_param):
 
     # --- Root Window Setup & Theming ---
     root = tk.Tk()
-    root.title("Neuron Analysis Toolkit")
+    workflow_label = "Two-Photon" if workflow == WORKFLOW_2P else "Electrophysiology"
+    root.title(f"Neuron Analysis Toolkit — {workflow_label}")
 
     def on_closing():
         root.quit()      
@@ -718,13 +826,18 @@ def run(param_defaults, gabor_param):
     btn_convert_zarr.pack(fill=tk.X, pady=3)
 
     # --- Experiment configuration ---
-    frame_params = ttk.LabelFrame(frame_left, text="Experiment Configuration", padding=15)
+    frame_params = ttk.LabelFrame(
+        frame_left,
+        text=f"Experiment Configuration ({workflow_label})",
+        padding=15,
+    )
     frame_params.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
     frame_params.columnconfigure(1, weight=1)
 
     param_entries = {}
-    for i, (label, default) in enumerate(param_defaults.items()):
-        add_config_row(frame_params, label, default, param_entries, i, frame_color, ANALYSIS_LABELS)
+    for i, key in enumerate(workflow_param_keys):
+        default = filtered_param_defaults.get(key, "")
+        add_config_row(frame_params, key, default, param_entries, i, frame_color, ANALYSIS_LABELS)
 
     # --- 3 · Neural & RF analysis ---
     frame_analysis = ttk.LabelFrame(frame_left, text="3 · Neural & RF Analysis", padding=15)
