@@ -78,30 +78,135 @@ def align_ephys_data(
     sampling_rate: float,
     **kwargs: Any,
 ) -> AlignedNeuralData:
-    """Time-align electrophysiology recordings to the stimulus timeline.
+    
+    import suite_ephys.DIO as DIO
+    import numpy as np
+    import os
+    import re
 
-    Implement this function for your ephys data layout.  ``data_dir`` should
-    contain a ``.pkl`` metadata file and a subfolder of ``.din`` trace files.
+    #======================================
+    # PKL-SPECIFIC FUNCTIONS
+    #======================================
+    def get_pkl_path(directory):
+        file_pattern = re.compile(r"\.pkl$")
+        for filename in os.listdir(directory):
+            if file_pattern.search(filename):
+                return os.path.join(directory, filename)
+        raise FileNotFoundError("No .pkl file found in data directory.")
 
-    The returned object MUST provide:
+    def extract_pos_and_spikes(units, start_times, end_times, pd_time, pd_state, nb_frames):
+        n_trials = len(start_times)
+        n_neurons = len(units)
 
-    - ``spikes``: ``np.ndarray`` with shape ``(n_trials, n_timepoints, n_neurons)``
-      containing trial-aligned spike counts or firing rates, binned to the same
-      frame grid used by the stimulus wavelets (``n_timepoints`` is typically
-      ``nb_frames`` per trial).
+        neuron_pos = np.zeros((n_neurons, 2))
+        spikes = np.zeros((n_trials, nb_frames, n_neurons))
 
-    - ``neuron_pos``: ``np.ndarray`` with shape ``(n_neurons, 2)`` giving each
-      unit's spatial coordinates (same convention as the 2p pipeline: column 0
-      is X, column 1 is Y, in micrometers or another consistent spatial unit).
+        for neuron_idx, neuron_data in enumerate(units.values()):
+            
+            neuron_pos[neuron_idx, :] = neuron_data['position'][:2] 
+            spike_train = np.array(neuron_data['spike_train'])
 
-    - ``aligned_spikes`` (optional): ``np.ndarray`` with the same shape as
-      ``spikes``, or ``None`` if not used.
+            for trial_idx, (start_time, end_time) in enumerate(zip(start_times, end_times)):
+                trial_pd_mask = (pd_time >= start_time) & (pd_time <= end_time)
+                trial_pd_time = pd_time[trial_pd_mask]
+                trial_pd_state = pd_state[trial_pd_mask]
 
-    Downstream RF analysis validates that ``neuron_pos.shape[0] == spikes.shape[2]``.
-    """
-    raise NotImplementedError(
-        "Implement align_ephys_data() in time_alignment.py for your ephys data. "
-        "See the docstring for the required output structure."
+                state_changes = np.diff(trial_pd_state) != 0 
+                state_changes = np.insert(state_changes, 0, False) 
+                
+                flip_times = trial_pd_time[state_changes] 
+                frame_edges = np.concatenate(([trial_pd_time[0]], flip_times, [trial_pd_time[-1]]))
+
+                # ENFORCE EXACT BIN COUNT to prevent ValueError
+                if len(frame_edges) > nb_frames + 1:
+                    frame_edges = frame_edges[:nb_frames + 1]
+                elif len(frame_edges) < nb_frames + 1:
+                    frame_edges = np.linspace(trial_pd_time[0], trial_pd_time[-1], nb_frames + 1)
+
+                trial_spikes = spike_train[(spike_train >= start_time) & (spike_train <= end_time)]
+
+                # 1. Get raw counts per bin
+                binned_counts, _ = np.histogram(trial_spikes, bins=frame_edges)
+                
+                # 2. Calculate the exact duration of each bin in seconds
+                # np.diff gets the distance between edges in samples; divide by sampling_rate for seconds
+                bin_durations_sec = np.diff(frame_edges) / sampling_rate
+                
+                # 3. Safety Check: Prevent division by zero 
+                # (In case a hardware glitch caused two PD pulses to register at the exact same sample)
+                bin_durations_sec[bin_durations_sec == 0] = 1e-9
+                
+                # 4. Calculate Firing Rate (Hz)
+                firing_rate_hz = binned_counts / bin_durations_sec
+                
+                spikes[trial_idx, :, neuron_idx] = firing_rate_hz
+
+        # Return pure counts. Do not subtract timestamps here.
+        return neuron_pos, spikes
+    
+    #======================================
+    # DIN-SPECIFIC FUNCTIONS
+    #======================================
+    def get_dio_files(dio_dir):
+        dio_folders = DIO.get_dio_folders(dio_dir)
+        return sorted(dio_folders, key=lambda x:x.name)
+
+    def choose_correct_din_file(dio_files, port):
+        temp_time, pd_state = DIO.concatenate_din_data(dio_files, port)
+        return (temp_time - temp_time[0]), pd_state 
+    
+    def get_frequency(pd_time, fs):
+        time_diff = np.diff(pd_time) / fs 
+        freq = 1. / time_diff / 1000 
+        return np.insert(freq, 0, 0) 
+    
+    def get_possible_trial_edges(freq, time_array):
+        bin_freq = (freq >= 0.01).astype(int)
+        chng_freq = np.diff(bin_freq)
+        chng_freq = np.insert(chng_freq, 0, 0)
+        
+        start_times_idx = chng_freq == +1
+        end_times_idx = chng_freq == -1
+
+        return time_array[start_times_idx], time_array[end_times_idx]
+    
+    def validate_edges(starts, ends, stim_dur, fs, tolerance=0.01): 
+        if starts.shape != ends.shape:
+            raise Exception("Start timestamps array and End timestamps array are not of same size.")
+
+        valid_times = ends - starts
+        ideal = stim_dur * 60 * fs
+        valid_mask = abs(valid_times - ideal) <= tolerance * ideal
+
+        return starts[valid_mask], ends[valid_mask] 
+    
+    #======================================
+    # MAIN EXECUTION
+    #======================================
+    pkl_path = get_pkl_path(data_dir)
+    
+    with open(pkl_path, "rb") as data:
+        import pickle
+        pkl_data = pickle.load(data) # Make sure to actually load the pickle!
+        SAMPLING_RATE = pkl_data['metadata']['sampling_frequencies'][0]
+        units = pkl_data['units']
+
+    STIMULUS_DURATION = 10 
+    dio_dir = os.path.join(data_dir, "din-data")
+    
+    dio_files = get_dio_files(dio_dir)
+    pd_time, pd_state = choose_correct_din_file(dio_files, 3)
+    freq = get_frequency(pd_time, SAMPLING_RATE)
+
+    start_times, end_times = get_possible_trial_edges(freq, pd_time) 
+    start_times, end_times = validate_edges(start_times, end_times, STIMULUS_DURATION, SAMPLING_RATE, 0.01)
+
+    neuron_pos, spikes = extract_pos_and_spikes(units, start_times, end_times, pd_time, pd_state, nb_frames)
+
+    return AlignedNeuralData(
+        spikes=spikes,
+        neuron_pos=neuron_pos,
+        aligned_spikes=None,
     )
 
 
