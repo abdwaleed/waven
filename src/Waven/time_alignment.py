@@ -65,6 +65,9 @@ def load_two_photon_spikes(
         neuron_pos = np.load(pos_path)
         aligned_spikes = None
 
+    np.save("pos.npy", neuron_pos)
+    np.save("spikes.npy", spikes)
+
     return AlignedNeuralData(
         spikes=spikes,
         neuron_pos=neuron_pos,
@@ -153,7 +156,7 @@ def align_ephys_data(
 
     def choose_correct_din_file(dio_files, port):
         temp_time, pd_state = DIO.concatenate_din_data(dio_files, port)
-        return (temp_time - temp_time[0]), pd_state 
+        return (temp_time - temp_time[0]), pd_state # aligns timestamps relative to start time, making it index 0
     
     def get_frequency(pd_time, fs):
         time_diff = np.diff(pd_time) / fs 
@@ -192,9 +195,8 @@ def align_ephys_data(
         units = pkl_data['units']
 
     STIMULUS_DURATION = 10 
-    dio_dir = os.path.join(data_dir, "din-data")
-    
-    dio_files = get_dio_files(dio_dir)
+
+    dio_files = get_dio_files(data_dir)
     pd_time, pd_state = choose_correct_din_file(dio_files, 3)
     freq = get_frequency(pd_time, SAMPLING_RATE)
 
@@ -208,7 +210,6 @@ def align_ephys_data(
         neuron_pos=neuron_pos,
         aligned_spikes=None,
     )
-
 
 def load_aligned_spikes(
     workflow: str,

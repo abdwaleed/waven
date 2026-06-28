@@ -28,7 +28,8 @@ dependencies = [
     "zarr",
     "numexpr",
     "tqdm",
-    "psutil"
+    "psutil",
+    "spikeinterface"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

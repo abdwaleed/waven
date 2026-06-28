@@ -27,6 +27,7 @@ dependencies:
   - imageio
   - pywavelets
   - tqdm
+  - spikeinterface
 
   # Computer vision, array storage, and compression.
   - opencv

@@ -9,7 +9,7 @@
     "Save Path": "{PROJECT_ROOT}/your_experiment/gabor-lib/gabors_library.npy"
   },
   "common": {
-    "Dir": "{PROJECT_ROOT}/your_experiment/input/datasets",
+    "Dir": "{PROJECT_ROOT}/your_experiment/input/ephys",
     "Path Directory": "{PROJECT_ROOT}/your_experiment/input",
     "Experiment Info": "('SS002', '2024-07-23', 3)",
     "Block End": "0",
