@@ -307,8 +307,8 @@ def downsample_video_binary(
     vis_cov = np.array(visual_coverage)
     ana_cov = np.array(analysis_coverage)
     
-    xi = int((vis_cov - ana_cov)[2])
-    yi = int((vis_cov - ana_cov)[0])
+    xi = int(abs((vis_cov - ana_cov)[2]))
+    yi = int(abs((vis_cov - ana_cov)[0]))
     
     # Grab one frame to dynamically determine cropping bounds
     ret, first_img = cap.read()

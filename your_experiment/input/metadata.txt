@@ -1,6 +1,0 @@
-dataset from paper : "Mapping the Visual cortex with Zebra Noise" : time aligned raw 2p mesoscope data with 30Hz movie and their respective timestamps
-
-This folder contain the following items: 
-.tif files of the raw 2p mesoscope recordings (2024-07-23_3_SS002_2P_00001_0000{}.tif)
-.mp4 movie of the zebra noise stimulus played at 30 Hz
- a .npy files containing the 2p timestamps and the stimulus frame timestamps
