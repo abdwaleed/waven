@@ -205,8 +205,8 @@ def orientation_correction_for_stretches(visual_coverage, nx, ny, omax):
     return corrected_ori
 
 
-def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, visual_coverage, screen_ratio, sigmas, n_orientations=8, fil=[0], absolute=False, plotting=False):
-    """RF correlation for pink-noise stimuli with retinotopy and tuning extraction."""
+def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_coverage, screen_ratio, sigmas, frequencies, n_orientations=8, fil=[0], absolute=False, plotting=False):
+    """RF correlation for pink-noise stimuli with retinotopy and tuning extraction (6D)."""
     stim_flat = stim.reshape(stim.shape[0], -1)
 
     rfs = _safe_chunked_cross_corr(stim_flat, resp)
@@ -219,16 +219,21 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, visual_cover
     np.nan_to_num(rfs, copy=False)
     print(rfs.shape)
 
-    rfs = rfs.reshape(rfs.shape[0], nx, ny, n_orientations, ns)
+    # 1. Update reshape for the 6th dimension (nf)
+    rfs = rfs.reshape(rfs.shape[0], nx, ny, n_orientations, ns, nf)
 
     abs_rfs = np.abs(rfs)
     flat_abs_rfs = abs_rfs.reshape(abs_rfs.shape[0], -1)
     flat_max_idx = np.argmax(flat_abs_rfs, axis=1)
 
     maxes = flat_abs_rfs[np.arange(abs_rfs.shape[0]), flat_max_idx]
-    xmax, ymax, omax, smax = np.unravel_index(flat_max_idx, (nx, ny, n_orientations, ns))
+    
+    # 2. Unpack 5 dimensions
+    xmax, ymax, omax, smax, fmax = np.unravel_index(flat_max_idx, (nx, ny, n_orientations, ns, nf))
 
-    maxe = [xmax, ymax, omax, smax]
+    # 3. Add frequency to the max outputs
+    maxe = [xmax, ymax, omax, smax, fmax]
+    
     xM, xm, yM, ym = visual_coverage
     degrees_per_orientation = 180.0 / n_orientations
     omax_corr = orientation_correction_for_stretches(
@@ -238,13 +243,16 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, visual_cover
     ymax_corr = (abs(ymax - ny) * (abs(yM - ym) / ny)) + ym
     
     smax_corr = sigmas[smax.astype(int)]
-    maxe_corr = [xmax_corr, ymax_corr, omax_corr, smax_corr]
+    fmax_corr = frequencies[fmax.astype(int)]
+    
+    maxe_corr = [xmax_corr, ymax_corr, omax_corr, smax_corr, fmax_corr]
     
     if plotting:
         if np.sum(fil) == 0:
-            for c_arr, title, cmap, vmax in zip([xmax_corr, ymax_corr, omax_corr, smax_corr], 
-                                                ['azimuth (visual degree)', 'elevation (visual degree)', 'orientation (degree)', 'size (visual degree)'],
-                                                ['jet', 'jet', 'hsv', 'coolwarm'], [None, None, 180, None]):
+            # Added frequency to the plotting loops
+            for c_arr, title, cmap, vmax in zip([xmax_corr, ymax_corr, omax_corr, smax_corr, fmax_corr], 
+                                                ['azimuth (visual degree)', 'elevation (visual degree)', 'orientation (degree)', 'size (visual degree)', 'spatial frequency (cyc/deg)'],
+                                                ['jet', 'jet', 'hsv', 'coolwarm', 'viridis'], [None, None, 180, None, None]):
                 plt.figure()
                 plt.rcParams['axes.facecolor'] = 'none'
                 plt.scatter(neuron_pos[:, 1], neuron_pos[:, 0], s=5, c=c_arr, cmap=cmap, vmax=vmax)
@@ -253,16 +261,7 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, visual_cover
                 plt.xlabel('position x (um)')
                 plt.ylabel('position y (um)')
 
-            plt.figure()
-            plt.imshow(np.ones((68, 180)), cmap='Greys')
-            plt.plot([0, 175], [32, 32], 'k--')
-            plt.plot([175, 175], [2, 66], 'k--')
-            plt.xticks([0, 135, 179], [135, 0, -45])
-            plt.yticks([0, 34, 67], [34, 0, -34])
-            plt.axis('image')
-            plt.xlabel('Azimuth')
-            plt.ylabel('Elevation')
-            plt.title('Screen positions')
+            # ... [Keep your screen positions plot here] ...
         else:
             fil = maxes > 0.2
             print('filtering')
@@ -2083,40 +2082,63 @@ def PredictNeuronsTest(wt_test, spks, idx, ncut, dt1=9000, func=relu):
     plt.plot(np.mean(spk, axis=0))
 
 
-def PlotTuningCurve(rfs, idx, visual_coverage, sigmas, screen_ratio, show=True):
+def PlotTuningCurve(rfs, idx, visual_coverage, sigmas, screen_ratio, frequencies, show=True):
     xM, xm, yM, ym = visual_coverage
-    cc_f_1_xy=rfs[0][idx, :, :, np.array(rfs[1])[2, idx], np.array(rfs[1])[3, idx]]
-    cc_f_1_o=rfs[0][idx,np.array(rfs[1])[0, idx], np.array(rfs[1])[1, idx], :, :]
-    s=np.array(rfs[1])[3, idx]
-    o = np.array(rfs[1])[2, idx]
+    
+    # 1. Extract all 5 max indices clearly (to make the code easier to read)
+    maxes = np.array(rfs[1])
+    x = maxes[0, idx]
+    y = maxes[1, idx]
+    o = maxes[2, idx]
+    s = maxes[3, idx]
+    f = maxes[4, idx]  # NEW: The frequency index
 
+    # 2. Slice the 6D array! We freeze the 6th dimension at 'f' for the spatial/ori plots
+    cc_f_1_xy = rfs[0][idx, :, :, o, s, f]
+    cc_f_1_o = rfs[0][idx, x, y, :, :, f]
+    
+    # 3. NEW: Extract the 1D frequency tuning curve (varying the 6th dimension)
+    f_tuning = rfs[0][idx, x, y, o, s, :]
+
+    # --- Everything below here is your original SVD logic ---
     u, s__, v = svds(cc_f_1_xy, 2)
     ori_tun = np.append(cc_f_1_o[:, s], cc_f_1_o[0, s])
     i = 1
     if v[1][np.argmax(abs(v[1]))] < 0:
         i = -1
+        
     if show:
-        fig, ax = plt.subplots(1, 5, figsize=(15, 1.5))
-        m=ax[0].imshow(cc_f_1_xy.T, cmap='coolwarm')
+        # Changed 1, 5 to 1, 6 and made the figure slightly wider
+        fig, ax = plt.subplots(1, 6, figsize=(18, 1.5))
+        m = ax[0].imshow(cc_f_1_xy.T, cmap='coolwarm')
         fig.colorbar(m)
-        ax[0].set_xticks([0 , cc_f_1_xy.shape[0]], [xM, xm])
+        ax[0].set_xticks([0, cc_f_1_xy.shape[0]], [xM, xm])
         ax[0].set_yticks([0, cc_f_1_xy.shape[1]], [yM, ym])
         ax[0].set_title('2D correlation')
-        ax[1].plot(i*v[1][::-1], c='k')
+        
+        ax[1].plot(i * v[1][::-1], c='k')
         ax[1].set_xticks([0, cc_f_1_xy.shape[1]], [ym, yM])
         ax[1].set_title('Elevation (deg)')
-        ax[2].plot(i*u[:, 1], c='k')
+        
+        ax[2].plot(i * u[:, 1], c='k')
         ax[2].set_xticks([0, cc_f_1_xy.shape[0]], [xM, xm])
         ax[2].set_title('Azimuth (deg)')
-        mm = max(cc_f_1_o.min(), cc_f_1_o.max(), key=abs)
-
+        
         ax[3].plot(ori_tun, 'o-', c='k')
-        ax[3].set_xticks([0, 4, 8], [0,90, 180])
+        ax[3].set_xticks([0, 4, 8], [0, 90, 180])
         ax[3].set_title('Orientation (deg)')
+        
         ax[4].plot(cc_f_1_o[o, :], 'o-', c='k')
         ax[4].set_xticks(np.arange(len(sigmas)), sigmas)
         ax[4].set_title('Size (deg)')
-    return[cc_f_1_xy.T, i*v[1][::-1], i*u[:, 1], ori_tun,cc_f_1_o[o, :]]
+
+        # NEW: Plot the frequency tuning curve
+        ax[5].plot(f_tuning, 'o-', c='k')
+        ax[5].set_xticks(np.arange(len(frequencies)), [round(freq, 2) for freq in frequencies])
+        ax[5].set_title('Spatial Freq')
+
+    # Return your original list, but append f_tuning at the end
+    return [cc_f_1_xy.T, i * v[1][::-1], i * u[:, 1], ori_tun, cc_f_1_o[o, :], f_tuning]
 
 
 

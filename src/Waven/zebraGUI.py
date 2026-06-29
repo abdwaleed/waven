@@ -375,6 +375,8 @@ def run(param_defaults, gabor_param, workflow=None):
             data_dirs = _parse_data_dir(param_entries["Dir"].get())
             exp_info = parse_literal(param_entries["Experiment Info"].get(), "Experiment Info")
             sigmas = np.array(parse_literal(param_entries["Sigmas"].get(), "Sigmas"))
+            frequencies = np.array(parse_literal(gabor_entries["Frequencies"].get(), "Frequencies"))
+            nf = len(frequencies)
             visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
             analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
             block_end = int(param_entries["Block End"].get())
@@ -457,9 +459,11 @@ def run(param_defaults, gabor_param, workflow=None):
             return
             
         n_frames = min(nb_frames, w_c_downsampled.shape[0], spks.shape[1])
+
+        # Updated the PearsonCorrelationPinkNoise call to pass nf and frequencies
         rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled[:n_frames].reshape(n_frames, -1),
-                                                np.mean(spks[:, :n_frames], axis=0),
-                                                neuron_pos, coarse_nx, coarse_ny, ns, analysis_coverage, screen_ratio, sigmas_deg,
+                                                spks[:, :n_frames],
+                                                neuron_pos, coarse_nx, coarse_ny, ns, nf, analysis_coverage, screen_ratio, sigmas_deg, frequencies,
                                                 n_orientations=n_orientations,
                                                 plotting=False)
 
@@ -498,14 +502,15 @@ def run(param_defaults, gabor_param, workflow=None):
             fig2, ax2 = plt.subplots(figsize=(10, 2.5), constrained_layout=True)
             ax2.set_title("Trial-averaged Spike Train")
 
-            fig3 = plt.figure(figsize=(8, 9), constrained_layout=True)
-            gs = fig3.add_gridspec(3, 2)
+            fig3 = plt.figure(figsize=(8, 11), constrained_layout=True)
+            gs = fig3.add_gridspec(4, 2)
             ax3_0 = fig3.add_subplot(gs[0, :])
             ax3_1 = fig3.add_subplot(gs[1, 0])
             ax3_2 = fig3.add_subplot(gs[1, 1])
             ax3_3 = fig3.add_subplot(gs[2, 0])
             ax3_4 = fig3.add_subplot(gs[2, 1])
-            ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4]
+            ax3_5 = fig3.add_subplot(gs[3, :])
+            ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4, ax3_5]
 
             def onpick(event):
                 try:
@@ -518,7 +523,7 @@ def run(param_defaults, gabor_param, workflow=None):
                     ax2.legend()
                     canvas2.draw()
 
-                    rf2d, x_tuning, y_tuning, ori_tun, s_tuning = PlotTuningCurve(rfs_gabor, neuron_id, analysis_coverage, sigmas_deg, screen_ratio, show=False)
+                    rf2d, x_tuning, y_tuning, ori_tun, s_tuning, f_tuning = PlotTuningCurve(rfs_gabor, neuron_id, analysis_coverage, sigmas_deg, screen_ratio, frequencies, show=False)
                     for ax in ax3: ax.clear()
 
                     ax3[0].imshow(rf2d, cmap='coolwarm', aspect='auto')
@@ -537,6 +542,9 @@ def run(param_defaults, gabor_param, workflow=None):
                     ax3[4].plot(s_tuning, 'o-', c='k')
                     ax3[4].set_title('Size (deg)')
                     ax3[4].set_xticks([0, len(sigmas) - 1], [sigmas_deg[0], sigmas_deg[-1]])
+                    ax3[5].plot(f_tuning, 'o-', c='k')
+                    ax3[5].set_title('Spatial Frequency')
+                    ax3[5].set_xticks(range(len(frequencies)), [round(f, 3) for f in frequencies])
                     canvas3.draw()
                 except Exception as e:
                     print(f"Error drawing pick event: {e}")
@@ -559,7 +567,7 @@ def run(param_defaults, gabor_param, workflow=None):
                     ax2.legend()
                     canvas2.draw()
 
-                    rf2d, x_tuning, y_tuning, ori_tun, s_tuning = PlotTuningCurve(rfs_gabor, neuron_id, analysis_coverage, sigmas_deg, screen_ratio, show=False)
+                    rf2d, x_tuning, y_tuning, ori_tun, s_tuning = PlotTuningCurve(rfs_gabor, neuron_id, analysis_coverage, sigmas_deg, screen_ratio, frequencies, show=False)
                     for ax in ax3: ax.clear()
                         
                     ax3[0].imshow(rf2d, cmap='coolwarm', aspect='auto')
@@ -847,20 +855,20 @@ def run(param_defaults, gabor_param, workflow=None):
     )
     btn_submit_wavelet.pack(fill=tk.X, pady=3)
 
-    ttk.Separator(frame_processing, orient="horizontal").pack(fill=tk.X, pady=8)
-    ttk.Label(
-        frame_processing,
-        text="Optional: compress full-resolution wavelet arrays to Zarr for the high-detail full model (lower RAM).",
-        wraplength=380, background=frame_color, foreground=text_color, font=main_font,
-    ).pack(anchor="w", pady=(0, 8))
-
-    btn_convert_zarr = ttk.Button(
-        frame_processing,
-        text="Convert Wavelets NPY → Zarr",
-        style="Primary.TButton",
-        command=run_in_thread(convert_to_zarr_gui, "Wavelet Zarr conversion"),
-    )
-    btn_convert_zarr.pack(fill=tk.X, pady=3)
+    #ttk.Separator(frame_processing, orient="horizontal").pack(fill=tk.X, pady=8)
+    #ttk.Label(
+    #    frame_processing,
+    #    text="Optional: compress full-resolution wavelet arrays to Zarr for the high-detail full model (lower RAM).",
+    #    wraplength=380, background=frame_color, foreground=text_color, font=main_font,
+    #).pack(anchor="w", pady=(0, 8))
+#
+    #btn_convert_zarr = ttk.Button(
+    #    frame_processing,
+    #    text="Convert Wavelets NPY → Zarr",
+    #    style="Primary.TButton",
+    #    command=run_in_thread(convert_to_zarr_gui, "Wavelet Zarr conversion"),
+    #)
+    #btn_convert_zarr.pack(fill=tk.X, pady=3)
 
     # --- Experiment configuration ---
     frame_params = ttk.LabelFrame(

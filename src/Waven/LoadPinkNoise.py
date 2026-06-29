@@ -753,16 +753,23 @@ def coarseWavelet(
         end = min((chunk_index + 1) * chunk_size, n_frames)
         chunk_len = end - start
         
-        w_r_slice = wavelets_r[:, :, :, start:end, :]
-        w_i_slice = wavelets_i[:, :, :, start:end, :]
+        # Use ellipsis (...) to grab the trailing dimensions safely
+        w_r_slice = wavelets_r[:, :, :, start:end, ...]
+        w_i_slice = wavelets_i[:, :, :, start:end, ...]
 
-        _, _, actual_no, _, actual_ns = w_r_slice.shape
+        # Check if load_stimulus_simple_cell gave us 5D or 6D
+        is_6d = len(w_r_slice.shape) == 6
+        if is_6d:
+            _, _, actual_no, _, actual_ns, actual_nf = w_r_slice.shape
+        else:
+            _, _, actual_no, _, actual_ns = w_r_slice.shape
+            actual_nf = 1 # Fallback if data is still 5D
+
         success = False
         error_msg = ""
 
         # --- ATTEMPT 1: GPU ACCELERATION ---
         if num_gpus > 0:
-            # Round-robin assignment: GPU 0, GPU 1, GPU 0, etc.
             device_id = chunk_index % num_gpus
             device = f"cuda:{device_id}"
             
@@ -776,19 +783,29 @@ def coarseWavelet(
                     w_c_gpu = w_r_gpu.square() + w_i_gpu.square()
 
                     def resize_tensor_gpu(t):
-                        t = t.permute(3, 2, 4, 0, 1)
-                        t = t.reshape(chunk_len, actual_no * actual_ns, nx0, ny0)
-                        t = F.interpolate(t, size=(nx, ny), mode='bilinear', align_corners=False, antialias=True)
-                        t = t.reshape(chunk_len, actual_no, actual_ns, nx, ny)
-                        t = t.permute(0, 3, 4, 1, 2)
-                        return t.unsqueeze(-1)
+                        if is_6d:
+                            # 6D Routing: (nx0, ny0, no, chunk, ns, nf) -> (chunk, no, ns, nf, nx0, ny0)
+                            t = t.permute(3, 2, 4, 5, 0, 1)
+                            t = t.reshape(chunk_len, actual_no * actual_ns * actual_nf, nx0, ny0)
+                            t = F.interpolate(t, size=(nx, ny), mode='bilinear', align_corners=False, antialias=True)
+                            t = t.reshape(chunk_len, actual_no, actual_ns, actual_nf, nx, ny)
+                            # Back to expected correlation shape: (chunk, nx, ny, no, ns, nf)
+                            t = t.permute(0, 4, 5, 1, 2, 3)
+                            return t
+                        else:
+                            # 5D Routing (Legacy)
+                            t = t.permute(3, 2, 4, 0, 1)
+                            t = t.reshape(chunk_len, actual_no * actual_ns, nx0, ny0)
+                            t = F.interpolate(t, size=(nx, ny), mode='bilinear', align_corners=False, antialias=True)
+                            t = t.reshape(chunk_len, actual_no, actual_ns, nx, ny)
+                            t = t.permute(0, 3, 4, 1, 2)
+                            return t.unsqueeze(-1) # Force 6th dim if it truly is missing
 
                     out_r = resize_tensor_gpu(w_r_gpu).cpu().numpy()
                     out_i = resize_tensor_gpu(w_i_gpu).cpu().numpy()
                     out_c = resize_tensor_gpu(w_c_gpu).cpu().numpy()
 
                     del w_r_clean, w_i_clean, w_r_gpu, w_i_gpu, w_c_gpu
-                    # Emptying cache per thread keeps VRAM footprint perfectly flat
                     torch.cuda.empty_cache() 
                     success = True
                     return chunk_index, start, end, out_r, out_i, out_c, f"GPU {device_id}", error_msg
@@ -801,9 +818,15 @@ def coarseWavelet(
         # --- ATTEMPT 2: CPU FALLBACK ---
         if not success:
             wavelets_complex = np.square(w_r_slice) + np.square(w_i_slice)
-            w_r_ready = w_r_slice.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
-            w_i_ready = w_i_slice.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
-            w_c_ready = wavelets_complex.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
+            
+            if is_6d:
+                w_r_ready = w_r_slice.transpose(3, 0, 1, 2, 4, 5)
+                w_i_ready = w_i_slice.transpose(3, 0, 1, 2, 4, 5)
+                w_c_ready = wavelets_complex.transpose(3, 0, 1, 2, 4, 5)
+            else:
+                w_r_ready = w_r_slice.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
+                w_i_ready = w_i_slice.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
+                w_c_ready = wavelets_complex.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
 
             target_shape_chunk = (chunk_len, nx, ny, no, ns, nf)
             out_r = skimage.transform.resize(w_r_ready, target_shape_chunk, anti_aliasing=True)
@@ -812,7 +835,7 @@ def coarseWavelet(
             
             del wavelets_complex, w_r_ready, w_i_ready, w_c_ready
             return chunk_index, start, end, out_r, out_i, out_c, "CPU", error_msg
-
+    
     # Execute workers and populate output arrays
     print(f"Dispatching to {max_workers} concurrent worker(s)...")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
