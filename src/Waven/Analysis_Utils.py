@@ -261,7 +261,16 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
                 plt.xlabel('position x (um)')
                 plt.ylabel('position y (um)')
 
-            # ... [Keep your screen positions plot here] ...
+            plt.figure()
+            plt.imshow(np.ones((68, 180)), cmap='Greys')
+            plt.plot([0, 175], [32, 32], 'k--')
+            plt.plot([175, 175], [2, 66], 'k--')
+            plt.xticks([0, 135, 179], [135, 0, -45])
+            plt.yticks([0, 34, 67], [34, 0, -34])
+            plt.axis('image')
+            plt.xlabel('Azimuth')
+            plt.ylabel('Elevation')
+            plt.title('Screen positions')
         else:
             fil = maxes > 0.2
             print('filtering')
@@ -902,25 +911,24 @@ def spikeTrig(spk, w_i, w_r, w_c, ran):
     return mu_sin, mu_cos, mu_complex
 
 
-def compute_stc(a, b, mu_b, ran, dt1, dt2):
+def compute_stc(a_t, b_t, mu_b_t, ran, dt1, dt2):
     with torch.no_grad():
-        a_t = torch.as_tensor(a, device='cuda')
-        b_t = torch.as_tensor(b, device='cuda')
-        mu_b_t = torch.as_tensor(mu_b, device='cuda')
+        # Keep spikes fixed in time. Shape becomes (T_sub, 1) for broadcasting
+        a_sub = a_t[ran:].reshape(-1, 1) 
         
-        a_sub = a_t[ran - dt1:a_t.shape[0] - dt1].reshape(1, -1)
-        b_sub1 = b_t[ran - dt1:b_t.shape[0] - dt1] - mu_b_t[mu_b_t.shape[0] - 1 - dt1]
-        b_sub2 = b_t[ran - dt2:b_t.shape[0] - dt2] - mu_b_t[mu_b_t.shape[0] - 1 - dt2]
+        # Shift stimuli and subtract means
+        b_sub1 = b_t[ran - dt1 : b_t.shape[0] - dt1] - mu_b_t[mu_b_t.shape[0] - 1 - dt1]
+        b_sub2 = b_t[ran - dt2 : b_t.shape[0] - dt2] - mu_b_t[mu_b_t.shape[0] - 1 - dt2]
         
-        term1 = torch.matmul(a_sub, b_sub1.reshape(b_t.shape[0] - ran, -1)).T
-        term2 = torch.matmul(a_sub, b_sub2.reshape(b_t.shape[0] - ran, -1))
+        # Multiply spikes with the first stimulus across the time dimension
+        # a_sub (T, 1) * b_sub1 (T, N) -> broadcasts to (T, N)
+        weighted_b1 = a_sub * b_sub1
         
-        c = (term1 @ term2) / torch.sum(a_sub)
-        res = c.cpu().numpy().astype('float16')
+        # Matmul transposes the time dimension to compute the spatial covariance
+        # (N, T) @ (T, N) -> (N, N)
+        c = torch.matmul(weighted_b1.T, b_sub2) / torch.sum(a_sub)
         
-        # Explicit VRAM memory release to prevent fragmentation
-        del a_sub, b_sub1, b_sub2, term1, term2, c
-        return res
+        return c.cpu().numpy().astype('float16')
 
 
 def CovspikeTrig(spk, w, mu, ran):
@@ -1364,21 +1372,37 @@ def create_fake_cell( w_i_downsampled, w_r_downsampled, pos_angle_scale, phase_t
     return nonlinres
 
 
-def PlotSelfCorrelation(w_c_downsampled,neuron_pos, pos_ori, ns=4):
+def PlotSelfCorrelation(w_c_downsampled, neuron_pos, pos_ori, visual_coverage, screen_ratio, sigmas, frequencies, ns=4, nf=1):
     x, y, o, s = pos_ori
-    rfs = PearsonCorrelationPinkNoise(w_c_downsampled.reshape(w_c_downsampled.shape[0], -1),
-                                      w_c_downsampled[:, x, y, o, s].reshape(w_c_downsampled.shape[0], -1),
-                                      neuron_pos, 27, 11, ns)
-    rfs_idx = rfs[0].reshape(27, 11, 8, ns)
-    maxes = np.array(rfs[1])
+
+    rfs = PearsonCorrelationPinkNoise(
+        w_c_downsampled.reshape(w_c_downsampled.shape[0], -1),
+        w_c_downsampled[:, x, y, o, s].reshape(w_c_downsampled.shape[0], -1),
+        neuron_pos, 
+        27, 
+        11, 
+        ns,
+        nf,                # Passed nf
+        visual_coverage,   # Passed visual_coverage
+        screen_ratio,      # Passed screen_ratio
+        sigmas,            # Passed sigmas
+        frequencies        # Passed frequencies
+    )
+    
+    # Isolate the first frequency index (0) to maintain your 5D plotting logic
+    # Shape of rfs[0] is (27, 11, 8, ns, nf) -> select [..., 0] to get (27, 11, 8, ns)
+    rfs_idx = rfs[0][:, :, :, :, 0] 
+    
     fig, ax = plt.subplots(8, ns)
-    cc = 0
-    r=skimage.transform.resize(rfs_idx, (135, 54, 8, ns), anti_aliasing=True)
+    
+    # Resize the image for smoother visualization
+    r = skimage.transform.resize(rfs_idx, (135, 54, 8, ns), anti_aliasing=True)
     vmax = 1
     vmin = -vmax
+    
     for i in range(8):
         for j in range(ns):
-            ax[i, j].imshow(rfs_idx[:, :, i, j].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
+            ax[i, j].imshow(r[:, :, i, j].T, vmin=vmin, vmax=vmax, cmap='coolwarm')
 
 
 def Plot_RF(rfs_idx, ns=4, title=''):

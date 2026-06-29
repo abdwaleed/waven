@@ -281,16 +281,18 @@ def run_rf_analysis(
     stimulus = wavelets.wavelets_complex[:n_frames].reshape(n_frames, -1)
     response = np.mean(spike_data.spikes[:, :n_frames], axis=0)
     rf_results = au.PearsonCorrelationPinkNoise(
-        stimulus,
-        response,
-        spike_data.neuron_pos,
-        analysis.coarse_nx,
-        analysis.coarse_ny,
-        len(analysis.sigmas),
-        analysis.analysis_coverage,
-        analysis.screen_ratio,
-        analysis.sigmas_deg,
-        n_orientations=gabor.n_thetas,
+        stimulus,                      # stim
+        response,                      # resp
+        spike_data.neuron_pos,         # neuron_pos
+        analysis.coarse_nx,            # nx
+        analysis.coarse_ny,            # ny
+        len(analysis.sigmas),          # ns
+        len(analysis.frequencies),     # nf (NEW: Number of frequencies)
+        analysis.analysis_coverage,    # visual_coverage
+        analysis.screen_ratio,         # screen_ratio
+        analysis.sigmas_deg,           # sigmas
+        analysis.frequencies,          # frequencies (NEW: Frequency values)
+        n_orientations=gabor.n_thetas, 
         plotting=plotting,
     )
 
@@ -310,6 +312,7 @@ def run_rf_analysis(
             analysis.analysis_coverage,
             analysis.sigmas_deg,
             analysis.screen_ratio,
+            analysis.frequencies
         )
 
     return RFAnalysisResult(

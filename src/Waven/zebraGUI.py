@@ -12,6 +12,7 @@ import threading
 import sys
 import gc
 from . import LoadPinkNoise as lpn
+import traceback
 
 # --- DPI Awareness ---
 try:
@@ -262,14 +263,18 @@ def run(param_defaults, gabor_param, workflow=None):
                 try:
                     func(*args, **kwargs)
                 except Exception as exc:
-                    print(f"Error: {exc}")
+                    # Print a clear header for the error
+                    print(f"\n[!] AN ERROR OCCURRED IN TASK: {label}")
+                    # This will dump the full "most recent call last" traceback 
+                    # straight to your GUI terminal!
+                    traceback.print_exc() 
                 finally:
                     root.after(0, end_task)
 
             threading.Thread(target=thread_target, daemon=True).start()
 
         return wrapper
-
+    
     def create_gabor():
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
@@ -448,6 +453,8 @@ def run(param_defaults, gabor_param, workflow=None):
         skewness = np.array(compute_skewness_neurons(spks, plotting=False))
         filter_mask = np.logical_and(respcorr >= 0.2, skewness <= 20)
 
+        point_alphas = np.where(filter_mask, 1.0, 0.05)
+
         parent_dir = os.path.dirname(movpath)
         try:
             wavelets_downsampled = np.load(os.path.join(parent_dir, 'dwt_downsampled_videodata.npy'))
@@ -462,7 +469,7 @@ def run(param_defaults, gabor_param, workflow=None):
 
         # Updated the PearsonCorrelationPinkNoise call to pass nf and frequencies
         rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled[:n_frames].reshape(n_frames, -1),
-                                                spks[:, :n_frames],
+                                                np.mean(spks[:, :n_frames], axis=0),
                                                 neuron_pos, coarse_nx, coarse_ny, ns, nf, analysis_coverage, screen_ratio, sigmas_deg, frequencies,
                                                 n_orientations=n_orientations,
                                                 plotting=False)
@@ -492,7 +499,7 @@ def run(param_defaults, gabor_param, workflow=None):
             for idx, values, cmap, title in map_specs:
                 scatter = ax10[idx].scatter(
                     neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=values,
-                    cmap=cmap, alpha=filter_mask, rasterized=True,
+                    cmap=cmap, alpha=point_alphas, rasterized=True,
                 )
                 fig10.colorbar(scatter, ax=ax10[idx], fraction=0.046)
                 ax10[idx].set_title(title)
@@ -855,20 +862,20 @@ def run(param_defaults, gabor_param, workflow=None):
     )
     btn_submit_wavelet.pack(fill=tk.X, pady=3)
 
-    #ttk.Separator(frame_processing, orient="horizontal").pack(fill=tk.X, pady=8)
-    #ttk.Label(
-    #    frame_processing,
-    #    text="Optional: compress full-resolution wavelet arrays to Zarr for the high-detail full model (lower RAM).",
-    #    wraplength=380, background=frame_color, foreground=text_color, font=main_font,
-    #).pack(anchor="w", pady=(0, 8))
-#
-    #btn_convert_zarr = ttk.Button(
-    #    frame_processing,
-    #    text="Convert Wavelets NPY → Zarr",
-    #    style="Primary.TButton",
-    #    command=run_in_thread(convert_to_zarr_gui, "Wavelet Zarr conversion"),
-    #)
-    #btn_convert_zarr.pack(fill=tk.X, pady=3)
+    ttk.Separator(frame_processing, orient="horizontal").pack(fill=tk.X, pady=8)
+    ttk.Label(
+        frame_processing,
+        text="Optional: compress full-resolution wavelet arrays to Zarr for the high-detail full model (lower RAM).",
+        wraplength=380, background=frame_color, foreground=text_color, font=main_font,
+    ).pack(anchor="w", pady=(0, 8))
+
+    btn_convert_zarr = ttk.Button(
+        frame_processing,
+        text="Convert Wavelets NPY → Zarr",
+        style="Primary.TButton",
+        command=run_in_thread(convert_to_zarr_gui, "Wavelet Zarr conversion"),
+    )
+    btn_convert_zarr.pack(fill=tk.X, pady=3)
 
     # --- Experiment configuration ---
     frame_params = ttk.LabelFrame(
