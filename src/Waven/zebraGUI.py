@@ -11,6 +11,7 @@ from pathlib import Path
 import threading
 import sys
 import gc
+from . import LoadPinkNoise as lpn
 
 # --- DPI Awareness ---
 try:
@@ -293,32 +294,68 @@ def run(param_defaults, gabor_param, workflow=None):
         print(f"Gabor library saved to: {path_save}")
 
     def run_wavelet():
-        print("Step 1/2: Downsampling stimulus movie...")
-        sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
-        visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
-        analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
         movpath = param_entries["Movie Path"].get()
+        parent_dir = os.path.dirname(movpath)
+        
+        # Define paths to the high-res wavelets
+        file_0 = os.path.join(parent_dir, "dwt_videodata_0.npy")
+        file_1 = os.path.join(parent_dir, "dwt_videodata_1.npy")
+        
+        # Extract common parameters needed for both high-res and coarse wavelets
+        sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
+        frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
         lib_path = param_entries["Library Path"].get()
         nx = int(param_entries["NX"].get())
         ny = int(param_entries["NY"].get())
+        n_thetas = int(gabor_entries["N_thetas"].get())
 
-        if (visual_coverage != analysis_coverage):
-            visual_coverage = np.array(visual_coverage)
-            analysis_coverage = np.array(analysis_coverage)
-            ratio_x = 1 - ((visual_coverage[0] - visual_coverage[1]) - (analysis_coverage[0] - analysis_coverage[1])) / (visual_coverage[0] - visual_coverage[1])
-            ratio_y = 1 - ((visual_coverage[2] - visual_coverage[3]) - (analysis_coverage[2] - analysis_coverage[3])) / (visual_coverage[2] - visual_coverage[3])
+        # CHECK 1: Do the high-res files already exist?
+        if os.path.exists(file_0) and os.path.exists(file_1):
+            print(f"Found existing high-resolution wavelets in {parent_dir}. Skipping decomposition.")
         else:
-            ratio_x = ratio_y = 1
-            
-        parent_dir = os.path.dirname(movpath)
-        downsample_video_binary(movpath, visual_coverage, analysis_coverage, shape=(ny, nx), chunk_size=1000, ratios=(ratio_x, ratio_y))
-        videodata = np.load(movpath[:-4] + '_downsampled.npy')
-        videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
-        waveletDecomposition(videodata, 0, sigmas, parent_dir, lib_path)
-        print("Step 2/2: Wavelet decomposition (imaginary phase)...")
-        waveletDecomposition(videodata, 1, sigmas, parent_dir, lib_path)
-        print(f"Wavelet coefficients written to: {parent_dir}")
+            print("Step 1/2: Downsampling stimulus movie and real phase decomposition...")
+            visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
+            analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
 
+            if (visual_coverage != analysis_coverage):
+                visual_coverage = np.array(visual_coverage)
+                analysis_coverage = np.array(analysis_coverage)
+                ratio_x = 1 - ((visual_coverage[0] - visual_coverage[1]) - (analysis_coverage[0] - analysis_coverage[1])) / (visual_coverage[0] - visual_coverage[1])
+                ratio_y = 1 - ((visual_coverage[2] - visual_coverage[3]) - (analysis_coverage[2] - analysis_coverage[3])) / (visual_coverage[2] - visual_coverage[3])
+            else:
+                ratio_x = ratio_y = 1
+                
+            downsample_video_binary(movpath, visual_coverage, analysis_coverage, shape=(ny, nx), chunk_size=1000, ratios=(ratio_x, ratio_y))
+            videodata = np.load(movpath[:-4] + '_downsampled.npy')
+            videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
+            
+            waveletDecomposition(videodata, 0, sigmas, parent_dir, lib_path)
+            
+            print("Step 2/2: Wavelet decomposition (imaginary phase)...")
+            waveletDecomposition(videodata, 1, sigmas, parent_dir, lib_path)
+
+        # STEP 3: Generate the downsampled coarse wavelets (the missing file)
+        print("Step 3: Generating coarse downsampled wavelets...")
+        
+        # NOTE: I am hardcoding nx=27, ny=11 here because they match your original defaults, 
+        # and they do not appear to exist in your GUI input config. 
+        # Update these if you eventually add "Coarse NX" and "Coarse NY" to the GUI.
+        lpn.coarseWavelet(
+            path=parent_dir,
+            downsampling=False,
+            nx0=nx,
+            ny0=ny,
+            no=n_thetas,
+            ns=len(sigmas),
+            nf=len(frequencies),
+            nx=None, # Lets code handle the downsampling ratio itself
+            ny=None, # Lets code handle the downsampling ratio itself
+            chunk_size=None
+        )
+        
+        
+        print(f"All wavelet files are ready in: {parent_dir}")
+    
     def embed_interactive_figure(fig, parent_container, title=None):
         """Embed a matplotlib figure with navigation toolbar in ``parent_container``."""
         section = ttk.LabelFrame(parent_container, text=title, padding=6) if title else ttk.Frame(parent_container, style="TFrame")

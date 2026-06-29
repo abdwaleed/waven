@@ -17,12 +17,19 @@ import torch
 ComputeDevice = Literal["cuda", "cpu"]
 
 
-@lru_cache(maxsize=1)
-def gpu_vram_bytes() -> int:
-    """Return total VRAM of CUDA device 0, or zero when no GPU is present."""
+def get_gpu_count() -> int:
+    """Return the total number of CUDA devices available on the system."""
     if not torch.cuda.is_available():
         return 0
-    return int(torch.cuda.get_device_properties(0).total_memory)
+    return torch.cuda.device_count()
+
+
+@lru_cache(maxsize=8)
+def gpu_vram_bytes(device_id: int = 0) -> int:
+    """Return total VRAM of the specified CUDA device, or zero when no GPU is present."""
+    if not torch.cuda.is_available() or device_id >= torch.cuda.device_count():
+        return 0
+    return int(torch.cuda.get_device_properties(device_id).total_memory)
 
 
 def available_ram_bytes() -> int:
@@ -112,8 +119,65 @@ def model_parallel_jobs() -> int:
 def coarse_wavelet_chunk_size(default: int = 1000) -> int:
     """Time frames processed per chunk when building coarse wavelet caches."""
     ram_gb = available_ram_bytes() / (1024**3)
+
+    # If system is especially powerful
+    if ram_gb >= 32:
+        # we can safely process roughly 40 frames per GB of available RAM.
+        dynamic_chunk = int(ram_gb * 40)
+        
+        # Cap at 5000 to prevent CPU cache thrashing during skimage.resize
+        return min(dynamic_chunk, 5000)
+    
     if ram_gb >= 24:
         return default
     if ram_gb >= 12:
         return 750
+    return 500
+
+
+def coarse_wavelet_chunk_size_gpu_or_cpu(
+    nx0: int = 138,
+    ny0: int = 112,
+    no: int = 18,
+    ns: int = 4,
+    nf: int = 1,
+    default: int = 1000,
+    vram_safety_margin: float = 0.60
+) -> int:
+    """Time frames processed per chunk, dynamically bounded by GPU VRAM and CPU RAM."""
+    ram_gb = available_ram_bytes() / (1024**3)
+    
+    # --- 1. GPU VRAM BOUNDARY (If applicable) ---
+    if torch.cuda.is_available():
+        # Calculate base elements per frame
+        elements_per_frame = nx0 * ny0 * no * ns * nf
+        
+        # 4 bytes per float32. We have 3 primary tensors (w_r, w_i, w_c)
+        bytes_per_frame_base = elements_per_frame * 4 * 3
+        
+        # PyTorch interpolation requires overhead for intermediate gradients/views.
+        # We multiply by ~4 to safely estimate the peak VRAM spike during F.interpolate
+        peak_bytes_per_frame = bytes_per_frame_base * 4 
+        
+        vram_budget = gpu_vram_bytes() * vram_safety_margin
+        
+        if peak_bytes_per_frame > 0:
+            gpu_max_chunk = int(vram_budget // peak_bytes_per_frame)
+            
+            # Bound the GPU chunk by system RAM limits (cap at 5000 to prevent CPU stalling)
+            dynamic_chunk = min(gpu_max_chunk, int(ram_gb * 40))
+            
+            # Ensure we process at least *some* frames, but no more than 5000
+            return max(64, min(dynamic_chunk, 5000))
+
+    # --- 2. CPU RAM BOUNDARY (Fallback if no GPU) ---
+    if ram_gb >= 32:
+        dynamic_chunk = int(ram_gb * 40)
+        return min(dynamic_chunk, 5000)
+    
+    if ram_gb >= 24:
+        return default
+    if ram_gb >= 12:
+        return 750
+        
     return 500

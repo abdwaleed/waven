@@ -14,6 +14,8 @@ import numexpr as ne
 from joblib import Parallel, delayed
 from torch.utils.data import DataLoader, TensorDataset
 import torch
+import torch.nn.functional as F
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 if os.environ.get("waven_NO_PLOTS") == "1":
     matplotlib.use("Agg", force=True)
@@ -21,49 +23,76 @@ else:
     matplotlib.use("TkAgg", force=True)
 
 import matplotlib.pyplot as plt
-import skimage.transform
 from .suite2p.utils import cortex_lab_utils as clu
 from .suite2p.utils import timelinepy as tlu
 from .suite2p.utils import utils as utils
-from .performance import coarse_wavelet_chunk_size, cpu_worker_count
+from .performance import coarse_wavelet_chunk_size, coarse_wavelet_chunk_size_gpu_or_cpu, cpu_worker_count, get_gpu_count
 from .Analysis_Utils import *
 
 
-def load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=False):
+def load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=False, chunk_size=1000):
     """Combine real and imaginary wavelet phases into a normalized magnitude map."""
+    n_frames = wavelets_r.shape[0]
+    
+    # Pre-allocate flat inputs to prevent massive memory spikes
     w_r = wavelets_r.reshape((-1, ny, nx, 3, 9))
     w_i = wavelets_i.reshape((-1, ny, nx, 3, 9))
+    
+    # Pre-allocate output array in system RAM
+    pn_wavelets = np.empty((n_frames, ny, nx, 3, 9), dtype=np.float32)
+    
+    num_gpus = get_gpu_count()
+    max_workers = max(1, num_gpus)
+    n_chunks = math.ceil(n_frames / chunk_size)
 
-    if torch.cuda.is_available():
-        try:
-            with torch.no_grad():
-                w_r_gpu = torch.from_numpy(w_r).cuda()
-                w_i_gpu = torch.from_numpy(w_i).cuda()
-                pn_wavelets_gpu = torch.abs(w_r_gpu) + torch.abs(w_i_gpu)
-
-                sigma = 1
-                pn_wavelets_gpu = pn_wavelets_gpu.reshape((-1, ny, nx, 27))
-                sum_wavelets = torch.sum(pn_wavelets_gpu, dim=1, keepdim=True)
-                pn_wavelets_gpu = pn_wavelets_gpu / (sigma + sum_wavelets)
-
-                pn_wavelets = pn_wavelets_gpu.cpu().numpy().reshape((-1, ny, nx, 3, 9))
-
-                del w_r_gpu, w_i_gpu, pn_wavelets_gpu, sum_wavelets
+    def process_chunk(chunk_index):
+        start = chunk_index * chunk_size
+        end = min((chunk_index + 1) * chunk_size, n_frames)
+        
+        w_r_slice = w_r[start:end]
+        w_i_slice = w_i[start:end]
+        
+        success = False
+        
+        if num_gpus > 0:
+            device_id = chunk_index % num_gpus
+            device = f"cuda:{device_id}"
+            try:
+                with torch.no_grad():
+                    w_r_gpu = torch.from_numpy(w_r_slice).to(device)
+                    w_i_gpu = torch.from_numpy(w_i_slice).to(device)
+                    
+                    pn_gpu = torch.abs(w_r_gpu) + torch.abs(w_i_gpu)
+                    pn_gpu = pn_gpu.reshape((-1, ny, nx, 27))
+                    
+                    sigma = 1.0
+                    sum_wavelets = torch.sum(pn_gpu, dim=1, keepdim=True)
+                    pn_gpu = pn_gpu / (sigma + sum_wavelets)
+                    
+                    out_chunk = pn_gpu.cpu().numpy().reshape((-1, ny, nx, 3, 9))
+                    
+                    del w_r_gpu, w_i_gpu, pn_gpu, sum_wavelets
+                    torch.cuda.empty_cache()
+                    success = True
+                    return chunk_index, start, end, out_chunk
+            except RuntimeError:
                 torch.cuda.empty_cache()
-        except RuntimeError:
-            print("GPU out of memory during load_wavelets; falling back to CPU.")
-            torch.cuda.empty_cache()
-            pn_wavelets = np.abs(w_r) + np.abs(w_i)
-            pn_wavelets = pn_wavelets.reshape((-1, ny, nx, 27))
-            sigma = 1
-            pn_wavelets = pn_wavelets / (sigma + np.sum(pn_wavelets, axis=1, keepdims=True))
-            pn_wavelets = np.reshape(pn_wavelets, (-1, ny, nx, 3, 9))
-    else:
-        pn_wavelets = np.abs(w_r) + np.abs(w_i)
-        pn_wavelets = pn_wavelets.reshape((-1, ny, nx, 27))
-        sigma = 1
-        pn_wavelets = pn_wavelets / (sigma + np.sum(pn_wavelets, axis=1, keepdims=True))
-        pn_wavelets = np.reshape(pn_wavelets, (-1, ny, nx, 3, 9))
+                success = False
+
+        if not success:
+            # Fallback to CPU
+            pn_chunk = np.abs(w_r_slice) + np.abs(w_i_slice)
+            pn_chunk = pn_chunk.reshape((-1, ny, nx, 27))
+            sigma = 1.0
+            pn_chunk = pn_chunk / (sigma + np.sum(pn_chunk, axis=1, keepdims=True))
+            out_chunk = np.reshape(pn_chunk, (-1, ny, nx, 3, 9))
+            return chunk_index, start, end, out_chunk
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_chunk, i) for i in range(n_chunks)]
+        for future in as_completed(futures):
+            chunk_idx, start, end, out_chunk = future.result()
+            pn_wavelets[start:end] = out_chunk
 
     print(pn_wavelets.shape)
     del w_r, w_i
@@ -82,57 +111,112 @@ def load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=False):
             ).reshape(sh)
         phase_diff = np.diff(phase, axis=0)
         return pn_wavelets, phase_diff
+        
     return pn_wavelets
 
 
-def load_stimulus(pathdir, wavelets_r, wavelets_i, nx=161, ny=60):
+def load_stimulus(pathdir, wavelets_r, wavelets_i, nx=161, ny=60, chunk_size=500):
     wavelets_r = np.load(pathdir + '/cwt_pn_real_1_9000.npy', mmap_mode='c')
     wavelets_i = np.load(pathdir + '/cwt_pn_imag_1_9000.npy', mmap_mode='c')
     
     scale = 2
     direct = True
+    
     if not direct:
-        wavelets = load_wavelets(pathdir, nx, ny, direction=direct)
+        wavelets = load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=direct)
         wavelets = wavelets[:, :, :, scale, :]
         wavelets = transform.resize(wavelets, (wavelets.shape[0], 8, 20, 9))
         wavelets = wavelets.reshape((wavelets.shape[0], wavelets.shape[1] * wavelets.shape[2] * wavelets.shape[3]))
-    elif direct:
-        w_r = transform.resize(wavelets_r.reshape((-1, ny, nx, 3, 9)), (wavelets_r.shape[0], 8, 20, 3, 9))
-        w_i = transform.resize(wavelets_i.reshape((-1, ny, nx, 3, 9)), (wavelets_i.shape[0], 8, 20, 3, 9))
+        return wavelets
         
-        with np.errstate(divide='ignore', invalid='ignore'):
-            phase = np.nan_to_num(np.arctan(w_i / w_r))
-        phase_diff = np.diff(phase, axis=0)
+    # DIRECT MODE: Multi-GPU Chunked Resize + Phase Calculation
+    n_frames = wavelets_r.shape[0]
+    n_chunks = math.ceil(n_frames / chunk_size)
+    num_gpus = get_gpu_count()
+    max_workers = max(1, num_gpus)
 
-        # OPTIMIZATION: GPU-accelerated absolute value trick with Fallback
-        if torch.cuda.is_available():
+    w_r_out = np.empty((n_frames, 8, 20, 3, 9), dtype=np.float32)
+    w_i_out = np.empty((n_frames, 8, 20, 3, 9), dtype=np.float32)
+    pn_wavelets = np.empty((n_frames, 8, 20, 3, 9), dtype=np.float32)
+
+    def process_stimulus_chunk(chunk_index):
+        start = chunk_index * chunk_size
+        end = min((chunk_index + 1) * chunk_size, n_frames)
+        chunk_len = end - start
+        
+        # Load from mmap and reshape
+        w_r_slice = wavelets_r[start:end].reshape((-1, ny, nx, 3, 9))
+        w_i_slice = wavelets_i[start:end].reshape((-1, ny, nx, 3, 9))
+        
+        success = False
+        if num_gpus > 0:
+            device_id = chunk_index % num_gpus
+            device = f"cuda:{device_id}"
+            
             try:
                 with torch.no_grad():
-                    w_r_gpu = torch.from_numpy(w_r).cuda()
-                    w_i_gpu = torch.from_numpy(w_i).cuda()
-                    pn_wavelets = (torch.abs(w_r_gpu) + torch.abs(w_i_gpu)).cpu().numpy()
-                    del w_r_gpu, w_i_gpu
-                    torch.cuda.empty_cache()
-            except RuntimeError:
-                print("WARNING: GPU Out of Memory. Safely falling back to CPU...")
-                torch.cuda.empty_cache()
-                pn_wavelets = np.abs(w_r) + np.abs(w_i)
-        else:
-            pn_wavelets = np.abs(w_r) + np.abs(w_i)
-            
-        del w_r, w_i
-        gc.collect()
+                    w_r_gpu = torch.from_numpy(np.ascontiguousarray(w_r_slice)).to(device).float()
+                    w_i_gpu = torch.from_numpy(np.ascontiguousarray(w_i_slice)).to(device).float()
+                    
+                    def resize_gpu(t):
+                        # Flatten spatial dims to match F.interpolate format
+                        t = t.permute(0, 3, 4, 1, 2)
+                        t = t.reshape(chunk_len, 3 * 9, ny, nx)
+                        t = F.interpolate(t, size=(8, 20), mode='bilinear', align_corners=False, antialias=True)
+                        t = t.reshape(chunk_len, 3, 9, 8, 20)
+                        return t.permute(0, 3, 4, 1, 2)
 
-        pn_wavelets_fwd = pn_wavelets * np.insert(np.clip(phase_diff, 0, None), [0], np.zeros((8, 20, 3, 9)),
-                                                  0).reshape(9000, 8, 20, 3, 9)
-        pn_wavelets_bkwd = pn_wavelets * np.insert(np.clip(-phase_diff, 0, None), [0], np.zeros((8, 20, 3, 9)),
-                                                   0).reshape(9000, 8, 20, 3, 9)
-        wavelets = np.stack([pn_wavelets, pn_wavelets_fwd, pn_wavelets_bkwd], axis=5)
-        del pn_wavelets_bkwd, pn_wavelets_fwd, wavelets_r, wavelets_i
-        gc.collect()
+                    w_r_res = resize_gpu(w_r_gpu)
+                    w_i_res = resize_gpu(w_i_gpu)
+                    pn_res = torch.abs(w_r_res) + torch.abs(w_i_res)
+                    
+                    res_r = w_r_res.cpu().numpy()
+                    res_i = w_i_res.cpu().numpy()
+                    res_pn = pn_res.cpu().numpy()
+                    
+                    del w_r_gpu, w_i_gpu, w_r_res, w_i_res, pn_res
+                    torch.cuda.empty_cache()
+                    success = True
+                    return start, end, res_r, res_i, res_pn
+            except RuntimeError:
+                torch.cuda.empty_cache()
+                success = False
+                
+        if not success:
+            # Fallback to CPU transform
+            res_r = transform.resize(w_r_slice, (chunk_len, 8, 20, 3, 9), anti_aliasing=True)
+            res_i = transform.resize(w_i_slice, (chunk_len, 8, 20, 3, 9), anti_aliasing=True)
+            res_pn = np.abs(res_r) + np.abs(res_i)
+            return start, end, res_r, res_i, res_pn
+
+    print(f"Dispatching load_stimulus to {max_workers} worker(s)...")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_stimulus_chunk, i) for i in range(n_chunks)]
+        for future in as_completed(futures):
+            start, end, out_r, out_i, out_pn = future.result()
+            w_r_out[start:end] = out_r
+            w_i_out[start:end] = out_i
+            pn_wavelets[start:end] = out_pn
+
+    # Process phase diff tracking
+    with np.errstate(divide='ignore', invalid='ignore'):
+        phase = np.nan_to_num(np.arctan(w_i_out / w_r_out))
+    phase_diff = np.diff(phase, axis=0)
+
+    del w_r_out, w_i_out, wavelets_r, wavelets_i
+    gc.collect()
+
+    pn_wavelets_fwd = pn_wavelets * np.insert(np.clip(phase_diff, 0, None), [0], np.zeros((8, 20, 3, 9)), 0).reshape(9000, 8, 20, 3, 9)
+    pn_wavelets_bkwd = pn_wavelets * np.insert(np.clip(-phase_diff, 0, None), [0], np.zeros((8, 20, 3, 9)), 0).reshape(9000, 8, 20, 3, 9)
+    
+    wavelets = np.stack([pn_wavelets, pn_wavelets_fwd, pn_wavelets_bkwd], axis=5)
+    
+    del pn_wavelets_bkwd, pn_wavelets_fwd, pn_wavelets
+    gc.collect()
 
     wavelets = wavelets[:, :, :, scale, :, :]
     w = wavelets.reshape((9000, 8, 20, 9, 3))
+    
     plt.figure()
     plt.plot(w[:, 5, 14, 4, 0])
     plt.plot(w[:, 5, 14, 4, 1])
@@ -151,48 +235,82 @@ def load_stimulus_simple_cell(
     ns=6,
     nf=1,
     downsampling=False,
+    chunk_size=500
 ):
     """Load coarse wavelet phases from ``dwt_videodata_{0,1}.npy`` via memmap."""
     wavelets_r = np.load(os.path.join(path, "dwt_videodata_0.npy"), mmap_mode="r")
     wavelets_i = np.load(os.path.join(path, "dwt_videodata_1.npy"), mmap_mode="r")
     print(wavelets_r.shape)
 
-    if downsampling:
-        target_shape = (nx, ny, no, ns, nf)
+    if not downsampling:
+        return wavelets_r, wavelets_i
 
-        def resize_chunk(chunk):
-            from skimage import transform
+    n_frames = wavelets_r.shape[0]
+    n_chunks = math.ceil(n_frames / chunk_size)
+    num_gpus = get_gpu_count()
+    max_workers = max(1, num_gpus)
+    
+    target_shape = (n_frames, nx, ny, no, ns, nf)
+    w_r_out = np.empty(target_shape, dtype=np.float32)
+    w_i_out = np.empty(target_shape, dtype=np.float32)
 
-            return transform.resize(
-                chunk,
-                (chunk.shape[0],) + target_shape,
-                anti_aliasing=True,
-            )
+    def process_resize_chunk(chunk_index):
+        start = chunk_index * chunk_size
+        end = min((chunk_index + 1) * chunk_size, n_frames)
+        chunk_len = end - start
+        
+        w_r_slice = wavelets_r[start:end]
+        w_i_slice = wavelets_i[start:end]
+        
+        success = False
+        if num_gpus > 0:
+            device_id = chunk_index % num_gpus
+            device = f"cuda:{device_id}"
+            
+            try:
+                with torch.no_grad():
+                    w_r_gpu = torch.from_numpy(np.ascontiguousarray(w_r_slice)).to(device).float()
+                    w_i_gpu = torch.from_numpy(np.ascontiguousarray(w_i_slice)).to(device).float()
 
-        safe_jobs = cpu_worker_count(cap=4)
-        chunks_r = np.array_split(wavelets_r, safe_jobs, axis=0)
-        wavelets_r_resized = Parallel(
-            n_jobs=safe_jobs,
-            backend="loky",
-            timeout=3600,
-        )(delayed(resize_chunk)(chunk) for chunk in chunks_r)
-        wavelets_r = np.concatenate(wavelets_r_resized, axis=0)
-        del wavelets_r_resized
-        wavelets_r = np.swapaxes(wavelets_r, 2, 1)
-        gc.collect()
+                    def resize_gpu(t):
+                        # Note: assuming input shape is (chunk_len, nx0, ny0, no, ns, nf)
+                        _, nx0, ny0, c_no, c_ns, c_nf = t.shape
+                        t = t.permute(0, 3, 4, 5, 1, 2)
+                        t = t.reshape(chunk_len, c_no * c_ns * c_nf, nx0, ny0)
+                        t = F.interpolate(t, size=(nx, ny), mode='bilinear', align_corners=False, antialias=True)
+                        t = t.reshape(chunk_len, c_no, c_ns, c_nf, nx, ny)
+                        return t.permute(0, 4, 5, 1, 2, 3)
 
-        chunks_i = np.array_split(wavelets_i, safe_jobs, axis=0)
-        wavelets_i_resized = Parallel(
-            n_jobs=safe_jobs,
-            backend="loky",
-            timeout=3600,
-        )(delayed(resize_chunk)(chunk) for chunk in chunks_i)
-        wavelets_i = np.concatenate(wavelets_i_resized, axis=0)
-        del wavelets_i_resized
-        wavelets_i = np.swapaxes(wavelets_i, 2, 1)
-        gc.collect()
+                    out_r = resize_gpu(w_r_gpu).cpu().numpy()
+                    out_i = resize_gpu(w_i_gpu).cpu().numpy()
+                    
+                    del w_r_gpu, w_i_gpu
+                    torch.cuda.empty_cache()
+                    success = True
+                    return start, end, out_r, out_i
+            except RuntimeError:
+                torch.cuda.empty_cache()
+                success = False
 
-    return wavelets_r, wavelets_i
+        if not success:
+            # Fallback to CPU transform
+            out_r = transform.resize(w_r_slice, (chunk_len, nx, ny, no, ns, nf), anti_aliasing=True)
+            out_i = transform.resize(w_i_slice, (chunk_len, nx, ny, no, ns, nf), anti_aliasing=True)
+            return start, end, out_r, out_i
+
+    print(f"Resizing simple cell arrays across {max_workers} worker(s)...")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_resize_chunk, i) for i in range(n_chunks)]
+        for future in as_completed(futures):
+            start, end, res_r, res_i = future.result()
+            w_r_out[start:end] = res_r
+            w_i_out[start:end] = res_i
+
+    # Original logic expected output shape with swapped axes
+    w_r_out = np.swapaxes(w_r_out, 2, 1)
+    w_i_out = np.swapaxes(w_i_out, 2, 1)
+    
+    return w_r_out, w_i_out
 
 
 def load_stimulus_simple_cell2_i(path='/media/sophie/Expansion1/UCL/datatest/', tt=[0, 9000], downsampling=False):
@@ -583,84 +701,134 @@ def correctNeuronPos(neuron_pos, resolution=1.3671):
 def coarseWavelet(
     path,
     downsampling,
-    nx0=135,
-    ny0=54,
-    nx=27,
-    ny=11,
-    no=8,
-    ns=6,
-    nf=1,
+    nx0,
+    ny0,
+    no,
+    ns,
+    nf,
+    nx=None,
+    ny=None,
     chunk_size=None,
 ):
-    """Load or build spatially downsampled wavelets for receptive-field analysis.
+    """Load or build spatially downsampled wavelets for receptive-field analysis."""
+    
+    if nx is None: nx = round(nx0 * 0.20)
+    if ny is None: ny = round(ny0 * 0.20)
+        
+    print(f"Original dims: {nx0}x{ny0} | Coarse dims (20%): {nx}x{ny}")
 
-    Reads ``dwt_downsampled_videodata.npy`` when present; otherwise downsamples
-    ``dwt_videodata_{0,1}.npy`` in time chunks and caches the result to disk.
-
-    Returns
-    -------
-    w_r, w_i, w_c : ndarray
-        Real, imaginary, and power (r² + i²) wavelet tensors at coarse resolution.
-    """
     if chunk_size is None:
-        chunk_size = coarse_wavelet_chunk_size()
+        chunk_size = coarse_wavelet_chunk_size_gpu_or_cpu(nx0=nx0, ny0=ny0, no=no, ns=ns, nf=nf)
+        print(f"Hardware-aware chunk size set to: {chunk_size} frames per batch")
 
     cache_path = os.path.join(path, "dwt_downsampled_videodata.npy")
-    print("loading wavelets...")
+    print("Loading wavelets...")
+    
     if os.path.exists(cache_path):
-        print("already downsampled")
+        print("Already downsampled. Loading from cache.")
         wavelets_downsampled = np.load(cache_path, mmap_mode="r")
-        w_r_downsampled = wavelets_downsampled[0]
-        w_i_downsampled = wavelets_downsampled[1]
-        w_c_downsampled = wavelets_downsampled[2]
-        return w_r_downsampled, w_i_downsampled, w_c_downsampled
+        return wavelets_downsampled[0], wavelets_downsampled[1], wavelets_downsampled[2]
 
-    print("downsampling")
+    print("Beginning downsampling...")
     wavelets_r, wavelets_i = load_stimulus_simple_cell(
         path, nx, ny, no, ns, nf, downsampling
     )
-    n_frames = wavelets_r.shape[0]
+    
+    n_frames = wavelets_r.shape[3]
     n_chunks = math.ceil(n_frames / chunk_size)
 
-    real_parts = []
-    imag_parts = []
-    power_parts = []
+    # Pre-allocate output arrays in system RAM
+    target_shape_full = (n_frames, nx, ny, no, ns, nf)
+    w_r_downsampled = np.empty(target_shape_full, dtype=np.float32)
+    w_i_downsampled = np.empty(target_shape_full, dtype=np.float32)
+    w_c_downsampled = np.empty(target_shape_full, dtype=np.float32)
 
-    for chunk_index in range(n_chunks):
+    num_gpus = get_gpu_count()
+    # Use 1 worker per GPU, or 1 worker total if falling back to pure CPU
+    max_workers = max(1, num_gpus) 
+
+    def process_chunk(chunk_index):
+        """Worker function to process a single chunk on a specific device."""
         start = chunk_index * chunk_size
         end = min((chunk_index + 1) * chunk_size, n_frames)
-        w_r = wavelets_r[start:end]
-        w_i = wavelets_i[start:end]
-        wavelets_complex = np.square(w_r) + np.square(w_i)
+        chunk_len = end - start
+        
+        w_r_slice = wavelets_r[:, :, :, start:end, :]
+        w_i_slice = wavelets_i[:, :, :, start:end, :]
 
-        target_r = (w_r.shape[0], nx, ny, no, ns, nf)
-        w_r_downsampled = skimage.transform.resize(
-            w_r.reshape((-1, nx0, ny0, no, ns, nf)),
-            target_r,
-            anti_aliasing=True,
-        )
-        w_i_downsampled = skimage.transform.resize(
-            w_i.reshape((-1, nx0, ny0, no, ns, nf)),
-            target_r,
-            anti_aliasing=True,
-        )
-        w_c_downsampled = skimage.transform.resize(
-            wavelets_complex.reshape((-1, nx0, ny0, no, ns, nf)),
-            target_r,
-            anti_aliasing=True,
-        )
-        del w_r, w_i, wavelets_complex
+        _, _, actual_no, _, actual_ns = w_r_slice.shape
+        success = False
+        error_msg = ""
 
-        real_parts.append(w_r_downsampled)
-        imag_parts.append(w_i_downsampled)
-        power_parts.append(w_c_downsampled)
-        gc.collect()
+        # --- ATTEMPT 1: GPU ACCELERATION ---
+        if num_gpus > 0:
+            # Round-robin assignment: GPU 0, GPU 1, GPU 0, etc.
+            device_id = chunk_index % num_gpus
+            device = f"cuda:{device_id}"
+            
+            try:
+                with torch.no_grad():
+                    w_r_clean = np.ascontiguousarray(w_r_slice).copy()
+                    w_i_clean = np.ascontiguousarray(w_i_slice).copy()
 
-    del wavelets_r, wavelets_i
-    w_r_downsampled = np.concatenate(real_parts, axis=0)
-    w_i_downsampled = np.concatenate(imag_parts, axis=0)
-    w_c_downsampled = np.concatenate(power_parts, axis=0)
-    del real_parts, imag_parts, power_parts
+                    w_r_gpu = torch.from_numpy(w_r_clean).to(device).float()
+                    w_i_gpu = torch.from_numpy(w_i_clean).to(device).float()
+                    w_c_gpu = w_r_gpu.square() + w_i_gpu.square()
 
+                    def resize_tensor_gpu(t):
+                        t = t.permute(3, 2, 4, 0, 1)
+                        t = t.reshape(chunk_len, actual_no * actual_ns, nx0, ny0)
+                        t = F.interpolate(t, size=(nx, ny), mode='bilinear', align_corners=False, antialias=True)
+                        t = t.reshape(chunk_len, actual_no, actual_ns, nx, ny)
+                        t = t.permute(0, 3, 4, 1, 2)
+                        return t.unsqueeze(-1)
+
+                    out_r = resize_tensor_gpu(w_r_gpu).cpu().numpy()
+                    out_i = resize_tensor_gpu(w_i_gpu).cpu().numpy()
+                    out_c = resize_tensor_gpu(w_c_gpu).cpu().numpy()
+
+                    del w_r_clean, w_i_clean, w_r_gpu, w_i_gpu, w_c_gpu
+                    # Emptying cache per thread keeps VRAM footprint perfectly flat
+                    torch.cuda.empty_cache() 
+                    success = True
+                    return chunk_index, start, end, out_r, out_i, out_c, f"GPU {device_id}", error_msg
+
+            except RuntimeError as e:
+                torch.cuda.empty_cache()
+                success = False
+                error_msg = str(e)
+
+        # --- ATTEMPT 2: CPU FALLBACK ---
+        if not success:
+            wavelets_complex = np.square(w_r_slice) + np.square(w_i_slice)
+            w_r_ready = w_r_slice.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
+            w_i_ready = w_i_slice.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
+            w_c_ready = wavelets_complex.transpose(3, 0, 1, 2, 4)[..., np.newaxis]
+
+            target_shape_chunk = (chunk_len, nx, ny, no, ns, nf)
+            out_r = skimage.transform.resize(w_r_ready, target_shape_chunk, anti_aliasing=True)
+            out_i = skimage.transform.resize(w_i_ready, target_shape_chunk, anti_aliasing=True)
+            out_c = skimage.transform.resize(w_c_ready, target_shape_chunk, anti_aliasing=True)
+            
+            del wavelets_complex, w_r_ready, w_i_ready, w_c_ready
+            return chunk_index, start, end, out_r, out_i, out_c, "CPU", error_msg
+
+    # Execute workers and populate output arrays
+    print(f"Dispatching to {max_workers} concurrent worker(s)...")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_chunk, i) for i in range(n_chunks)]
+        
+        for future in as_completed(futures):
+            chunk_idx, start, end, out_r, out_i, out_c, hw_used, err = future.result()
+            
+            if err:
+                print(f"Chunk {chunk_idx + 1} GPU failure. Reason: {err}")
+                
+            w_r_downsampled[start:end] = out_r
+            w_i_downsampled[start:end] = out_i
+            w_c_downsampled[start:end] = out_c
+            print(f"Finished Chunk {chunk_idx + 1} / {n_chunks} [Hardware: {hw_used}]")
+
+    print("\nSaving cache to disk...")
     np.save(cache_path, [w_r_downsampled, w_i_downsampled, w_c_downsampled])
     return w_r_downsampled, w_i_downsampled, w_c_downsampled
