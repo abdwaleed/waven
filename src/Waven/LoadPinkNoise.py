@@ -7,6 +7,7 @@ by receptive-field and nonlinear model stages.
 import os
 import gc
 import matplotlib
+import math
 import numpy as np
 from skimage import transform
 import numexpr as ne
@@ -619,7 +620,7 @@ def coarseWavelet(
         path, nx, ny, no, ns, nf, downsampling
     )
     n_frames = wavelets_r.shape[0]
-    n_chunks = max(1, int(n_frames / chunk_size))
+    n_chunks = math.ceil(n_frames / chunk_size)
 
     real_parts = []
     imag_parts = []
@@ -634,12 +635,12 @@ def coarseWavelet(
 
         target_r = (w_r.shape[0], nx, ny, no, ns, nf)
         w_r_downsampled = skimage.transform.resize(
-            w_r.reshape((-1, nx0, ny0, no, ns)),
+            w_r.reshape((-1, nx0, ny0, no, ns, nf)),
             target_r,
             anti_aliasing=True,
         )
         w_i_downsampled = skimage.transform.resize(
-            w_i.reshape((-1, nx0, ny0, no, ns)),
+            w_i.reshape((-1, nx0, ny0, no, ns, nf)),
             target_r,
             anti_aliasing=True,
         )

@@ -247,6 +247,7 @@ def load_coarse_wavelets(analysis: AnalysisConfig, gabor: GaborConfig) -> Wavele
         ny=analysis.coarse_ny,
         no=gabor.n_thetas,
         ns=len(analysis.sigmas),
+        nf=len(analysis.frequencies)
     )
     return WaveletData(
         wavelets_r=wavelets_r,
