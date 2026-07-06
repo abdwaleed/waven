@@ -11,6 +11,7 @@ src/waven/gui.py
 src/waven/performance.py
 src/waven/pipeline.py
 src/waven/plotting.py
+src/waven/time_alignment.py
 src/waven/wavelet_io.py
 src/waven/zarr_compat.py
 src/waven/zebraGUI.py
@@ -26,4 +27,6 @@ src/waven/suite2p/utils/mpeppy.py
 src/waven/suite2p/utils/timelinepy.py
 src/waven/suite2p/utils/twophopy.py
 src/waven/suite2p/utils/utils.py
-tests/test_zarr_compat.py
+src/waven/suite_ephys/DIO.py
+src/waven/suite_ephys/__init__.py
+src/waven/suite_ephys/readTrodesExtractedDataFile3.py

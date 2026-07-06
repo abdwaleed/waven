@@ -4,7 +4,7 @@ from numcodecs import Blosc
 from tqdm import trange
 import os
 
-def convert_npy_to_zarr(npy_dir, zarr_dir, hz):
+def convert_npy_to_zarr(npy_dir, zarr_dir, hz, n_orientations=None, n_sigmas=None, n_frequencies=None):
     """
     Converts downsampled wavelet .npy files to chunked, compressed Zarr format
     using configurations derived dynamically from the project JSON settings.
@@ -13,6 +13,9 @@ def convert_npy_to_zarr(npy_dir, zarr_dir, hz):
         npy_dir (str): Directory where the .npy files are located (e.g., your zebra_movie folder)
         zarr_dir (str): Directory where the .zarr files should be saved (e.g., your zarr folder)
         hz (int): Acquisition frequency of the video data. Default is 30.
+        n_orientations (int, optional): Number of Gabor orientations (N_thetas).
+        n_sigmas (int, optional): Number of sigma scales in full-model wavelets.
+        n_frequencies (int, optional): Number of spatial frequencies in full-model wavelets.
     """
     # Dynamically build paths
     npy_i = os.path.join(npy_dir, "dwt_videodata2_i.npy")
@@ -23,17 +26,7 @@ def convert_npy_to_zarr(npy_dir, zarr_dir, hz):
 
     SECONDS_PER_MINUTE = 60
     FRAMES_PER_MINUTE = hz * SECONDS_PER_MINUTE
-    chunks = (FRAMES_PER_MINUTE, 1, 1, 8, 5, 4)
 
-    compressor = Blosc(
-        cname="zstd",
-        clevel=3,
-        shuffle=Blosc.BITSHUFFLE,
-    )
-
-    # ======================
-    # LOAD NPY AS MEMMAP
-    # ======================
     print(f"Opening NPY files as memmap from: {npy_dir}")
     if not os.path.exists(npy_i) or not os.path.exists(npy_r):
         raise FileNotFoundError(
@@ -47,8 +40,24 @@ def convert_npy_to_zarr(npy_dir, zarr_dir, hz):
     shape = w_i.shape
     dtype = w_i.dtype
 
+    if n_orientations is None:
+        n_orientations = shape[3]
+    if n_sigmas is None:
+        n_sigmas = shape[4]
+    if n_frequencies is None:
+        n_frequencies = shape[5]
+
+    chunks = (FRAMES_PER_MINUTE, 1, 1, n_orientations, n_sigmas, n_frequencies)
+
     print("Shape:", shape)
     print("Dtype:", dtype)
+    print("Chunks:", chunks)
+
+    compressor = Blosc(
+        cname="zstd",
+        clevel=3,
+        shuffle=Blosc.BITSHUFFLE,
+    )
 
     # Ensure output zarr directory exists
     os.makedirs(zarr_dir, exist_ok=True)

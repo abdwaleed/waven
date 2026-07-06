@@ -25,6 +25,8 @@ Requires-Dist: zarr
 Requires-Dist: numexpr
 Requires-Dist: tqdm
 Requires-Dist: psutil
+Requires-Dist: customtkinter>=5.2.0
+Requires-Dist: spikeinterface
 Dynamic: license-file
 
 <div>

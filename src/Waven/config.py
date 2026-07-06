@@ -54,6 +54,8 @@ DEFAULT_COMMON_PARAMS: Dict[str, str] = {
     "Spks Path": "None",
     "Full Model Wavelet Path": "",
     "Full Model Save Path": "",
+    "Plot Cache Path": "",
+    "Recovery Cache Directory": "",
 }
 
 DEFAULT_TWO_PHOTON_PARAMS: Dict[str, str] = {
@@ -172,6 +174,32 @@ def _path_to_gui(path: Optional[Path]) -> str:
 def coarse_grid_dimensions(nx: int, ny: int) -> Tuple[int, int]:
     """Return coarse RF grid size as 20% of full NX/NY (rounded)."""
     return round(0.2 * nx), round(0.2 * ny)
+
+
+def coarse_to_full_scale(nx: int, ny: int) -> Tuple[float, float]:
+    """Return multipliers from coarse RF grid indices to full-resolution pixels."""
+    coarse_nx, coarse_ny = coarse_grid_dimensions(nx, ny)
+    scale_x = nx / coarse_nx if coarse_nx else 1.0
+    scale_y = ny / coarse_ny if coarse_ny else 1.0
+    return scale_x, scale_y
+
+
+def resolve_sigma_indices(
+    library_sigmas: Sequence[float],
+    requested_sigmas: Sequence[float],
+) -> Tuple[int, ...]:
+    """Map requested sigma values to indices in the Gabor library."""
+    lib = tuple(float(s) for s in library_sigmas)
+    indices = []
+    for sigma in requested_sigmas:
+        value = float(sigma)
+        try:
+            indices.append(lib.index(value))
+        except ValueError as exc:
+            raise ValueError(
+                f"Sigma {value} is not present in the Gabor library sigmas {lib}"
+            ) from exc
+    return tuple(indices)
 
 
 def _parse_data_dir(mapping: Mapping[str, Any], field_name: str = "Dir") -> Path:
@@ -293,6 +321,8 @@ class AnalysisConfig:
     spks_path: Optional[Path] = None
     full_model_wavelet_path: Optional[Path] = None
     full_model_save_path: Optional[Path] = None
+    plot_cache_path: Optional[Path] = None
+    recovery_cache_dir: Optional[Path] = None
 
     @classmethod
     def from_mapping(
@@ -382,6 +412,10 @@ class AnalysisConfig:
             full_model_save_path=parse_optional_path(
                 _get(mapping, "Full Model Save Path"),
             ),
+            plot_cache_path=parse_optional_path(_get(mapping, "Plot Cache Path")),
+            recovery_cache_dir=parse_optional_path(
+                _get(mapping, "Recovery Cache Directory"),
+            ),
         )
 
     @property
@@ -469,6 +503,8 @@ class AnalysisConfig:
             "Spks Path": _path_to_gui(self.spks_path),
             "Full Model Wavelet Path": _path_to_gui(self.full_model_wavelet_path),
             "Full Model Save Path": _path_to_gui(self.full_model_save_path),
+            "Plot Cache Path": _path_to_gui(self.plot_cache_path),
+            "Recovery Cache Directory": _path_to_gui(self.recovery_cache_dir),
         }
         if self.workflow == WORKFLOW_2P:
             mapping["Resolution"] = str(self.resolution)
@@ -532,6 +568,11 @@ class PipelineConfig:
         actual_root = os.getcwd().replace("\\", "/")
         resolved_text = raw_text.replace("{PROJECT_ROOT}", actual_root)
         payload = json.loads(resolved_text)
+        workflow = payload.get("workflow", workflow)
+        if workflow not in (WORKFLOW_2P, WORKFLOW_EPHYS):
+            raise ValueError(
+                f"Unknown workflow {workflow!r}; expected {WORKFLOW_2P!r} or {WORKFLOW_EPHYS!r}"
+            )
 
         gabor_params = payload.get("gabor") or payload.get("gabor_param", {})
         common_params = payload.get("common", {})

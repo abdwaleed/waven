@@ -53,7 +53,7 @@ def has_enough_ram(required_bytes: int, safety_margin: float = 1.20) -> bool:
     is_safe = _has_enough_ram(required_bytes, safety_margin)
     print(
         f"Memory check: needs {required_gb:.2f} GB, "
-        f"{available_gb:.2f} GB free → "
+        f"{available_gb:.2f} GB free -> "
         f"{'in-memory' if is_safe else 'disk streaming'}",
         end="\n\n",
     )
@@ -452,6 +452,13 @@ def getWTfromNPY(
     else:
         lib_phase = waveletLibrary[:, :, :, phase, :]
 
+    if lib_phase.shape[-1] != spatial_pixels:
+        raise ValueError(
+            "Gabor library pixel axis does not match video frames: "
+            f"library has {lib_phase.shape[-1]} pixels, video has {spatial_pixels}. "
+            "Check NX/NY and the downsampled movie shape in config.json."
+        )
+
     lib_flat = lib_phase.reshape(-1, spatial_pixels)
     num_filters = lib_flat.shape[0]
 
@@ -488,17 +495,24 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path):
     Chooses in-memory or memory-mapped output based on ``has_enough_ram``, then
     iterates over sigma scales and fills ``dwt_videodata_{phase}.npy``.
     """
+    from .zarr_compat import load_array
+
     print(f"Loading Gabor library from {library_path} (mmap_mode='r')...", end="\n\n")
-    L = np.load(library_path, mmap_mode='r') 
+    L = load_array(library_path, mmap_mode='r')
     
-    prefix_shape = L.shape[:3] # (lx, ly, thetas)
+    prefix_shape = L.shape[:3]  # (lx, ly, thetas)
     num_filters = int(np.prod(prefix_shape))
     T = videodata.shape[0]
+    if len(sigmas) > L.shape[3]:
+        raise ValueError(
+            f"Requested {len(sigmas)} sigma values, but the Gabor library "
+            f"contains {L.shape[3]} sigma planes."
+        )
     
-    final_shape = prefix_shape + (T, len(sigmas))
+    # Legacy analysis expects time-first wavelet arrays for coarse decomposition.
+    final_shape = (T,) + prefix_shape + (len(sigmas),)
     
-    # FIX 1: Use Python's math.prod to prevent 32-bit integer overflow on Windows!
-    required_bytes = math.prod(final_shape) * 4 
+    required_bytes = math.prod(final_shape) * 4
     
     save_path = os.path.join(folder_path, f'dwt_videodata_{phase}.npy')
     
@@ -510,27 +524,131 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path):
         WT_final = np.lib.format.open_memmap(save_path, mode='w+', dtype=np.float32, shape=final_shape)
         use_mmap = True
 
-    # FIX 2: Create a continuous view of the entire array ONCE.
-    # This prevents numpy from accidentally creating massive memory copies inside the loop.
-    WT_flat = WT_final.reshape(num_filters, T, len(sigmas))
+    temp_flat = np.empty((num_filters, T, 1), dtype=np.float32)
 
     for s, ss in enumerate(sigmas):
         print(f"Processing sigma {s + 1}/{len(sigmas)}...", end="\n\n")
-        
-        # Pass the flattened view and the specific sigma index
-        getWTfromNPY(videodata, L[:, :, :, s], phase, WT_flat=WT_flat, s_idx=s)
+        temp_flat.fill(0)
+        getWTfromNPY(videodata, L[:, :, :, s], phase, WT_flat=temp_flat, s_idx=0)
+        spatial = temp_flat[:, :, 0].reshape(prefix_shape + (T,))
+        WT_final[..., s] = np.transpose(spatial, (3, 0, 1, 2))
         
         gc.collect() 
         torch.cuda.empty_cache() 
         
     if use_mmap:
         WT_final.flush()
-        del WT_final, WT_flat
+        del WT_final, temp_flat
         print(f"Success! Saved streamed disk array to {save_path}")
     else:
         print("Saving array to disk...", end="\n\n")
         np.save(save_path, WT_final)
         print(f"Success! Saved RAM array to {save_path}", end="\n\n")
+
+
+def waveletDecompositionFull(
+    videodata,
+    phase,
+    sigmas,
+    frequencies,
+    folder_path,
+    library_path,
+    library_sigmas=None,
+    sigma_indices=None,
+):
+    """Decompose a movie into full-resolution wavelets for ``run_Full_Model``.
+
+    Writes ``dwt_videodata2_r.npy`` (phase 0) or ``dwt_videodata2_i.npy`` (phase 1)
+    with shape ``(T, nx, ny, n_orientations, n_sigmas, n_frequencies)``.
+    """
+    from .config import resolve_sigma_indices
+
+    print(
+        f"Loading Gabor library from {library_path} (mmap_mode='r') "
+        "for full-model decomposition...",
+        end="\n\n",
+    )
+    from .zarr_compat import load_array
+
+    library = load_array(library_path, mmap_mode="r")
+    lx, ly, num_t = int(library.shape[0]), int(library.shape[1]), int(library.shape[2])
+    num_frames = videodata.shape[0]
+    sigmas = np.asarray(sigmas, dtype=float)
+    frequencies = np.asarray(frequencies, dtype=float)
+    ns = len(sigmas)
+    nf = len(frequencies)
+    if library.ndim < 7 and nf > 1:
+        raise ValueError(
+            "Full-model wavelet generation was asked for multiple frequencies, "
+            "but the Gabor library has no frequency axis. Regenerate the library "
+            "from config.json with the configured Frequencies list."
+        )
+
+    if sigma_indices is None:
+        if library_sigmas is None:
+            if library.ndim >= 7:
+                raise ValueError(
+                    "library_sigmas is required when the Gabor library includes "
+                    "a dedicated sigma axis"
+                )
+            library_sigmas = tuple(range(library.shape[3]))
+        sigma_indices = resolve_sigma_indices(library_sigmas, sigmas)
+    else:
+        sigma_indices = tuple(int(i) for i in sigma_indices)
+
+    phase_suffix = "_r" if phase == 0 else "_i"
+    save_path = os.path.join(folder_path, f"dwt_videodata2{phase_suffix}.npy")
+    final_shape = (num_frames, lx, ly, num_t, ns, nf)
+    required_bytes = math.prod(final_shape) * 4
+
+    if has_enough_ram(required_bytes, safety_margin=1.15):
+        wt_final = np.zeros(final_shape, dtype=np.float32)
+        use_mmap = False
+    else:
+        wt_final = np.lib.format.open_memmap(
+            save_path,
+            mode="w+",
+            dtype=np.float32,
+            shape=final_shape,
+        )
+        use_mmap = True
+
+    num_filters = lx * ly * num_t
+    temp_flat = np.zeros((num_filters, num_frames, 1), dtype=np.float32)
+
+    for out_s, lib_s in enumerate(sigma_indices):
+        for f_idx in range(nf):
+            if library.ndim >= 7:
+                lib_slice = library[:, :, :, lib_s, f_idx]
+            elif library.ndim == 6:
+                lib_slice = library[:, :, :, lib_s]
+            else:
+                lib_slice = library[:, :, :, lib_s]
+
+            getWTfromNPY(
+                videodata,
+                lib_slice,
+                phase,
+                WT_flat=temp_flat,
+                s_idx=0,
+            )
+            spatial = temp_flat[:, :, 0].reshape(lx, ly, num_t, num_frames)
+            wt_final[:, :, :, :, out_s, f_idx] = np.transpose(
+                spatial,
+                (3, 0, 1, 2),
+            )
+            gc.collect()
+            if resolve_compute_device(prefer_gpu=True) == "cuda":
+                torch.cuda.empty_cache()
+
+    if use_mmap:
+        wt_final.flush()
+        del wt_final
+        print(f"Success! Saved streamed full-model array to {save_path}")
+    else:
+        print("Saving full-model array to disk...", end="\n\n")
+        np.save(save_path, wt_final)
+        print(f"Success! Saved full-model array to {save_path}", end="\n\n")
 
 
 def getTrueRF(idx, rfs, L):

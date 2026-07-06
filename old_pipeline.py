@@ -1,4 +1,4 @@
-"""High-level orchestration for waven analysis.
+"""High-level orchestration for Waven analysis.
 
 The functions here deliberately delegate numerical work to the existing
 modules.  Their job is to make execution explicit, reusable, and easier
@@ -142,18 +142,10 @@ def create_gabor_library(config: GaborConfig) -> Path:
 def prepare_stimulus_wavelets(
     analysis: AnalysisConfig,
     library_path: Optional[Path] = None,
-    chunk_size: Optional[int] = None,
+    chunk_size: int = 1000,
 ) -> Path:
-    """Downsample the stimulus movie and save both wavelet phases.
-
-    Chunk size for video downsampling is chosen from available RAM when
-    ``chunk_size`` is omitted.
-    """
+    """Downsample the stimulus movie and save both wavelet phases."""
     from . import WaveletGenerator as wg
-    from .performance import video_downsample_chunk_size
-
-    if chunk_size is None:
-        chunk_size = video_downsample_chunk_size()
 
     library_path = library_path or analysis.library_path
     require_file(analysis.movie_path, "Stimulus movie")
@@ -201,84 +193,38 @@ def load_spikes_and_positions(
     analysis: AnalysisConfig,
     threshold: float = 1.25,
     method: str = "frame2ttl",
-    correct_positions: bool = True,
 ) -> SpikeData:
-    """Load spike responses and neuron positions for the configured workflow."""
-    from . import time_alignment as ta
+    """Load spike responses and neuron positions from suite2p or npy files."""
+    from . import LoadPinkNoise as lpn
 
-    aligned = ta.load_aligned_spikes(
-        analysis.workflow,
-        experiment_info=analysis.experiment_info,
-        data_dir=analysis.data_dir,
-        data_dir_strings=list(analysis.data_dir_strings),
-        suite2p_dir=analysis.suite2p_dir,
-        block_end=analysis.block_end,
-        n_planes=analysis.n_planes,
-        nb_frames=analysis.nb_frames,
-        resolution=analysis.resolution,
-        sampling_rate=analysis.sampling_rate,
-        spks_path=analysis.spks_path,
-        threshold=threshold,
-        method=method,
-        correct_positions=correct_positions,
-    )
-
-    validate_spike_data(aligned.spikes, aligned.neuron_pos)
-    return SpikeData(
-        spikes=aligned.spikes,
-        aligned_spikes=aligned.aligned_spikes,
-        neuron_pos=aligned.neuron_pos,
-    )
-
-
-def prepare_full_model_wavelets(
-    analysis: AnalysisConfig,
-    gabor: GaborConfig,
-    library_path: Optional[Path] = None,
-    output_dir: Optional[Path] = None,
-) -> Path:
-    """Build full-resolution wavelet arrays used by :func:`run_Full_Model`."""
-    from . import WaveletGenerator as wg
-
-    library_path = library_path or analysis.library_path
-    output_dir = output_dir or analysis.full_model_wavelet_path or analysis.path_directory
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    downsampled_path = analysis.movie_path.with_name(
-        f"{analysis.movie_path.stem}_downsampled.npy"
-    )
-    require_file(downsampled_path, "Downsampled stimulus")
-    require_file(library_path, "Gabor library")
-
-    video_data = np.load(downsampled_path)
-    video_data = (
-        video_data.astype(int)
-        - np.logical_not(video_data).astype(int)
-    )
-
-    for phase in (0, 1):
-        target = output_dir / f"dwt_videodata2{'_r' if phase == 0 else '_i'}.npy"
-        if target.exists():
-            print(f"Found existing full-model wavelets: {target}")
-            continue
-        wg.waveletDecompositionFull(
-            video_data,
-            phase,
-            analysis.sigmas_full_model,
-            analysis.frequencies,
-            str(output_dir),
-            str(library_path),
-            library_sigmas=gabor.sigmas,
+    if analysis.spks_path is None:
+        require_directory(analysis.suite2p_dir, "suite2p directory")
+        spikes, aligned_spikes, neuron_pos = lpn.loadSPKMesoscope(
+            analysis.experiment_info,
+            list(analysis.data_dir_strings),
+            str(analysis.suite2p_dir),
+            analysis.block_end,
+            analysis.n_planes,
+            analysis.nb_frames,
+            threshold=threshold,
+            last=True,
+            method=method,
         )
-    return output_dir
+    else:
+        require_file(analysis.spks_path, "Spike file")
+        spikes = np.load(analysis.spks_path)
+        pos_path = analysis.spks_path.parent / "pos.npy"
+        require_file(pos_path, "Neuron position file")
+        neuron_pos = np.load(pos_path)
+        aligned_spikes = None
+
+    # neuron_pos = lpn.correctNeuronPos(neuron_pos, analysis.resolution)
+    validate_spike_data(spikes, neuron_pos)
+    return SpikeData(spikes=spikes, aligned_spikes=aligned_spikes, neuron_pos=neuron_pos)
 
 
 def load_coarse_wavelets(analysis: AnalysisConfig, gabor: GaborConfig) -> WaveletData:
-    """Load or build coarse wavelet arrays used for receptive-field estimation.
-
-    Results are cached as ``dwt_downsampled_videodata.npy`` under the path directory.
-    """
+    """Load or create the coarse wavelet arrays used for RF estimation."""
     from . import LoadPinkNoise as lpn
 
     wavelets_r, wavelets_i, wavelets_complex = lpn.coarseWavelet(
@@ -286,11 +232,10 @@ def load_coarse_wavelets(analysis: AnalysisConfig, gabor: GaborConfig) -> Wavele
         False,
         nx0=analysis.nx,
         ny0=analysis.ny,
-        nx=analysis.coarse_nx,
-        ny=analysis.coarse_ny,
+        nx=27,
+        ny=11,
         no=gabor.n_thetas,
         ns=len(analysis.sigmas),
-        nf=1,
     )
     return WaveletData(
         wavelets_r=wavelets_r,
@@ -323,25 +268,16 @@ def run_rf_analysis(
     )
     stimulus = wavelets.wavelets_complex[:n_frames].reshape(n_frames, -1)
     response = np.mean(spike_data.spikes[:, :n_frames], axis=0)
-    if wavelets.wavelets_complex.ndim == 6:
-        rf_nf = wavelets.wavelets_complex.shape[5]
-        rf_frequencies = np.asarray(analysis.frequencies[:rf_nf])
-    else:
-        rf_nf = 1
-        rf_frequencies = np.asarray(analysis.frequencies[:1])
     rf_results = au.PearsonCorrelationPinkNoise(
-        stimulus,                      # stim
-        response,                      # resp
-        spike_data.neuron_pos,         # neuron_pos
-        analysis.coarse_nx,            # nx
-        analysis.coarse_ny,            # ny
-        len(analysis.sigmas),          # ns
-        rf_nf,                         # nf
-        analysis.analysis_coverage,    # visual_coverage
-        analysis.screen_ratio,         # screen_ratio
-        analysis.sigmas_deg,           # sigmas
-        rf_frequencies,                # frequencies present in coarse cache
-        n_orientations=gabor.n_thetas, 
+        stimulus,
+        response,
+        spike_data.neuron_pos,
+        27,
+        11,
+        len(analysis.sigmas),
+        analysis.analysis_coverage,
+        analysis.screen_ratio,
+        analysis.sigmas_deg,
         plotting=plotting,
     )
 
@@ -352,7 +288,7 @@ def run_rf_analysis(
     ):
         au.Plot_RF(
             rf_results[0][neuron_id],
-            len(analysis.sigmas),
+            4,
             title=np.max(rf_results[0][neuron_id]),
         )
         au.PlotTuningCurve(
@@ -361,7 +297,6 @@ def run_rf_analysis(
             analysis.analysis_coverage,
             analysis.sigmas_deg,
             analysis.screen_ratio,
-            rf_frequencies,
         )
 
     return RFAnalysisResult(
@@ -466,7 +401,7 @@ def run_full_model(
         spike_data.spikes,
         idxs,
         config.gabor.theta_radians,
-        np.array(analysis.sigmas_full_model),
+        analysis.sigmas_array,
         np.array(analysis.frequencies),
         analysis.visual_coverage,
         spike_data.neuron_pos,
@@ -495,7 +430,7 @@ def run_pipeline(
     plotting: bool = True,
     neuron_id: Optional[int] = 2441,
 ) -> PipelineOutputs:
-    """Run the configurable waven analysis pipeline."""
+    """Run the configurable Waven analysis pipeline."""
     outputs = PipelineOutputs()
     library_path = config.analysis.library_path
 
@@ -505,11 +440,6 @@ def run_pipeline(
 
     if run_wavelets:
         prepare_stimulus_wavelets(config.analysis, library_path=library_path)
-        prepare_full_model_wavelets(
-            config.analysis,
-            config.gabor,
-            library_path=library_path,
-        )
 
     spike_data = load_spikes_and_positions(config.analysis)
     outputs.spike_data = spike_data

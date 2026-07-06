@@ -14,3 +14,5 @@ zarr
 numexpr
 tqdm
 psutil
+customtkinter>=5.2.0
+spikeinterface
