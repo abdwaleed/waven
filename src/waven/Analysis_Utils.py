@@ -2618,7 +2618,48 @@ def signaltonoiseScipy(a, axis=0, ddof=0):
     return np.where(sd == 0, 0, m/sd)
 
 
-def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute):
+def _sem_over_trials(trials):
+    trials = np.asarray(trials, dtype=float)
+    if trials.ndim < 2 or trials.shape[0] <= 1:
+        return None
+    return np.nanstd(trials, axis=0, ddof=1) / np.sqrt(trials.shape[0])
+
+
+def _plot_trace_with_optional_sem(ax, trials, x=None, color='k', label=None, show_sem_errorbars=False):
+    trials = np.asarray(trials, dtype=float)
+    if trials.ndim == 1:
+        mean = trials
+        n_trials = 1
+    else:
+        mean = np.nanmean(trials, axis=0)
+        n_trials = trials.shape[0]
+    if x is None:
+        x = np.arange(mean.shape[0])
+    ax.plot(x, mean, c=color, label=label)
+    sem = _sem_over_trials(trials)
+    if show_sem_errorbars and sem is not None:
+        every = max(1, mean.shape[0] // 100)
+        ax.errorbar(
+            x,
+            mean,
+            yerr=sem,
+            fmt='none',
+            ecolor=color,
+            elinewidth=0.6,
+            capsize=1,
+            alpha=0.55,
+            errorevery=every,
+        )
+        return n_trials
+    return None
+
+
+def _set_sem_caption(fig, n_trials):
+    if n_trials and n_trials > 1:
+        fig._waven_caption = f"Error bars represent SEM over {n_trials} trials."
+
+
+def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, show_sem_errorbars=False):
     x = int(np.round(maxes0[0, idx]))
     y = int(np.round(maxes0[1, idx]))
     o = int(np.round(maxes0[2, idx]))
@@ -2662,22 +2703,48 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
     if plotting:
         spk = spks[:, :, idx]
 
-        fig, ax = plt.subplots(6, 1)
-        ax[0].plot(np.mean(spk, axis=0)[8500:9000])
-        ax[1].plot(w_r[8500:9000])
-        ax[2].plot(w_i[8500:9000])
-        ax[3].plot(rho[8500:9000])
-        ax[4].plot(phi[8500:9000])
-        ax[5].plot(dphi[8500:9000])
+        fig, ax = plt.subplots(6, 1, sharex=True)
+        x_trace = np.arange(8500, 9000)
+        sem_trials = _plot_trace_with_optional_sem(
+            ax[0],
+            spk[:, 8500:9000],
+            x=x_trace,
+            color='k',
+            label='Trial-averaged spike activity',
+            show_sem_errorbars=show_sem_errorbars,
+        )
+        _set_sem_caption(fig, sem_trials)
+        ax[1].plot(x_trace, w_r[8500:9000], c='r')
+        ax[2].plot(x_trace, w_i[8500:9000], c='b')
+        ax[3].plot(x_trace, rho[8500:9000], c='k')
+        ax[4].plot(x_trace, phi[8500:9000], c='k')
+        ax[5].plot(x_trace, dphi[8500:9000], c='k')
+        labels = [
+            ("Spike activity", "Activity (a.u.)"),
+            ("Cosine wavelet", "Wavelet value (a.u.)"),
+            ("Sine wavelet", "Wavelet value (a.u.)"),
+            ("Amplitude", "rho (a.u.)"),
+            ("Phase", "phi (rad)"),
+            ("Drift", "dphi (rad/frame)"),
+        ]
+        for axis, (title, ylabel) in zip(ax, labels):
+            axis.set_title(title)
+            axis.set_ylabel(ylabel)
+        ax[-1].set_xlabel("Frame index")
 
         colors = []
-        ax = plt.figure().add_subplot(projection='3d')
+        fig3d = plt.figure()
+        ax = fig3d.add_subplot(projection='3d')
         for i in np.arange(1000, 3000, 1):
             c = np.mean(spk, axis=0)[i]
             color = plt.cm.coolwarm(255 * c / 100)
             colors.append(color)
             ax.scatter(rho[i - 1:i + 1], phi[i - 1:i + 1], dphi[i - 1:i + 1], s=10,
                        color=color)  # dphi[1000:1100])#, color=colors)
+        ax.set_title("Wavelet trajectory colored by spike activity")
+        ax.set_xlabel("Amplitude rho (a.u.)")
+        ax.set_ylabel("Phase phi (rad)")
+        ax.set_zlabel("Drift dphi (rad/frame)")
 
     vis_resp, a, nonlinparams, rhophiparams, plots, unrectified, w, interp = GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib,
                                                                                           w_r_inhib,
@@ -2696,7 +2763,8 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
 
 def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
               n_min=5, double_wavelet_model=True, train_idx=[0, 2],
-              test_idx=[1, 3], plotting=False, frames_per_minute=None):
+              test_idx=[1, 3], plotting=False, frames_per_minute=None,
+              show_sem_errorbars=False):
     """Fit the fast nonlinear Gabor-wavelet model for every neuron in parallel."""
     if wavelets_i.ndim != 5 or wavelets_r.ndim != 5:
         raise ValueError(
@@ -2718,7 +2786,8 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         parallel_results = [
             _process_single_neuron(
                 idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
-                double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute
+                double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
+                show_sem_errorbars=show_sem_errorbars
             )
             for idx in range(num_neurons)
         ]
@@ -2727,7 +2796,8 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         parallel_results = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(_process_single_neuron)(
                 idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
-                double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute
+                double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
+                show_sem_errorbars=show_sem_errorbars
             ) for idx in range(num_neurons)
         )
 
@@ -2750,7 +2820,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                    savepath='/home/sophie/Pictures/img zebra/supp/supp/', n_min=5, tt=[0, 18000],
                    memmapping=True, train_idx=[0, 2], test_idx=[1, 3], double_wavelet_model=False, lastmin=False,
                    plotting=False, frames_per_minute=None,
-                   hz=DEFAULT_MOVIE_FRAME_RATE_HZ):
+                   hz=DEFAULT_MOVIE_FRAME_RATE_HZ, show_sem_errorbars=False):
     if frames_per_minute is None:
         frames_per_minute = int(hz) * SECONDS_PER_MINUTE
     frames_per_minute = int(frames_per_minute)
@@ -2862,10 +2932,14 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             
             if plotting:
                 fig, ax = plt.subplots(n_orientations)
+                fig.suptitle("Local orientation/size/frequency correlation search")
                 if n_orientations == 1:
                     ax = [ax]
                 for i in range(n_orientations):
                     ax[i].imshow(cc_f_1[i].T, vmin=-np.max(abs(cc_f_1)), vmax=np.max(abs(cc_f_1)), cmap='coolwarm')
+                    ax[i].set_title(f"Orientation {i}")
+                    ax[i].set_xlabel("Size index")
+                    ax[i].set_ylabel("Frequency index")
             
             m = np.where(abs(cc_f_1) == np.max(abs(cc_f_1)))
             o, s, f = m[0][0], m[1][0], m[2][0]
@@ -2914,6 +2988,9 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                 plt.imshow(cc_f_1_xy.T, vmax=np.max(abs(cc_f_1_xy)), cmap='coolwarm', aspect='equal')
                 plt.xticks(np.linspace(0, cc_f_1_xy.shape[0] - 1, 3).astype(int))
                 plt.yticks(np.linspace(0, cc_f_1_xy.shape[1] - 1, 3).astype(int))
+                plt.title("Local x/y correlation search")
+                plt.xlabel("Local X position (pixels)")
+                plt.ylabel("Local Y position (pixels)")
 
             print(xt, yt)
             print(o, s, f)
@@ -2965,10 +3042,14 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             
             if plotting:
                 fig, ax = plt.subplots(n_orientations)
+                fig.suptitle("Local orientation/size/frequency correlation search")
                 if n_orientations == 1:
                     ax = [ax]
                 for i in range(n_orientations):
                     ax[i].imshow(cc_f_1[i].T, vmin=-np.max(abs(cc_f_1)), vmax=np.max(abs(cc_f_1)), cmap='coolwarm')
+                    ax[i].set_title(f"Orientation {i}")
+                    ax[i].set_xlabel("Size index")
+                    ax[i].set_ylabel("Frequency index")
             
             m = np.where(abs(cc_f_1) == np.max(abs(cc_f_1)))
             o, s, f = m[0][0], m[1][0], m[2][0]
@@ -3021,6 +3102,9 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                 plt.imshow(cc_f_1_xy.T, vmax=np.max(abs(cc_f_1_xy)), cmap='coolwarm', aspect='equal')
                 plt.xticks(np.linspace(0, cc_f_1_xy.shape[0] - 1, 3).astype(int))
                 plt.yticks(np.linspace(0, cc_f_1_xy.shape[1] - 1, 3).astype(int))
+                plt.title("Local x/y correlation search")
+                plt.xlabel("Local X position (pixels)")
+                plt.ylabel("Local Y position (pixels)")
             
             print(x, y)
             print(o, s, f)
@@ -3137,6 +3221,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[0].spines["right"].set_visible(False)
             ax[0].set_ylim(bottom=-np.max(abs(cc_f_1_xy)), top=np.max(abs(cc_f_1_xy)))
             ax[0].set_title('Azimuth (deg)')
+            ax[0].set_xlabel("Azimuth (deg)")
+            ax[0].set_ylabel("Correlation (r)")
 
             ax[2].plot(np.append(cc_f_1_o[:, s, f], cc_f_1_o[0, s, f]), 'o-', c='k', markersize=markersize)
             ax[2].set_xticks(
@@ -3146,12 +3232,16 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[2].spines["top"].set_visible(False)
             ax[2].spines["right"].set_visible(False)
             ax[2].set_title('Orientation (deg)')
+            ax[2].set_xlabel("Orientation (deg)")
+            ax[2].set_ylabel("Correlation (r)")
 
             ax[1].plot(elev_val, i * cc_f_1_xy[x, :], c='k')
             ax[1].set_xticks([-30, 0, 30])
             ax[1].spines["top"].set_visible(False)
             ax[1].spines["right"].set_visible(False)
             ax[1].set_title('Elevation (deg)')
+            ax[1].set_xlabel("Elevation (deg)")
+            ax[1].set_ylabel("Correlation (r)")
 
             mm = max(cc_f_1_o.min(), cc_f_1_o.max(), key=abs)
 
@@ -3160,6 +3250,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[3].spines["top"].set_visible(False)
             ax[3].spines["right"].set_visible(False)
             ax[3].set_title('Size (deg)')
+            ax[3].set_xlabel("Size (deg)")
+            ax[3].set_ylabel("Correlation (r)")
 
             ax[4].plot(frequencies, cc_f_1_o[o, s, :], 'o-', c='k', markersize=markersize)
             ax[4].set_xticks(np.floor(frequencies * 100).astype(int) / 100)
@@ -3167,6 +3259,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[4].spines["top"].set_visible(False)
             ax[4].spines["right"].set_visible(False)
             ax[4].set_title('Frequency (cdp)')
+            ax[4].set_xlabel("Spatial frequency (cycles/deg)")
+            ax[4].set_ylabel("Correlation (r)")
 
         if memmapping:
             # Slicing the existing zarr references instead of re-opening them from disk
@@ -3231,6 +3325,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[5].spines["right"].set_visible(False)
             ax[5].set_xticks([0, a / 2, a])
             ax[5].set_title('Amplitude (a.u.)')
+            ax[5].set_xlabel("Amplitude rho (a.u.)")
+            ax[5].set_ylabel("Response gain (a.u.)")
 
             b_x = np.linspace(0, 2 * np.pi, ncut + 1)
             ax[6].plot(b_x, plot[1], c='k')
@@ -3240,6 +3336,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[6].set_xticks([0, np.pi, 2 * np.pi])
             ax[6].set_xticklabels([0, r'$\pi$', r'$2\pi$'])
             ax[6].set_title('Phase (rad)')
+            ax[6].set_xlabel("Phase phi (rad)")
+            ax[6].set_ylabel("Response gain (a.u.)")
 
             c_x = np.linspace(-1, 1, ncut)
             ax[7].plot(c_x, plot[2], c='k')
@@ -3248,8 +3346,9 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[7].spines["right"].set_visible(False)
             ax[7].set_xticks([-1, 0, 1])
             ax[7].set_title('Drift (a.u.)')
-
-            fig.savefig(savepath + str(idx) + "new.svg", format="svg", bbox_inches="tight")
+            ax[7].set_xlabel("Drift dphi (a.u.)")
+            ax[7].set_ylabel("Response gain (a.u.)")
+            ax[8].axis("off")
 
             pref_phase = b_x[np.argmax(plot[1])]
             pref_ori = thetas[o] * 180 / np.pi
@@ -3261,27 +3360,53 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             star = 4500
             stop = star + 500
             spk = spks[:, :, idx]
-            fig, ax = plt.subplots(7, 1)
+            fig, ax = plt.subplots(7, 1, sharex=True)
             plt.rcParams.update({
                 "font.size": 8,
                 "svg.fonttype": "none"  # Texte éditable dans Inkscape
             })
-            ax[2].plot(np.mean(spk, axis=0)[star:stop], c='k')
-            ax[3].plot(rho[star:stop], c='k')
+            x_trace = np.arange(star, stop)
+            sem_trials = _plot_trace_with_optional_sem(
+                ax[2],
+                spk[:, star:stop],
+                x=x_trace,
+                color='k',
+                label='Trial-averaged spike activity',
+                show_sem_errorbars=show_sem_errorbars,
+            )
+            _set_sem_caption(fig, sem_trials)
+            ax[2].set_title("Spike activity")
+            ax[2].set_ylabel("Activity (a.u.)")
+            ax[3].plot(x_trace, rho[star:stop], c='k')
+            ax[3].set_title("Amplitude")
+            ax[3].set_ylabel("rho (a.u.)")
             ax3 = ax[3].twinx()
-            ax3.plot(np.mean(spk, axis=0)[star:stop], c='k', linestyle='dotted')
-            ax[4].plot(np.unwrap(phi[star:stop]), c='k')
+            ax3.plot(x_trace, np.mean(spk, axis=0)[star:stop], c='k', linestyle='dotted')
+            ax3.set_ylabel("Activity (a.u.)")
+            ax[4].plot(x_trace, np.unwrap(phi[star:stop]), c='k')
+            ax[4].set_title("Phase")
+            ax[4].set_ylabel("phi (rad)")
             ax[4].yaxis.set_major_locator(ticker.MultipleLocator(base=2 * np.pi))
             ax[4].yaxis.set_major_formatter(FuncFormatter(pi_formatter))
             ax4 = ax[4].twinx()
-            ax4.plot(np.mean(spk, axis=0)[star:stop], c='k', linestyle='dotted')
+            ax4.plot(x_trace, np.mean(spk, axis=0)[star:stop], c='k', linestyle='dotted')
+            ax4.set_ylabel("Activity (a.u.)")
             dphi_smooth = rolling_avg(dphi, 10)[15:-15]
-            ax[5].plot(dphi_smooth[star:stop])
+            dphi_segment = dphi_smooth[star:stop]
+            ax[5].plot(x_trace[:len(dphi_segment)], dphi_segment)
+            ax[5].set_title("Drift")
+            ax[5].set_ylabel("dphi (rad/s)")
             ax[5].yaxis.set_major_locator(ticker.MultipleLocator(base=2 * np.pi))
             ax[5].yaxis.set_major_formatter(FuncFormatter(pi_formatter))
-            ax[6].plot(vis_resp[star:stop], c='r')
+            ax[6].plot(x_trace, vis_resp[star:stop], c='r')
+            ax[6].set_title("Model prediction")
+            ax[6].set_xlabel("Frame index")
+            ax[6].set_ylabel("Predicted activity (a.u.)")
             ax6 = ax[6].twinx()
-            ax6.plot(np.mean(spk, axis=0)[star:stop], c='k', linestyle='--')
+            ax6.plot(x_trace, np.mean(spk, axis=0)[star:stop], c='k', linestyle='--')
+            ax6.set_ylabel("Activity (a.u.)")
+            ax[0].axis("off")
+            ax[1].axis("off")
         print(rhophiparams)
         Predictions.append(vis_resp)
         nonlinParams.append(nonlinparams)

@@ -304,13 +304,52 @@ def run(param_defaults, gabor_param, workflow=None):
     BROWSE_ICONS = {"file": "📄", "savefile": "📄", "dir": "📁"}
 
     class RedirectText:
-        def __init__(self, widget): self.widget = widget
-        def write(self, string):
-            self.widget.insert(tk.END, string)
-            self.widget.see(tk.END)
-        def flush(self): pass
+        def __init__(self, widget, max_lines=5000, flush_ms=50):
+            self.widget = widget
+            self.max_lines = max_lines
+            self.flush_ms = flush_ms
+            self._buffer = []
+            self._lock = threading.Lock()
+            self._flush_pending = False
 
-    task_state = {"name": None, "start": None, "detail": None}
+        def write(self, string):
+            if not string:
+                return
+            with self._lock:
+                self._buffer.append(string)
+                should_schedule = not self._flush_pending
+                self._flush_pending = True
+            if should_schedule:
+                try:
+                    self.widget.after(self.flush_ms, self._flush)
+                except Exception:
+                    pass
+
+        def _flush(self):
+            with self._lock:
+                chunk = "".join(self._buffer)
+                self._buffer.clear()
+                self._flush_pending = False
+            if not chunk:
+                return
+            try:
+                at_bottom = self.widget.yview()[1] >= 0.98
+                self.widget.insert(tk.END, chunk)
+                line_count = int(float(self.widget.index("end-1c").split(".")[0]))
+                if line_count > self.max_lines:
+                    self.widget.delete("1.0", f"{line_count - self.max_lines}.0")
+                if at_bottom:
+                    self.widget.see(tk.END)
+            except Exception:
+                pass
+
+        def flush(self):
+            try:
+                self.widget.after(0, self._flush)
+            except Exception:
+                pass
+
+    task_state = {"name": None, "start": None, "detail": None, "last_ui_update": 0}
 
     def flash_taskbar():
         try:
@@ -352,17 +391,20 @@ def run(param_defaults, gabor_param, workflow=None):
             eta = elapsed * (100 - percent) / percent
             status_var.set(f"{message}{suffix} · ETA {int(eta)}s")
 
-        root.update_idletasks()
+        now = time.time()
+        if threading.current_thread() is threading.main_thread() and now - task_state.get("last_ui_update", 0) > 0.1:
+            task_state["last_ui_update"] = now
+            root.update_idletasks()
 
     def show_terminal_half():
         """Reveal the log pane and allocate the lower half of the window to it."""
         try:
-            if frame_log not in right_pane.panes():
-                right_pane.add(frame_log, weight=1)
+            if str(frame_log) not in right_pane.panes():
+                right_pane.add(frame_log, minsize=220, stretch="always")
             root.update_idletasks()
             total_h = right_pane.winfo_height() or root.winfo_height()
-            top_h = max(120, int(total_h * 0.68))
-            right_pane.sashpos(0, top_h)
+            top_h = max(260, int(total_h * 0.56))
+            set_pane_sash(right_pane, 0, top_h)
         except Exception:
             pass
 
@@ -421,6 +463,52 @@ def run(param_defaults, gabor_param, workflow=None):
     embedded_canvases = []
     figure_export_records = []
     active_recovery_dir = {"path": None}
+
+    def _sem_enabled():
+        try:
+            return bool(show_sem_var.get())
+        except Exception:
+            return False
+
+    def _sem_over_trials(trials):
+        trials = np.asarray(trials, dtype=float)
+        if trials.ndim < 2 or trials.shape[0] <= 1:
+            return None
+        return np.nanstd(trials, axis=0, ddof=1) / np.sqrt(trials.shape[0])
+
+    def _plot_trace_with_optional_sem(ax, trials, x=None, color='k', label=None):
+        trials = np.asarray(trials, dtype=float)
+        if trials.ndim == 1:
+            mean = trials
+            n_trials = 1
+        else:
+            mean = np.nanmean(trials, axis=0)
+            n_trials = trials.shape[0]
+        if x is None:
+            x = np.arange(mean.shape[0])
+        ax.plot(x, mean, c=color, label=label)
+        sem = _sem_over_trials(trials)
+        if _sem_enabled() and sem is not None:
+            every = max(1, mean.shape[0] // 100)
+            ax.errorbar(
+                x,
+                mean,
+                yerr=sem,
+                fmt='none',
+                ecolor=color,
+                elinewidth=0.6,
+                capsize=1,
+                alpha=0.55,
+                errorevery=every,
+            )
+            return n_trials
+        return None
+
+    def _set_sem_caption(fig, n_trials):
+        if n_trials and n_trials > 1:
+            fig._waven_caption = f"Error bars represent SEM over {n_trials} trials."
+        elif hasattr(fig, "_waven_caption"):
+            delattr(fig, "_waven_caption")
 
     def _field_value(entries, key, default=""):
         entry = entries.get(key) if isinstance(entries, dict) else None
@@ -507,6 +595,7 @@ def run(param_defaults, gabor_param, workflow=None):
                     "png": image_buffer.getvalue(),
                     "export_payload": _cache_safe_payload(getattr(fig, "_waven_export_payload", None)),
                     "export_artist_data": _extract_figure_data(fig),
+                    "caption": getattr(fig, "_waven_caption", ""),
                 }
             )
         return records
@@ -844,6 +933,8 @@ def run(param_defaults, gabor_param, workflow=None):
                         _set_figure_export_payload(fig, record.get("export_payload"))
                     if "export_artist_data" in record:
                         setattr(fig, "_waven_cached_artist_data", record.get("export_artist_data"))
+                    if record.get("caption"):
+                        fig._waven_caption = record.get("caption")
                 except Exception as exc:
                     print(f"Could not restore cached figure: {exc}")
                     continue
@@ -1079,6 +1170,15 @@ def run(param_defaults, gabor_param, workflow=None):
             except Exception as exc:
                 print(f"Could not remove intermediate file {intermediate_path}: {exc}")
 
+        for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
+            scratch_path = os.path.join(wavelet_folder, scratch_name)
+            try:
+                if os.path.exists(scratch_path):
+                    os.remove(scratch_path)
+                    print(f"Removed temporary coarse cache scratch file: {scratch_path}")
+            except Exception as exc:
+                print(f"Could not remove temporary scratch file {scratch_path}: {exc}")
+
         sigmas_full = parse_literal(
             param_entries["Sigmas Full Model"].get(),
             "Sigmas Full Model",
@@ -1149,6 +1249,15 @@ def run(param_defaults, gabor_param, workflow=None):
         toolbar.update()
 
         canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        caption = getattr(fig, "_waven_caption", "")
+        caption_label = ctk.CTkLabel(
+            section,
+            text=caption,
+            text_color="#6B7280",
+            font=ctk.CTkFont(size=11),
+            anchor="w",
+        )
+        caption_label.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(2, 8))
         embedded_canvases.append(canvas)
         record = {
             "canvas": canvas,
@@ -1156,6 +1265,7 @@ def run(param_defaults, gabor_param, workflow=None):
             "title": graph_title,
             "tab": _tab_name_for_parent(parent_container),
             "section": section,
+            "caption_widget": caption_label,
         }
         figure_export_records.append(record)
         ctk.CTkButton(
@@ -1169,6 +1279,13 @@ def run(param_defaults, gabor_param, workflow=None):
             command=lambda r=record: export_single_graph(r),
         ).pack(side=tk.RIGHT, padx=(10, 0))
         return canvas
+
+    def refresh_figure_caption(fig):
+        caption = getattr(fig, "_waven_caption", "")
+        for record in figure_export_records:
+            if record.get("figure") is fig and record.get("caption_widget") is not None:
+                record["caption_widget"].configure(text=caption)
+                break
 
     def clear_plot_tab(parent):
         tab_name = _tab_name_for_parent(parent)
@@ -1226,7 +1343,10 @@ def run(param_defaults, gabor_param, workflow=None):
         return path + os.sep
     
     def plot_data():
-        rf_extra = {"selected_neuron": _field_value(param_entries, "Neuron ID", "")}
+        rf_extra = {
+            "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
+            "show_sem_errorbars": _sem_enabled(),
+        }
         cached = _get_cached_entry("coarse_rf", extra=rf_extra)
         if cached:
             cached_state = cached.get("analysis_state")
@@ -1295,12 +1415,17 @@ def run(param_defaults, gabor_param, workflow=None):
                     sampling_rate=sampling_rate,
                     threshold=1.25,
                     method='frame2ttl',
+                    save_dir=Path(pathdata),
                 )
             except NotImplementedError as exc:
                 print(exc)
                 return False
             spks = aligned.spikes
             neuron_pos = aligned.neuron_pos
+            saved_spks_path = Path(pathdata) / "spikes.npy"
+            if saved_spks_path.exists():
+                param_entries["Spks Path"].delete(0, tk.END)
+                param_entries["Spks Path"].insert(0, str(saved_spks_path))
             if workflow == WORKFLOW_2P:
                 neuron_pos[:, 1] = abs(neuron_pos[:, 1] - np.max(neuron_pos[:, 1]))
         else:
@@ -1373,13 +1498,30 @@ def run(param_defaults, gabor_param, workflow=None):
             embedded_canvases.clear()
             plt.close('all')
 
-            fig1, ax1 = plt.subplots(figsize=(6, 5), constrained_layout=True)
-            ax1.scatter(neuron_pos[:, 0], neuron_pos[:, 1], c='k', alpha=0.3, label="Neurons", picker=True, rasterized=True)
+            pos_dim = neuron_pos.shape[1] if getattr(neuron_pos, "ndim", 0) == 2 else 0
+            has_z = pos_dim >= 3
+            fig1 = plt.figure(figsize=(6, 5), constrained_layout=True)
+            ax1 = fig1.add_subplot(111, projection='3d') if has_z else fig1.add_subplot(111)
+            if has_z:
+                ax1.scatter(
+                    neuron_pos[:, 0], neuron_pos[:, 1], neuron_pos[:, 2],
+                    c='k', alpha=0.3, label="Neurons", picker=True, rasterized=True,
+                )
+                ax1.set_zlabel("Z (um)")
+            else:
+                ax1.scatter(neuron_pos[:, 0], neuron_pos[:, 1], c='k', alpha=0.3, label="Neurons", picker=True, rasterized=True)
             ax1.set_title("Neuron Positions (µm)")
             ax1.set_xlabel("X (µm)")
             ax1.set_ylabel("Y (µm)")
 
-            fig10, axes10 = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True)
+            ax1.set_title("Neuron Positions")
+            ax1.set_xlabel("X (um)")
+            ax1.set_ylabel("Y (um)")
+            if has_z:
+                ax1.set_zlabel("Z (um)")
+
+            subplot_kwargs = {"projection": "3d"} if has_z else {}
+            fig10, axes10 = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True, subplot_kw=subplot_kwargs)
             ax10 = axes10.ravel()
             maxes1 = rfs_gabor[2]
             plt.rcParams['axes.facecolor'] = 'none'
@@ -1391,14 +1533,28 @@ def run(param_defaults, gabor_param, workflow=None):
                 (3, maxes1[3], 'coolwarm', 'Size (°)'),
             ]
             for idx, values, cmap, title in map_specs:
-                scatter = ax10[idx].scatter(
-                    neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=values,
-                    cmap=cmap, alpha=point_alphas, rasterized=True, picker=True,
-                )
+                title = ["Azimuth (deg)", "Elevation (deg)", "Orientation (deg)", "Size (deg)"][idx]
+                if has_z:
+                    scatter = ax10[idx].scatter(
+                        neuron_pos[:, 0], neuron_pos[:, 1], neuron_pos[:, 2], s=5, c=values,
+                        cmap=cmap, alpha=point_alphas, rasterized=True, picker=True,
+                    )
+                    ax10[idx].set_zlabel("Z (um)")
+                else:
+                    scatter = ax10[idx].scatter(
+                        neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=values,
+                        cmap=cmap, alpha=point_alphas, rasterized=True, picker=True,
+                    )
                 fig10.colorbar(scatter, ax=ax10[idx], fraction=0.046)
                 ax10[idx].set_title(title)
                 ax10[idx].set_xlabel("X (µm)")
                 ax10[idx].set_ylabel("Y (µm)")
+
+            for axis in ax10:
+                axis.set_xlabel("X (um)")
+                axis.set_ylabel("Y (um)")
+                if has_z:
+                    axis.set_zlabel("Z (um)")
 
             fig2, ax2 = plt.subplots(figsize=(10, 2.5), constrained_layout=True)
             ax2.set_title("Trial-averaged Spike Train")
@@ -1418,9 +1574,18 @@ def run(param_defaults, gabor_param, workflow=None):
                     entry_neuron.delete(0, tk.END)
                     entry_neuron.insert(0, str(neuron_id))
 
-                    spike_train = np.mean(spks[:, :, neuron_id], axis=0)
+                    trial_spikes = spks[:, :, neuron_id]
+                    spike_train = np.mean(trial_spikes, axis=0)
                     ax2.clear()
-                    ax2.plot(spike_train, label=f"Neuron {neuron_id} Spike Times")
+                    sem_trials = _plot_trace_with_optional_sem(
+                        ax2,
+                        trial_spikes,
+                        label=f"Neuron {neuron_id} trial-averaged activity",
+                    )
+                    _set_sem_caption(fig2, sem_trials)
+                    ax2.set_title("Trial-averaged Spike Train")
+                    ax2.set_xlabel("Frame index")
+                    ax2.set_ylabel("Activity (a.u.)")
                     ax2.legend()
                     _set_figure_export_payload(
                         fig2,
@@ -1428,9 +1593,10 @@ def run(param_defaults, gabor_param, workflow=None):
                             "source": "Inspect Single Neuron",
                             "neuron_id": neuron_id,
                             "spike_train": spike_train,
-                            "trial_spikes": spks[:, :, neuron_id],
+                            "trial_spikes": trial_spikes,
                         },
                     )
+                    refresh_figure_caption(fig2)
                     canvas2.draw()
 
                     rf2d, x_tuning, y_tuning, ori_tun, s_tuning, f_tuning = PlotTuningCurve(rfs_gabor, neuron_id, analysis_coverage, sigmas_deg, screen_ratio, frequencies, show=False)
@@ -1451,22 +1617,32 @@ def run(param_defaults, gabor_param, workflow=None):
                     ax3[1].plot(x_tuning[::-1], c='k')
                     ax3[1].set_title('Elevation (deg)')
                     ax3[1].set_xticks([0, rf2d.shape[0]], [ym, yM])
+                    ax3[1].set_xlabel("Elevation (deg)")
+                    ax3[1].set_ylabel("Correlation (a.u.)")
                     ax3[2].plot(y_tuning, c='k')
-                    ax3[2].set_title('Azimuth')
+                    ax3[2].set_title('Azimuth (deg)')
                     ax3[2].set_xticks([0, rf2d.shape[1]], [xM, xm])
+                    ax3[2].set_xlabel("Azimuth (deg)")
+                    ax3[2].set_ylabel("Correlation (a.u.)")
                     ax3[3].plot(ori_tun, 'o-', c='k')
-                    ax3[3].set_title('Orientation')
+                    ax3[3].set_title('Orientation (deg)')
                     n_ori = rfs_gabor[0].shape[3]
                     ax3[3].set_xticks(
                         [0, max(1, n_ori // 2), max(2, n_ori - 1)],
                         [0, 90, 180],
                     )
+                    ax3[3].set_xlabel("Orientation (deg)")
+                    ax3[3].set_ylabel("Correlation (a.u.)")
                     ax3[4].plot(s_tuning, 'o-', c='k')
                     ax3[4].set_title('Size (deg)')
                     ax3[4].set_xticks([0, len(sigmas) - 1], [sigmas_deg[0], sigmas_deg[-1]])
+                    ax3[4].set_xlabel("Size (deg)")
+                    ax3[4].set_ylabel("Correlation (a.u.)")
                     ax3[5].plot(f_tuning, 'o-', c='k')
                     ax3[5].set_title('Spatial Frequency')
                     ax3[5].set_xticks(range(len(frequencies)), [round(f, 3) for f in frequencies])
+                    ax3[5].set_xlabel("Spatial frequency (cycles/deg)")
+                    ax3[5].set_ylabel("Correlation (a.u.)")
                     _set_figure_export_payload(
                         fig3,
                         {
@@ -1577,7 +1753,7 @@ def run(param_defaults, gabor_param, workflow=None):
     def plot_run_model_outputs():
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
-        cache_extra = {"model": "run_Model", "neuron": neuron_id}
+        cache_extra = {"model": "run_Model", "neuron": neuron_id, "show_sem_errorbars": _sem_enabled()}
         cached = _get_cached_entry("run_model", neuron_id=neuron_id, extra=cache_extra)
         if cached:
             _render_figure_records(
@@ -1613,6 +1789,7 @@ def run(param_defaults, gabor_param, workflow=None):
                 double_wavelet_model=False,
                 plotting=True,
                 frames_per_minute=frames_per_minute,
+                show_sem_errorbars=_sem_enabled(),
             )
 
         result, figures = capture_new_figures(call_model)
@@ -1636,7 +1813,7 @@ def run(param_defaults, gabor_param, workflow=None):
     def plot_run_full_model_outputs():
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
-        cache_extra = {"model": "run_Full_Model", "neuron": neuron_id}
+        cache_extra = {"model": "run_Full_Model", "neuron": neuron_id, "show_sem_errorbars": _sem_enabled()}
         cached = _get_cached_entry("run_full_model", neuron_id=neuron_id, extra=cache_extra)
         if cached:
             _render_figure_records(
@@ -1680,6 +1857,7 @@ def run(param_defaults, gabor_param, workflow=None):
                 plotting=True,
                 frames_per_minute=frames_per_minute,
                 hz=int(param_entries["Hz"].get()),
+                show_sem_errorbars=_sem_enabled(),
             )
 
         result, figures = capture_new_figures(call_full_model)
@@ -2041,16 +2219,40 @@ def run(param_defaults, gabor_param, workflow=None):
 
     root.configure(fg_color=bg_color)
 
+    def tune_scrollable_frame(scrollable_frame, increment=36):
+        """Make mouse-wheel scrolling feel steadier on CustomTkinter scroll frames."""
+        for attr in ("_parent_canvas", "_canvas"):
+            canvas = getattr(scrollable_frame, attr, None)
+            if canvas is not None:
+                try:
+                    canvas.configure(yscrollincrement=increment, highlightthickness=0)
+                except Exception:
+                    pass
+
+    def set_pane_sash(pane, index, position):
+        try:
+            pane.sashpos(index, position)
+            return
+        except AttributeError:
+            pass
+        try:
+            if str(pane.cget("orient")) == str(tk.VERTICAL):
+                pane.sash_place(index, 1, int(position))
+            else:
+                pane.sash_place(index, int(position), 1)
+        except Exception:
+            pass
+
     # --- View Menu ---
     menubar = tk.Menu(root)
     view_menu = tk.Menu(menubar, tearoff=0)
 
     def toggle_terminal():
         try:
-            if frame_log in right_pane.panes():
+            if str(frame_log) in right_pane.panes():
                 right_pane.forget(frame_log)
             else:
-                right_pane.add(frame_log, weight=1)
+                right_pane.add(frame_log, minsize=220, stretch="always")
                 show_terminal_half()
         except Exception:
             pass
@@ -2059,11 +2261,11 @@ def run(param_defaults, gabor_param, workflow=None):
 
     def toggle_left_panel():
         try:
-            if left_frame in paned_h.panes():
+            if str(left_frame) in paned_h.panes():
                 paned_h.forget(left_frame)
                 left_panel_visible[0] = False
             else:
-                paned_h.add(left_frame, weight=1)
+                paned_h.add(left_frame, minsize=340, stretch="never")
                 left_panel_visible[0] = True
         except Exception:
             pass
@@ -2084,16 +2286,34 @@ def run(param_defaults, gabor_param, workflow=None):
     progress_bar.pack(side=tk.RIGHT, padx=(8, 0))
 
     # Split layout using paned windows so left and terminal are resizable
-    paned_h = ttk.PanedWindow(content_root, orient=tk.HORIZONTAL)
+    paned_h = tk.PanedWindow(
+        content_root,
+        orient=tk.HORIZONTAL,
+        opaqueresize=False,
+        sashwidth=8,
+        sashrelief=tk.FLAT,
+        bg=bg_color,
+        bd=0,
+        showhandle=False,
+    )
     paned_h.pack(fill=tk.BOTH, expand=True)
 
     # Left pane (resizable horizontally)
     left_frame = ttk.Frame(paned_h, style="TFrame")
-    paned_h.add(left_frame, weight=1)
+    paned_h.add(left_frame, minsize=340, stretch="never")
 
     # Right pane is a vertical paned window so the terminal is resizable vertically
-    right_pane = ttk.PanedWindow(paned_h, orient=tk.VERTICAL)
-    paned_h.add(right_pane, weight=3)
+    right_pane = tk.PanedWindow(
+        paned_h,
+        orient=tk.VERTICAL,
+        opaqueresize=False,
+        sashwidth=8,
+        sashrelief=tk.FLAT,
+        bg=bg_color,
+        bd=0,
+        showhandle=False,
+    )
+    paned_h.add(right_pane, minsize=700, stretch="always")
 
     # Container for left content (scrollable inside)
     container_left = ctk.CTkFrame(left_frame, fg_color=frame_color, corner_radius=8)
@@ -2101,11 +2321,11 @@ def run(param_defaults, gabor_param, workflow=None):
 
     # Right-top visualization area
     container_right_top = ctk.CTkFrame(right_pane, fg_color=frame_color, corner_radius=8)
-    right_pane.add(container_right_top, weight=3)
+    right_pane.add(container_right_top, minsize=260, stretch="always")
 
     # Right-bottom terminal
     frame_log = ctk.CTkFrame(right_pane, fg_color="#FFFFFF", corner_radius=8)
-    right_pane.add(frame_log, weight=1)
+    right_pane.add(frame_log, minsize=220, stretch="always")
 
     terminal_toolbar = ctk.CTkFrame(frame_log, fg_color="transparent")
     terminal_toolbar.pack(fill=tk.X, padx=10, pady=(8, 4))
@@ -2131,19 +2351,36 @@ def run(param_defaults, gabor_param, workflow=None):
     text_log = tk.Text(
         frame_log, height=10, bg="#1E1E1E", fg="#CCCCCC",
         font=("Consolas", 10), yscrollcommand=log_scroll.set, relief="flat",
+        wrap="word", borderwidth=0, highlightthickness=0,
     )
     text_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=(0, 10))
     log_scroll.config(command=text_log.yview)
+    text_log.configure(blockcursor=False)
+
+    def _terminal_mousewheel(event):
+        try:
+            step = -int(event.delta / 120) if getattr(event, "delta", 0) else 0
+            text_log.yview_scroll(step * 3, "units")
+            return "break"
+        except Exception:
+            return None
+
+    text_log.bind("<MouseWheel>", _terminal_mousewheel)
+    text_log.bind("<Button-4>", lambda event: (text_log.yview_scroll(-3, "units"), "break")[1])
+    text_log.bind("<Button-5>", lambda event: (text_log.yview_scroll(3, "units"), "break")[1])
     sys.stdout = RedirectText(text_log)
     sys.stderr = RedirectText(text_log)
 
     # Set sensible initial sash positions after layout
     root.update_idletasks()
     try:
-        paned_h.sashpos(0, 420)
-        right_pane.sashpos(0, int(root.winfo_height() * 0.68))
+        set_pane_sash(paned_h, 0, 420)
+        pane_height = right_pane.winfo_height() or root.winfo_height()
+        set_pane_sash(right_pane, 0, int(pane_height * 0.56))
     except Exception:
         pass
+    root.after(150, show_terminal_half)
+    root.after(500, show_terminal_half)
 
     # Left panel scrollable content
     frame_left = ctk.CTkScrollableFrame(
@@ -2154,6 +2391,7 @@ def run(param_defaults, gabor_param, workflow=None):
         scrollbar_button_hover_color="#94A3B8",
     )
     frame_left.pack(fill=tk.BOTH, expand=True)
+    tune_scrollable_frame(frame_left, increment=32)
 
     plot_tabs = ctk.CTkTabview(
         container_right_top,
@@ -2171,6 +2409,7 @@ def run(param_defaults, gabor_param, workflow=None):
     individual_neuron_tab = plot_tabs.add("Individual neuron")
     frame_plot_all = ctk.CTkScrollableFrame(all_neurons_tab, fg_color="#F9FAFB", corner_radius=8)
     frame_plot_all.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+    tune_scrollable_frame(frame_plot_all, increment=36)
     individual_update_label = ctk.CTkLabel(
         individual_neuron_tab,
         text="No neuron selected",
@@ -2182,6 +2421,7 @@ def run(param_defaults, gabor_param, workflow=None):
     individual_update_label.pack(fill=tk.X, padx=4, pady=(4, 2))
     frame_plot_individual = ctk.CTkScrollableFrame(individual_neuron_tab, fg_color="#F9FAFB", corner_radius=8)
     frame_plot_individual.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+    tune_scrollable_frame(frame_plot_individual, increment=36)
 
     # --- Session configuration ---
     frame_session = ttk.LabelFrame(frame_left, text="Session Configuration", padding=15)
@@ -2389,6 +2629,30 @@ def run(param_defaults, gabor_param, workflow=None):
     # --- 3 · Neural & RF analysis ---
     frame_analysis = ttk.LabelFrame(frame_left, text="3 · Neural & RF Analysis", padding=15)
     frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+    show_sem_var = tk.BooleanVar(value=False)
+    sem_wrap = ttk.Frame(frame_analysis, style="TFrame")
+    sem_wrap.pack(fill=tk.X, pady=(0, 10))
+    ctk.CTkLabel(
+        sem_wrap,
+        text="Error bars",
+        text_color=text_color,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).pack(side=tk.LEFT, padx=(0, 10))
+    ctk.CTkRadioButton(
+        sem_wrap,
+        text="Off",
+        variable=show_sem_var,
+        value=False,
+        text_color=text_color,
+    ).pack(side=tk.LEFT, padx=(0, 12))
+    ctk.CTkRadioButton(
+        sem_wrap,
+        text="SEM",
+        variable=show_sem_var,
+        value=True,
+        text_color=text_color,
+    ).pack(side=tk.LEFT)
 
     btn_submit_plot = ctk.CTkButton(
         frame_analysis,

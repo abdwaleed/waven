@@ -24,6 +24,14 @@ class AlignedNeuralData:
     aligned_spikes: Optional[np.ndarray] = None
 
 
+def _save_aligned_outputs(neuron_pos: np.ndarray, spikes: np.ndarray, save_dir: Optional[Path]) -> None:
+    """Persist aligned arrays beside the experiment data for later GUI reuse."""
+    output_dir = Path(".") if save_dir is None else Path(save_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    np.save(output_dir / "pos.npy", neuron_pos)
+    np.save(output_dir / "spikes.npy", spikes)
+
+
 def load_two_photon_spikes(
     experiment_info: Tuple[str, str, int],
     data_dirs: Sequence[str],
@@ -37,6 +45,7 @@ def load_two_photon_spikes(
     threshold: float = 1.25,
     method: str = "frame2ttl",
     correct_positions: bool = True,
+    save_dir: Optional[Path] = None,
 ) -> AlignedNeuralData:
     """Load and time-align two-photon (suite2p) spike data.
 
@@ -65,8 +74,8 @@ def load_two_photon_spikes(
         neuron_pos = np.load(pos_path)
         aligned_spikes = None
 
-    np.save("pos.npy", neuron_pos)
-    np.save("spikes.npy", spikes)
+    if spks_path is None:
+        _save_aligned_outputs(neuron_pos, spikes, save_dir)
 
     return AlignedNeuralData(
         spikes=spikes,
@@ -79,6 +88,7 @@ def align_ephys_data(
     data_dir: Path,
     nb_frames: int,
     sampling_rate: float,
+    save_dir: Optional[Path] = None,
     **kwargs: Any,
 ) -> AlignedNeuralData:
     
@@ -101,12 +111,13 @@ def align_ephys_data(
         n_trials = len(start_times)
         n_neurons = len(units)
 
-        neuron_pos = np.zeros((n_neurons, 2))
+        neuron_pos = np.zeros((n_neurons, 3))
         spikes = np.zeros((n_trials, nb_frames, n_neurons))
 
         for neuron_idx, neuron_data in enumerate(units.values()):
             
-            neuron_pos[neuron_idx, :] = neuron_data['position'][:2] 
+            position = np.asarray(neuron_data.get('position', []), dtype=float).ravel()
+            neuron_pos[neuron_idx, :min(3, position.size)] = position[:3]
             spike_train = np.array(neuron_data['spike_train'])
 
             for trial_idx, (start_time, end_time) in enumerate(zip(start_times, end_times)):
@@ -120,11 +131,14 @@ def align_ephys_data(
                 flip_times = trial_pd_time[state_changes] 
                 frame_edges = np.concatenate(([trial_pd_time[0]], flip_times, [trial_pd_time[-1]]))
 
-                # ENFORCE EXACT BIN COUNT to prevent ValueError
-                if len(frame_edges) > nb_frames + 1:
-                    frame_edges = frame_edges[:nb_frames + 1]
-                elif len(frame_edges) < nb_frames + 1:
-                    frame_edges = np.linspace(trial_pd_time[0], trial_pd_time[-1], nb_frames + 1)
+                # CONVERT TO LIST: better for handle_dropped_frames algorithm (insertions into list) than memory-fixed numpy arrays
+                frame_edges = [trial_pd_time[0]] + list(flip_times) + [trial_pd_time[-1]]
+
+                # Apply the in-place fix
+                handle_dropped_frames(frame_edges, nb_frames)
+
+                # Convert back to a numpy array right before histogram binning
+                frame_edges = np.array(frame_edges)
 
                 trial_spikes = spike_train[(spike_train >= start_time) & (spike_train <= end_time)]
 
@@ -147,6 +161,41 @@ def align_ephys_data(
         # Return pure counts. Do not subtract timestamps here.
         return neuron_pos, spikes
     
+    def handle_dropped_frames(frame_edges: list, nb_frames: int) -> None:
+        """
+        Modifies the frame_edges list in-place to correct for dropped photodiode pulses
+        and match the required length of (nb_frames + 1).
+        """
+        if len(frame_edges) < 2:
+            return  # Not enough data to calculate gaps
+
+        # 1. Calculate expected frame duration using the median
+        frame_durations = np.diff(frame_edges)
+        expected_duration = np.median(frame_durations)
+
+        # 2. Patch missing pulses in the middle of the trial
+        i = 0
+        while i < len(frame_edges) - 1 and len(frame_edges) < nb_frames + 1:
+            current_gap = frame_edges[i+1] - frame_edges[i]
+            
+            # If the gap is > 1.5x the expected duration, a pulse was missed
+            if current_gap > 1.5 * expected_duration:
+                # Insert the synthetic timestamp directly into the list
+                frame_edges.insert(i + 1, frame_edges[i] + expected_duration)
+            i += 1
+
+        # 3. Handle tail-end mismatches
+        if len(frame_edges) > nb_frames + 1:
+            # Slice off any hardware bounce/excess pulses at the very end
+            del frame_edges[nb_frames + 1:]
+            
+        elif len(frame_edges) < nb_frames + 1:
+            # Append missing trailing edges if the recording cut off early
+            missing_count = (nb_frames + 1) - len(frame_edges)
+            for _ in range(missing_count):
+                frame_edges.append(frame_edges[-1] + expected_duration)
+
+
     #======================================
     # DIN-SPECIFIC FUNCTIONS
     #======================================
@@ -160,11 +209,12 @@ def align_ephys_data(
     
     def get_frequency(pd_time, fs):
         time_diff = np.diff(pd_time) / fs 
-        freq = 1. / time_diff / 1000 
+        freq = 1. / time_diff # in Hz
         return np.insert(freq, 0, 0) 
     
+    # BINARIZATION code: Trial ON or OFF
     def get_possible_trial_edges(freq, time_array):
-        bin_freq = (freq >= 0.01).astype(int)
+        bin_freq = (freq >= 10).astype(int) # in Hz, HARDCODED 10 VALUE
         chng_freq = np.diff(bin_freq)
         chng_freq = np.insert(chng_freq, 0, 0)
         
@@ -207,8 +257,7 @@ def align_ephys_data(
     
     print(neuron_pos.shape)
     print(spikes.shape)
-    np.save("pos.npy", neuron_pos)
-    np.save("spikes.npy", spikes)
+    _save_aligned_outputs(neuron_pos, spikes, save_dir or data_dir)
 
     return AlignedNeuralData(
         spikes=spikes,
@@ -243,6 +292,7 @@ def load_aligned_spikes(
     threshold: float = 1.25,
     method: str = "frame2ttl",
     correct_positions: bool = True,
+    save_dir: Optional[Path] = None,
 ) -> AlignedNeuralData:
     """Dispatch spike loading to the workflow-specific alignment routine."""
     if spks_path is not None:
@@ -265,6 +315,7 @@ def load_aligned_spikes(
             threshold=threshold,
             method=method,
             correct_positions=correct_positions,
+            save_dir=save_dir,
         )
 
     if workflow == WORKFLOW_EPHYS:
@@ -274,6 +325,7 @@ def load_aligned_spikes(
             data_dir,
             nb_frames,
             sampling_rate,
+            save_dir=save_dir,
             experiment_info=experiment_info,
             threshold=threshold,
             method=method,
