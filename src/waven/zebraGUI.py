@@ -44,6 +44,10 @@ from .config import (
 import numpy as np
 
 _ANALYSIS_IMPORTS_READY = False
+_GABOR_IMPORTS_READY = False
+_WAVELET_IMPORTS_READY = False
+_RF_IMPORTS_READY = False
+_MODEL_IMPORTS_READY = False
 _PLOT_IMPORTS_READY = False
 plt = None
 FigureCanvasTkAgg = None
@@ -64,55 +68,94 @@ def _ensure_plot_imports():
     _PLOT_IMPORTS_READY = True
 
 
-def _ensure_analysis_imports(label="analysis"):
-    global _ANALYSIS_IMPORTS_READY
-    global lpn, makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
-    global downsample_video_binary, waveletDecomposition, waveletDecompositionFull
-    global LoadData, compute_skewness_neurons, PearsonCorrelationPinkNoise, PlotTuningCurve
-    global run_Model, run_Full_Model, video_downsample_chunk_size, smooth_best_positions
-    global zarr, convert_npy_to_zarr
-    if _ANALYSIS_IMPORTS_READY:
+def _ensure_gabor_imports(label="Gabor library construction"):
+    global _GABOR_IMPORTS_READY
+    global makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
+    if _GABOR_IMPORTS_READY:
         return
-    _ensure_plot_imports()
-    import zarr as _zarr
-    from . import LoadPinkNoise as _lpn
     from .WaveletGenerator import (
         makeFilterLibrary as _makeFilterLibrary,
         makeFilterLibrary2 as _makeFilterLibrary2,
         makeGaborFilter as _makeGaborFilter,
+    )
+
+    makeFilterLibrary = _makeFilterLibrary
+    makeFilterLibrary2 = _makeFilterLibrary2
+    makeGaborFilter = _makeGaborFilter
+    _GABOR_IMPORTS_READY = True
+
+
+def _ensure_wavelet_imports(label="stimulus wavelet generation"):
+    global _WAVELET_IMPORTS_READY
+    global lpn, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
+    global video_downsample_chunk_size, convert_npy_to_zarr
+    if _WAVELET_IMPORTS_READY:
+        return
+    from . import LoadPinkNoise as _lpn
+    from .WaveletGenerator import (
         downsample_video_binary as _downsample_video_binary,
         waveletDecomposition as _waveletDecomposition,
         waveletDecompositionFull as _waveletDecompositionFull,
     )
-    from .LoadPinkNoise import LoadData as _LoadData
+    from .performance import video_downsample_chunk_size as _video_downsample_chunk_size
+    from .wavelet_io import convert_npy_to_zarr as _convert_npy_to_zarr
+
+    lpn = _lpn
+    downsample_video_binary = _downsample_video_binary
+    waveletDecomposition = _waveletDecomposition
+    waveletDecompositionFull = _waveletDecompositionFull
+    video_downsample_chunk_size = _video_downsample_chunk_size
+    convert_npy_to_zarr = _convert_npy_to_zarr
+    _WAVELET_IMPORTS_READY = True
+
+
+def _ensure_rf_imports(label="coarse RF analysis"):
+    global _RF_IMPORTS_READY
+    global compute_skewness_neurons, PearsonCorrelationPinkNoise, PlotTuningCurve
+    global repetability_trial3
+    if _RF_IMPORTS_READY:
+        return
+    _ensure_plot_imports()
     from .Analysis_Utils import (
         compute_skewness_neurons as _compute_skewness_neurons,
         PearsonCorrelationPinkNoise as _PearsonCorrelationPinkNoise,
         PlotTuningCurve as _PlotTuningCurve,
-        run_Model as _run_Model,
-        run_Full_Model as _run_Full_Model,
+        repetability_trial3 as _repetability_trial3,
     )
-    from .performance import video_downsample_chunk_size as _video_downsample_chunk_size
-    from .pipeline import smooth_best_positions as _smooth_best_positions
-    from .wavelet_io import convert_npy_to_zarr as _convert_npy_to_zarr
 
-    lpn = _lpn
-    makeFilterLibrary = _makeFilterLibrary
-    makeFilterLibrary2 = _makeFilterLibrary2
-    makeGaborFilter = _makeGaborFilter
-    downsample_video_binary = _downsample_video_binary
-    waveletDecomposition = _waveletDecomposition
-    waveletDecompositionFull = _waveletDecompositionFull
-    LoadData = _LoadData
     compute_skewness_neurons = _compute_skewness_neurons
     PearsonCorrelationPinkNoise = _PearsonCorrelationPinkNoise
     PlotTuningCurve = _PlotTuningCurve
+    repetability_trial3 = _repetability_trial3
+    _RF_IMPORTS_READY = True
+
+
+def _ensure_model_imports(label="model plot capture"):
+    global _MODEL_IMPORTS_READY
+    global run_Model, run_Full_Model, smooth_best_positions
+    if _MODEL_IMPORTS_READY:
+        return
+    _ensure_plot_imports()
+    from .Analysis_Utils import (
+        run_Model as _run_Model,
+        run_Full_Model as _run_Full_Model,
+    )
+    from .pipeline import smooth_best_positions as _smooth_best_positions
+
     run_Model = _run_Model
     run_Full_Model = _run_Full_Model
-    video_downsample_chunk_size = _video_downsample_chunk_size
     smooth_best_positions = _smooth_best_positions
-    zarr = _zarr
-    convert_npy_to_zarr = _convert_npy_to_zarr
+    _MODEL_IMPORTS_READY = True
+
+
+def _ensure_analysis_imports(label="analysis"):
+    global _ANALYSIS_IMPORTS_READY
+    if _ANALYSIS_IMPORTS_READY:
+        return
+    _ensure_gabor_imports(label)
+    _ensure_wavelet_imports(label)
+    _ensure_rf_imports(label)
+    _ensure_model_imports(label)
     _ANALYSIS_IMPORTS_READY = True
 
 
@@ -1073,9 +1116,16 @@ def run(param_defaults, gabor_param, workflow=None):
         update_progress(70, f"Saving {description}", "Writing output file")
         os.makedirs(os.path.dirname(path_save) or ".", exist_ok=True)
         if gabor_format_var.get() == "zarr":
+            try:
+                import zarr as _zarr
+            except ImportError as exc:
+                raise ImportError(
+                    "Zarr library output requires the 'zarr' package. "
+                    "Install project requirements or select 'npy' as the library format."
+                ) from exc
             output_path = os.path.splitext(path_save)[0] + ".zarr"
             print(f"Saving {description} into Zarr container: {output_path}")
-            zarr.save(output_path, library)
+            _zarr.save(output_path, library)
         else:
             output_path = path_save
             np.save(output_path, library)
@@ -1083,7 +1133,7 @@ def run(param_defaults, gabor_param, workflow=None):
         return output_path
 
     def create_gabor(kind="fine"):
-        _ensure_analysis_imports("Gabor library construction")
+        _ensure_gabor_imports("Gabor library construction")
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
         full_nx = int(gabor_entries["NX"].get())
@@ -1136,7 +1186,7 @@ def run(param_defaults, gabor_param, workflow=None):
         create_gabor("fine")
 
     def run_wavelet():
-        _ensure_analysis_imports("stimulus wavelet generation")
+        _ensure_wavelet_imports("stimulus wavelet generation")
         movpath = param_entries["Movie Path"].get().strip()
         if not movpath:
             print("Error: Movie Path is required.")
@@ -1455,7 +1505,7 @@ def run(param_defaults, gabor_param, workflow=None):
         return path + os.sep
     
     def plot_data():
-        _ensure_analysis_imports("coarse RF analysis")
+        _ensure_rf_imports("coarse RF analysis")
         rf_extra = {
             "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
             "show_sem_errorbars": _sem_enabled(),
@@ -1930,7 +1980,7 @@ def run(param_defaults, gabor_param, workflow=None):
         root.after(0, render)
 
     def plot_run_model_outputs():
-        _ensure_analysis_imports("run_Model plot capture")
+        _ensure_model_imports("run_Model plot capture")
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
         split_settings = _model_split_settings(state)
@@ -2000,7 +2050,7 @@ def run(param_defaults, gabor_param, workflow=None):
         _append_model_figures(figures, f"run_Model neuron {neuron_id}")
 
     def plot_run_full_model_outputs():
-        _ensure_analysis_imports("run_Full_Model plot capture")
+        _ensure_model_imports("run_Full_Model plot capture")
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
         split_settings = _model_split_settings(state)

@@ -1,7 +1,4 @@
 import numpy as np
-import zarr
-from numcodecs import Blosc
-from tqdm import trange
 import os
 
 def convert_npy_to_zarr(npy_dir, zarr_dir, hz, n_orientations=None, n_sigmas=None, n_frequencies=None):
@@ -17,6 +14,16 @@ def convert_npy_to_zarr(npy_dir, zarr_dir, hz, n_orientations=None, n_sigmas=Non
         n_sigmas (int, optional): Number of sigma scales in full-model wavelets.
         n_frequencies (int, optional): Number of spatial frequencies in full-model wavelets.
     """
+    try:
+        import zarr
+        from numcodecs import Blosc
+        from tqdm import trange
+    except ImportError as exc:
+        raise ImportError(
+            "Zarr wavelet output requires the 'zarr', 'numcodecs', and 'tqdm' packages. "
+            "Install project requirements or select 'npy' as the full-model format."
+        ) from exc
+
     # Dynamically build paths
     npy_i = os.path.join(npy_dir, "dwt_videodata2_i.npy")
     npy_r = os.path.join(npy_dir, "dwt_videodata2_r.npy")

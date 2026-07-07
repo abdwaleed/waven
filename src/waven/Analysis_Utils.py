@@ -44,7 +44,6 @@ import cv2
 from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import FuncFormatter
 import matplotlib.ticker as ticker
-import zarr
 from joblib import Parallel, delayed
 from scipy import signal
 from sklearn.metrics import r2_score, explained_variance_score
