@@ -7,13 +7,13 @@ to validate than a long top-level script.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .config import AnalysisConfig, GaborConfig, PipelineConfig
+from .config import AnalysisConfig, GaborConfig, PipelineConfig, coarse_grid_dimensions, parse_literal
 
 DEFAULT_MOVIE_FRAME_RATE_HZ = 30
 SECONDS_PER_MINUTE = 60
@@ -67,6 +67,8 @@ class PipelineOutputs:
     """Container returned by :func:`run_pipeline`."""
 
     gabor_library_path: Optional[Path] = None
+    coarse_gabor_library_path: Optional[Path] = None
+    fine_gabor_library_path: Optional[Path] = None
     spike_data: Optional[SpikeData] = None
     rf_analysis: Optional[RFAnalysisResult] = None
     simple_model: Optional[SimpleModelResult] = None
@@ -139,6 +141,101 @@ def create_gabor_library(config: GaborConfig) -> Path:
     return config.save_path
 
 
+def create_coarse_gabor_library(config: GaborConfig) -> Path:
+    """Create the coupled coarse RF Gabor library used for paper-style RF search."""
+    from . import WaveletGenerator as wg
+
+    coarse_nx, coarse_ny = coarse_grid_dimensions(config.nx, config.ny)
+    xs = np.arange(coarse_nx)
+    ys = np.arange(coarse_ny)
+    frequency = config.frequencies[0] if config.frequencies else 0.0
+    filter_library = wg.makeFilterLibrary(
+        xs,
+        ys,
+        config.theta_radians,
+        config.sigmas_array,
+        config.phases_array,
+        frequency,
+        freq=False,
+    )
+    config.coarse_save_path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(config.coarse_save_path, filter_library)
+    return config.coarse_save_path
+
+
+def create_fine_gabor_library(
+    config: GaborConfig,
+    extra_sigmas: Optional[Sequence[float]] = None,
+) -> Path:
+    """Create the full-resolution independent size/frequency Gabor library."""
+    from . import WaveletGenerator as wg
+
+    if extra_sigmas:
+        merged_sigmas = tuple(dict.fromkeys(
+            [float(value) for value in config.sigmas]
+            + [float(value) for value in extra_sigmas]
+        ))
+        config = replace(config, sigmas=merged_sigmas)
+
+    library_sigmas = config.sigmas_array
+    if config.has_independent_frequencies:
+        filter_library = wg.makeFilterLibrary2(
+            config.x_positions,
+            config.y_positions,
+            config.theta_radians,
+            library_sigmas,
+            config.phases_array,
+            config.frequencies_array,
+        )
+    else:
+        frequency = config.frequencies[0] if config.frequencies else 0.0
+        filter_library = wg.makeFilterLibrary(
+            config.x_positions,
+            config.y_positions,
+            config.theta_radians,
+            library_sigmas,
+            config.phases_array,
+            frequency,
+            freq=False,
+        )
+    config.fine_save_path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(config.fine_save_path, filter_library)
+    return config.fine_save_path
+
+
+def model_trial_indices(analysis: AnalysisConfig, n_trials: int) -> Tuple[Sequence[int], Sequence[int]]:
+    """Resolve configured train/test trial indices, accepting ``auto`` for test."""
+    def parse_indices(value: str, label: str, train_indices=None):
+        text = str(value).strip()
+        if text.lower() in {"", "auto"}:
+            if train_indices is None:
+                defaults = [0, 2]
+                return [idx for idx in defaults if idx < n_trials] or [0]
+            train_set = set(int(idx) for idx in train_indices)
+            held_out = [idx for idx in range(n_trials) if idx not in train_set]
+            if not held_out:
+                raise ValueError("Automatic test trial selection found no held-out trials.")
+            return held_out
+        parsed = parse_literal(text, label)
+        if isinstance(parsed, int):
+            parsed = [parsed]
+        indices = [int(idx) for idx in parsed]
+        invalid = [idx for idx in indices if idx < 0 or idx >= n_trials]
+        if invalid:
+            raise ValueError(
+                f"{label} contains out-of-range trial index/indices {invalid}; "
+                f"available trials are 0 through {n_trials - 1}."
+            )
+        return indices
+
+    train_idx = parse_indices(analysis.train_trial_indices, "Train Trial Indices")
+    test_idx = parse_indices(analysis.test_trial_indices, "Test Trial Indices", train_idx)
+    overlap = sorted(set(train_idx) & set(test_idx))
+    if overlap:
+        raise ValueError(f"Train and test trial indices overlap: {overlap}")
+    return train_idx, test_idx
+
+
 def prepare_stimulus_wavelets(
     analysis: AnalysisConfig,
     library_path: Optional[Path] = None,
@@ -155,26 +252,28 @@ def prepare_stimulus_wavelets(
     if chunk_size is None:
         chunk_size = video_downsample_chunk_size()
 
-    library_path = library_path or analysis.library_path
+    library_path = Path(library_path or analysis.library_path)
     require_file(analysis.movie_path, "Stimulus movie")
     require_file(library_path, "Gabor library")
 
     analysis.path_directory.mkdir(parents=True, exist_ok=True)
     ratio_x, ratio_y = analysis.coverage_ratios()
+    coarse_nx, coarse_ny = analysis.coarse_nx, analysis.coarse_ny
+    coarse_downsampled_path = analysis.movie_path.with_name(
+        f"{analysis.movie_path.stem}_coarse_downsampled.npy"
+    )
     wg.downsample_video_binary(
         str(analysis.movie_path),
         np.array(analysis.visual_coverage),
         np.array(analysis.analysis_coverage),
-        shape=(analysis.ny, analysis.nx),
+        shape=(coarse_ny, coarse_nx),
         chunk_size=chunk_size,
         ratios=(ratio_x, ratio_y),
+        save_path=str(coarse_downsampled_path),
     )
 
-    downsampled_path = analysis.movie_path.with_name(
-        f"{analysis.movie_path.stem}_downsampled.npy"
-    )
-    require_file(downsampled_path, "Downsampled stimulus")
-    video_data = np.load(downsampled_path)
+    require_file(coarse_downsampled_path, "Coarse downsampled stimulus")
+    video_data = np.load(coarse_downsampled_path)
     video_data = (
         video_data.astype(int)
         - np.logical_not(video_data).astype(int)
@@ -239,8 +338,9 @@ def prepare_full_model_wavelets(
 ) -> Path:
     """Build full-resolution wavelet arrays used by :func:`run_Full_Model`."""
     from . import WaveletGenerator as wg
+    from .performance import video_downsample_chunk_size
 
-    library_path = library_path or analysis.library_path
+    library_path = Path(library_path or gabor.fine_save_path)
     output_dir = output_dir or analysis.full_model_wavelet_path or analysis.path_directory
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -248,8 +348,19 @@ def prepare_full_model_wavelets(
     downsampled_path = analysis.movie_path.with_name(
         f"{analysis.movie_path.stem}_downsampled.npy"
     )
-    require_file(downsampled_path, "Downsampled stimulus")
     require_file(library_path, "Gabor library")
+    if not downsampled_path.exists():
+        ratio_x, ratio_y = analysis.coverage_ratios()
+        wg.downsample_video_binary(
+            str(analysis.movie_path),
+            np.array(analysis.visual_coverage),
+            np.array(analysis.analysis_coverage),
+            shape=(analysis.ny, analysis.nx),
+            chunk_size=video_downsample_chunk_size(),
+            ratios=(ratio_x, ratio_y),
+            save_path=str(downsampled_path),
+        )
+    require_file(downsampled_path, "Downsampled stimulus")
 
     video_data = np.load(downsampled_path)
     video_data = (
@@ -269,7 +380,10 @@ def prepare_full_model_wavelets(
             analysis.frequencies,
             str(output_dir),
             str(library_path),
-            library_sigmas=gabor.sigmas,
+            library_sigmas=tuple(dict.fromkeys(
+                [float(value) for value in gabor.sigmas]
+                + [float(value) for value in analysis.sigmas_full_model]
+            )),
         )
     return output_dir
 
@@ -284,8 +398,8 @@ def load_coarse_wavelets(analysis: AnalysisConfig, gabor: GaborConfig) -> Wavele
     wavelets_r, wavelets_i, wavelets_complex = lpn.coarseWavelet(
         str(analysis.path_directory),
         False,
-        nx0=analysis.nx,
-        ny0=analysis.ny,
+        nx0=analysis.coarse_nx,
+        ny0=analysis.coarse_ny,
         nx=analysis.coarse_nx,
         ny=analysis.coarse_ny,
         no=gabor.n_thetas,
@@ -401,6 +515,9 @@ def run_simple_model(
     n_min: int = 5,
     double_wavelet_model: bool = False,
     frames_per_minute: Optional[int] = None,
+    train_idx: Optional[Sequence[int]] = None,
+    test_idx: Optional[Sequence[int]] = None,
+    lastmin: bool = False,
 ) -> SimpleModelResult:
     """Run the fast nonlinear model for all neurons."""
     from . import Analysis_Utils as au
@@ -422,6 +539,9 @@ def run_simple_model(
         dt1=dt1,
         n_min=n_min,
         double_wavelet_model=double_wavelet_model,
+        train_idx=list(train_idx or [0, 2]),
+        test_idx=list(test_idx or [1]),
+        lastmin=lastmin,
         frames_per_minute=frames_per_minute,
     )
     predictions, nonlin_params, rho_phi_params, metrics, interpolators = results
@@ -460,6 +580,7 @@ def run_full_model(
         raw_best_params,
         spike_data.neuron_pos,
     )
+    train_idx, test_idx = model_trial_indices(analysis, spike_data.spikes.shape[0])
     return au.run_Full_Model(
         raw_best_params,
         smoothed_best_params,
@@ -475,10 +596,10 @@ def run_full_model(
         n_min=n_min,
         tt=list(tt or [0, analysis.nb_frames]),
         memmapping=True,
-        train_idx=[0, 2],
-        test_idx=[1, 3],
+        train_idx=train_idx,
+        test_idx=test_idx,
         double_wavelet_model=False,
-        lastmin=False,
+        lastmin=analysis.use_last_minute_holdout,
         plotting=False,
         frames_per_minute=analysis.frames_per_minute,
         hz=analysis.hz,
@@ -497,18 +618,25 @@ def run_pipeline(
 ) -> PipelineOutputs:
     """Run the configurable waven analysis pipeline."""
     outputs = PipelineOutputs()
-    library_path = config.analysis.library_path
+    coarse_library_path = config.gabor.coarse_save_path
+    fine_library_path = config.gabor.fine_save_path
 
     if run_gabor:
-        library_path = create_gabor_library(config.gabor)
-        outputs.gabor_library_path = library_path
+        coarse_library_path = create_coarse_gabor_library(config.gabor)
+        fine_library_path = create_fine_gabor_library(
+            config.gabor,
+            extra_sigmas=config.analysis.sigmas_full_model,
+        )
+        outputs.coarse_gabor_library_path = coarse_library_path
+        outputs.fine_gabor_library_path = fine_library_path
+        outputs.gabor_library_path = fine_library_path
 
     if run_wavelets:
-        prepare_stimulus_wavelets(config.analysis, library_path=library_path)
+        prepare_stimulus_wavelets(config.analysis, library_path=coarse_library_path)
         prepare_full_model_wavelets(
             config.analysis,
             config.gabor,
-            library_path=library_path,
+            library_path=fine_library_path,
         )
 
     spike_data = load_spikes_and_positions(config.analysis)
@@ -524,10 +652,17 @@ def run_pipeline(
     outputs.rf_analysis = rf_analysis
 
     if run_model or run_full:
+        train_idx, test_idx = model_trial_indices(
+            config.analysis,
+            spike_data.spikes.shape[0],
+        )
         simple_model = run_simple_model(
             rf_analysis,
             spike_data,
             frames_per_minute=config.analysis.frames_per_minute,
+            train_idx=train_idx,
+            test_idx=test_idx,
+            lastmin=config.analysis.use_last_minute_holdout,
         )
         outputs.simple_model = simple_model
     else:

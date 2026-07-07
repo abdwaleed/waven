@@ -56,6 +56,9 @@ DEFAULT_COMMON_PARAMS: Dict[str, str] = {
     "Full Model Save Path": "",
     "Plot Cache Path": "",
     "Recovery Cache Directory": "",
+    "Train Trial Indices": "[0, 2]",
+    "Test Trial Indices": "auto",
+    "Use Last Minute Holdout": "False",
 }
 
 DEFAULT_TWO_PHOTON_PARAMS: Dict[str, str] = {
@@ -112,6 +115,14 @@ def parse_optional_path(value: Any) -> Optional[Path]:
     return parse_path(value, "path")
 
 
+def sibling_path_with_suffix(path: Any, suffix: str) -> Path:
+    """Return ``path`` with ``suffix`` inserted before the extension."""
+    base = parse_path(path, "path")
+    if base.suffix:
+        return base.with_name(f"{base.stem}{suffix}{base.suffix}")
+    return base.with_name(f"{base.name}{suffix}.npy")
+
+
 def _as_tuple(value: Any, field_name: str) -> Tuple[Any, ...]:
     parsed = parse_literal(value, field_name)
     if parsed is None:
@@ -139,6 +150,21 @@ def _as_float(value: Any, field_name: str) -> float:
     if parsed is None:
         raise ValueError(f"{field_name} is required")
     return float(parsed)
+
+
+def _as_bool(value: Any, field_name: str) -> bool:
+    parsed = parse_literal(value, field_name)
+    if isinstance(parsed, bool):
+        return parsed
+    if isinstance(parsed, str):
+        normalized = parsed.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    if parsed in (0, 1):
+        return bool(parsed)
+    raise ValueError(f"{field_name} must be a boolean value")
 
 
 def _as_path_tuple(value: Any, field_name: str) -> Tuple[Path, ...]:
@@ -234,9 +260,22 @@ class GaborConfig:
     nx: int
     ny: int
     save_path: Path
+    coarse_save_path: Path
+    fine_save_path: Path
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "GaborConfig":
+        save_path = parse_path(_get(mapping, "Save Path"), "Save Path")
+        coarse_path = (
+            parse_path(_get(mapping, "Coarse Library Path"), "Coarse Library Path")
+            if _get(mapping, "Coarse Library Path") is not None
+            else sibling_path_with_suffix(save_path, "_coarse")
+        )
+        fine_path = (
+            parse_path(_get(mapping, "Fine Library Path"), "Fine Library Path")
+            if _get(mapping, "Fine Library Path") is not None
+            else sibling_path_with_suffix(save_path, "_fine")
+        )
         return cls(
             n_thetas=_as_int(_get(mapping, "N_thetas"), "N_thetas"),
             sigmas=_as_float_tuple(_get(mapping, "Sigmas"), "Sigmas"),
@@ -247,7 +286,9 @@ class GaborConfig:
             phases=_as_float_tuple(_get(mapping, "Phases"), "Phases"),
             nx=_as_int(_get(mapping, "NX"), "NX"),
             ny=_as_int(_get(mapping, "NY"), "NY"),
-            save_path=parse_path(_get(mapping, "Save Path"), "Save Path"),
+            save_path=save_path,
+            coarse_save_path=coarse_path,
+            fine_save_path=fine_path,
         )
 
     @property
@@ -289,6 +330,8 @@ class GaborConfig:
             "NX": str(self.nx),
             "NY": str(self.ny),
             "Save Path": str(self.save_path),
+            "Coarse Library Path": str(self.coarse_save_path),
+            "Fine Library Path": str(self.fine_save_path),
         }
 
 
@@ -313,6 +356,9 @@ class AnalysisConfig:
     hz: int
     nb_frames: int
     n_trials_to_keep: int
+    train_trial_indices: str
+    test_trial_indices: str
+    use_last_minute_holdout: bool
     movie_path: Path
     library_path: Path
     resolution: Optional[float] = None
@@ -402,6 +448,12 @@ class AnalysisConfig:
             n_trials_to_keep=_as_int(
                 _get(mapping, "Number of Trials to Keep"),
                 "Number of Trials to Keep",
+            ),
+            train_trial_indices=str(_get(mapping, "Train Trial Indices") or "auto"),
+            test_trial_indices=str(_get(mapping, "Test Trial Indices") or "auto"),
+            use_last_minute_holdout=_as_bool(
+                _get(mapping, "Use Last Minute Holdout"),
+                "Use Last Minute Holdout",
             ),
             movie_path=parse_path(_get(mapping, "Movie Path"), "Movie Path"),
             library_path=parse_path(_get(mapping, "Library Path"), "Library Path"),

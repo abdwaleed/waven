@@ -2023,16 +2023,27 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
 
 
 def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
-                         spks, n_min, double_wavelet_model, dt1=9000,
-                         train_idx=[0, 2, 4], test_idx=[1, 3],
-                         lastmin=False, func=relu, sigma=7, plotting=False,
-                         frames_per_minute=None) :
+                          spks, n_min, double_wavelet_model, dt1=9000,
+                          train_idx=[0, 2, 4], test_idx=[1, 3],
+                          lastmin=False, func=relu, sigma=7, plotting=False,
+                          frames_per_minute=None) :
     if frames_per_minute is None:
         frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
     frames_per_minute = int(frames_per_minute)
+    train_idx = [int(i) for i in train_idx]
+    test_idx = [int(i) for i in test_idx]
+    if not train_idx or not test_idx:
+        raise ValueError("GetNeuronVisresponse requires at least one train and one test trial.")
+    n_trials = spks.shape[0]
+    invalid = [i for i in train_idx + test_idx if i < 0 or i >= n_trials]
+    if invalid:
+        raise ValueError(f"Trial index/indices out of range for {n_trials} trials: {invalid}")
     spk = spks[:, :n_min * frames_per_minute, idx]
+    signal_len = min(len(w_i), len(w_r), len(w_i_inhib), len(w_r_inhib), len(dphi), len(dphi_inhib), spks.shape[1])
     if lastmin:
-        dt1 = n_min * frames_per_minute
+        dt1 = min(n_min * frames_per_minute, signal_len)
+    else:
+        dt1 = min(int(dt1), signal_len)
     y_train = spks[train_idx, :dt1, idx]
     y_test = spks[test_idx, :dt1, idx]
     rho, phi = getpolar(w_i, w_r)  # [:dt1]
@@ -2107,30 +2118,27 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
     print(ev)
     print(cc)
 
-    print('prediction last minute : ')
-    tp_test = dt1 + frames_per_minute
-    print(tp_test, dt1)
-    X1 = np.concatenate([(np.concatenate(
-        (pred[tp_test:tp_test + frames_per_minute],
-         pred_h[tp_test:tp_test + frames_per_minute]), axis=1))
-        for rep in test_idx])
-
-    X1 = np.nan_to_num(X1)
-    print(pred.shape)
-    y_test = np.concatenate([
-        spks[r, tp_test:tp_test + frames_per_minute, idx]
-        for r in train_idx
-    ])
-    res = func(X1, *fittedParameters)
-    res1 = res  # + (w_pc*pcs_test[:, 0])
-    reslastmin = np.mean(res1.reshape(len(test_idx), frames_per_minute), axis=0)
-    print(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0).shape, reslastmin.shape)
-    evlastmin= explained_variance_score(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0), reslastmin, multioutput='uniform_average')
-    fevelastmin = FEVE(y_test.reshape(len(test_idx), dt1-tp_test), reslastmin)
-    cclastmin=np.corrcoef(np.mean(y_test.reshape(len(test_idx),  dt1-tp_test), axis=0), reslastmin)[0,1]
-    print(feve)
-    print(ev)
-    print(cclastmin)
+    cclastmin = np.nan
+    if lastmin:
+        print('prediction last minute : ')
+        holdout_start = dt1
+        holdout_end = min(dt1 + frames_per_minute, signal_len)
+        holdout_len = holdout_end - holdout_start
+        if holdout_len <= 1:
+            print("Skipping last-minute holdout: not enough frames remain after the training window.")
+        else:
+            base_holdout = np.concatenate(
+                (pred[holdout_start:holdout_end], pred_h[holdout_start:holdout_end]),
+                axis=1,
+            )
+            X1 = np.tile(base_holdout, (len(test_idx), 1))
+            X1 = np.nan_to_num(X1)
+            y_holdout = spks[test_idx, holdout_start:holdout_end, idx].ravel()
+            res = func(X1, *fittedParameters)
+            reslastmin = np.mean(res.reshape(len(test_idx), holdout_len), axis=0)
+            y_holdout_mean = np.mean(y_holdout.reshape(len(test_idx), holdout_len), axis=0)
+            cclastmin = np.corrcoef(y_holdout_mean, reslastmin)[0, 1]
+            print(cclastmin)
     return res2, [feve, ev, cc, cc_train, cclastmin], fittedParameters, [d, c, hmp, d_h, c_h, hmp_h], plot, unrectified, w, f
 
 
@@ -2659,7 +2667,7 @@ def _set_sem_caption(fig, n_trials):
         fig._waven_caption = f"Error bars represent SEM over {n_trials} trials."
 
 
-def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, show_sem_errorbars=False):
+def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, lastmin=False, show_sem_errorbars=False):
     x = int(np.round(maxes0[0, idx]))
     y = int(np.round(maxes0[1, idx]))
     o = int(np.round(maxes0[2, idx]))
@@ -2755,7 +2763,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
                                                                                           train_idx=train_idx,
                                                                                           test_idx=test_idx,
                                                                                           double_wavelet_model=False,
-                                                                                          lastmin=True, func=relu, sigma=15,
+                                                                                          lastmin=lastmin, func=relu, sigma=15,
                                                                                           plotting=False,
                                                                                           frames_per_minute=frames_per_minute)
     print(rhophiparams)
@@ -2763,7 +2771,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
 
 def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
               n_min=5, double_wavelet_model=True, train_idx=[0, 2],
-              test_idx=[1, 3], plotting=False, frames_per_minute=None,
+              test_idx=[1, 3], lastmin=False, plotting=False, frames_per_minute=None,
               show_sem_errorbars=False):
     """Fit the fast nonlinear Gabor-wavelet model for every neuron in parallel."""
     if wavelets_i.ndim != 5 or wavelets_r.ndim != 5:
@@ -2787,7 +2795,7 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
             _process_single_neuron(
                 idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
                 double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
-                show_sem_errorbars=show_sem_errorbars
+                lastmin=lastmin, show_sem_errorbars=show_sem_errorbars
             )
             for idx in range(num_neurons)
         ]
@@ -2797,7 +2805,7 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
             delayed(_process_single_neuron)(
                 idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
                 double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
-                show_sem_errorbars=show_sem_errorbars
+                lastmin=lastmin, show_sem_errorbars=show_sem_errorbars
             ) for idx in range(num_neurons)
         )
 
@@ -2825,6 +2833,17 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         frames_per_minute = int(hz) * SECONDS_PER_MINUTE
     frames_per_minute = int(frames_per_minute)
     hz = int(hz)
+    train_idx = [int(i) for i in train_idx]
+    test_idx = [int(i) for i in test_idx]
+    if not train_idx or not test_idx:
+        raise ValueError("run_Full_Model requires at least one train and one test trial.")
+    n_trials = spks.shape[0]
+    invalid = [i for i in train_idx + test_idx if i < 0 or i >= n_trials]
+    if invalid:
+        raise ValueError(f"Trial index/indices out of range for {n_trials} trials: {invalid}")
+    overlap = sorted(set(train_idx) & set(test_idx))
+    if overlap:
+        raise ValueError(f"Train and test trial indices overlap: {overlap}")
     Predictions = []
     Metrics = []
     Params = []
@@ -2884,251 +2903,143 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     scale_x, scale_y = coarse_to_full_scale(nx_full, ny_full)
     margin = 5
     corr_shape = (n_orientations, n_sigmas_w, n_frequencies)
+    compute_device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    def _corr_features(features, response):
+        features = np.asarray(features, dtype=np.float32)
+        response = np.asarray(response, dtype=np.float32).reshape(-1)
+        if features.shape[0] != response.shape[0]:
+            raise ValueError(
+                f"Feature/response time mismatch: {features.shape[0]} != {response.shape[0]}"
+            )
+        flat = features.reshape(features.shape[0], -1).T
+        with torch.no_grad():
+            feature_tensor = torch.as_tensor(flat, device=compute_device, dtype=torch.float32)
+            response_tensor = torch.as_tensor(response.reshape(1, -1), device=compute_device, dtype=torch.float32)
+            feature_tensor = feature_tensor - feature_tensor.mean(dim=1, keepdim=True)
+            response_tensor = response_tensor - response_tensor.mean(dim=1, keepdim=True)
+            denom = torch.linalg.norm(feature_tensor, dim=1) * torch.linalg.norm(response_tensor)
+            corr = torch.matmul(feature_tensor, response_tensor.T).squeeze(1) / torch.clamp(denom, min=1e-12)
+            corr = torch.nan_to_num(corr).cpu().numpy()
+        return corr
+
+    def _best_phase_correlation(real_features, imag_features, response, output_shape):
+        corr_real = _corr_features(real_features, response).reshape(output_shape)
+        corr_imag = _corr_features(imag_features, response).reshape(output_shape)
+        real_score = np.nanmax(np.abs(corr_real))
+        imag_score = np.nanmax(np.abs(corr_imag))
+        if real_score >= imag_score:
+            corr = corr_real
+            phase = "real"
+        else:
+            corr = corr_imag
+            phase = "imaginary"
+        best = np.unravel_index(np.nanargmax(np.abs(corr)), corr.shape)
+        return phase, corr, tuple(int(i) for i in best)
+
+    def _window_bounds(x0, y0, radius):
+        x_start = max(0, x0 - radius)
+        x_end = min(nx_full, x0 + radius + 1)
+        y_start = max(0, y0 - radius)
+        y_end = min(ny_full, y0 + radius + 1)
+        return x_start, x_end, y_start, y_end
+
+    def _findBestPos_phase_specific(x, y, o, s, nmin=5, plotting=False):
+        x0 = int(np.round(np.minimum(np.maximum(x * scale_x, margin), nx_full - margin)))
+        y0 = int(np.round(np.minimum(np.maximum(y * scale_y, margin), ny_full - margin)))
+        w = 10
+        t_start = int(tt[0])
+        t_end = min(t_start + nmin * frames_per_minute, wavelets_r.shape[0], spks.shape[1])
+        if t_end - t_start <= 1:
+            raise ValueError("Fine refinement needs at least two training frames.")
+        spk_train = np.mean(spks[train_idx, t_start:t_end, idx], axis=0)
+        x_start, x_end, y_start, y_end = _window_bounds(x0, y0, w)
+        wavelets_r_ = np.asarray(wavelets_r[t_start:t_end, x_start:x_end, y_start:y_end, :, :, :])
+        wavelets_i_ = np.asarray(wavelets_i[t_start:t_end, x_start:x_end, y_start:y_end, :, :, :])
+        phase, cc_initial, best = _best_phase_correlation(
+            wavelets_r_,
+            wavelets_i_,
+            spk_train,
+            wavelets_r_.shape[1:],
+        )
+        x_local, y_local, o, s, f = best
+        x_global = x_start + x_local
+        y_global = y_start + y_local
+
+        for iteration in range(10):
+            print(x_global, y_global, phase)
+            phase, cc_f_1, osf_best = _best_phase_correlation(
+                wavelets_r_[:, x_local, y_local, :, :, :],
+                wavelets_i_[:, x_local, y_local, :, :, :],
+                spk_train,
+                corr_shape,
+            )
+            o, s, f = osf_best
+
+            if plotting:
+                fig, ax = plt.subplots(n_orientations)
+                fig.suptitle(f"Local orientation/size/frequency correlation search ({phase} phase)")
+                if n_orientations == 1:
+                    ax = [ax]
+                for i in range(n_orientations):
+                    ax[i].imshow(cc_f_1[i].T, vmin=-np.max(abs(cc_f_1)), vmax=np.max(abs(cc_f_1)), cmap='coolwarm')
+                    ax[i].set_title(f"Orientation {i}")
+                    ax[i].set_xlabel("Size index")
+                    ax[i].set_ylabel("Frequency index")
+
+            spatial_features = (
+                wavelets_r_[:, :, :, o, s, f]
+                if phase == "real"
+                else wavelets_i_[:, :, :, o, s, f]
+            )
+            cc_f_1_xy = _corr_features(spatial_features, spk_train).reshape(spatial_features.shape[1:])
+            new_x_local, new_y_local = np.unravel_index(np.nanargmax(np.abs(cc_f_1_xy)), cc_f_1_xy.shape)
+            new_x_global = x_start + int(new_x_local)
+            new_y_global = y_start + int(new_y_local)
+
+            if plotting:
+                plt.figure()
+                plt.imshow(cc_f_1_xy.T, vmax=np.max(abs(cc_f_1_xy)), cmap='coolwarm', aspect='equal')
+                plt.xticks(np.linspace(0, cc_f_1_xy.shape[0] - 1, 3).astype(int))
+                plt.yticks(np.linspace(0, cc_f_1_xy.shape[1] - 1, 3).astype(int))
+                plt.title(f"Local x/y correlation search ({phase} phase)")
+                plt.xlabel("Local X position (pixels)")
+                plt.ylabel("Local Y position (pixels)")
+
+            print(o, s, f)
+            print(new_x_global, new_y_global)
+            if new_x_global == x_global and new_y_global == y_global:
+                print('converged')
+                break
+            x_local, y_local = int(new_x_local), int(new_y_local)
+            x_global, y_global = new_x_global, new_y_global
+
+        if compute_device == "cuda":
+            torch.cuda.empty_cache()
+        print(x_global, y_global, o, s, f)
+        return (x_global, y_global, o, s, f)
+    
+    
     def findBestPos_profiled(x, y, o, s, nmin=5, plotting=False):
-        x0 = int(np.round(np.minimum(np.maximum(x * scale_x, margin), nx_full - margin)))
-        y0 = int(np.round(np.minimum(np.maximum(y * scale_y, margin), ny_full - margin)))
+        return _findBestPos_phase_specific(x, y, o, s, nmin=nmin, plotting=plotting)
 
-        spk = np.mean(spks[:5, :nmin * frames_per_minute, idx], axis=0).reshape(-1, 1)
-        spk_train = np.mean(spks[[0, 2], :nmin * frames_per_minute, idx], axis=0).reshape(-1, 1)
 
-        div = True
-        ttt = 0
-        r = 1
-        w = 10
-
-        xt = max(0, x0 - w)
-        yt = max(0, y0 - w)
-
-        x = x0 - xt
-        y = y0 - yt
-
-        wavelets_i_ = wavelets_i[tt[0]:nmin * frames_per_minute, xt:xt + (2 * w),
-        yt:yt + (2 * w), :, :, :]
-        wavelets_i_ = np.array(wavelets_i_)
-        wavelets_r_ = wavelets_r[tt[0]:nmin * frames_per_minute, xt:xt + (2 * w),
-        yt:yt + (2 * w), :, :, :]
-        wavelets_r_ = np.array(wavelets_r_)
-
-        # PRE-ALLOCATE directly to device to save PCIe bandwidth
-        spk_train_tensor = torch.as_tensor(spk_train.T, device='cuda', dtype=torch.float32)
-
-        while div:
-            print(x, y)
-            wavelets_complex = np.power(wavelets_r_[:, x, y], 2) + np.power(wavelets_i_[:, x, y], 2)
-            
-            # Use as_tensor to prevent intermediate CPU copies
-            wavelets_tensor = torch.as_tensor(
-                wavelets_complex.reshape(nmin * frames_per_minute, -1).T, 
-                device='cuda', 
-                dtype=torch.float32
-            )
-            
-            concat_tensor = torch.cat((wavelets_tensor, spk_train_tensor), dim=0)
-            
-            # No need to detach if we aren't tracking gradients
-            cc_f_1 = torch.corrcoef(concat_tensor).cpu().numpy()[-1:, :-1]
-            cc_f_1 = cc_f_1.reshape(corr_shape)
-            
-            if plotting:
-                fig, ax = plt.subplots(n_orientations)
-                fig.suptitle("Local orientation/size/frequency correlation search")
-                if n_orientations == 1:
-                    ax = [ax]
-                for i in range(n_orientations):
-                    ax[i].imshow(cc_f_1[i].T, vmin=-np.max(abs(cc_f_1)), vmax=np.max(abs(cc_f_1)), cmap='coolwarm')
-                    ax[i].set_title(f"Orientation {i}")
-                    ax[i].set_xlabel("Size index")
-                    ax[i].set_ylabel("Frequency index")
-            
-            m = np.where(abs(cc_f_1) == np.max(abs(cc_f_1)))
-            o, s, f = m[0][0], m[1][0], m[2][0]
-
-            wc = np.sqrt(np.power(wavelets_r_[:, :, :, o, s, f], 2) + np.power(
-                wavelets_i_[:, :, :, o, s, f], 2))
-            if r == 1:
-                wi = wavelets_i_[:, :, :, o, s, f]
-                wr = wavelets_r_[:, :, :, o, s, f]
-                wsin = np.max(wi)
-                wcos = np.max(wr)
-                m = np.argmax([wcos, wsin, np.max(wc)])
-                print(m, [wcos, wsin, np.max(wc)])
-                if m == 0:
-                    ww = wr
-                elif m == 1:
-                    ww = wi
-                else:
-                    ww = wc
-                r = 0
-
-            if ww.shape != (2 * w, 2 * w):
-                print('padding')
-                w_temp = np.zeros((ww.shape[0], 2 * w, 2 * w))
-                w_temp[:, :ww.shape[1], :ww.shape[2]] = ww
-                ww = w_temp
-
-            ww_tensor = torch.as_tensor(
-                ww.reshape(nmin * frames_per_minute, -1).T, 
-                device='cuda', 
-                dtype=torch.float32
-            )
-            
-            concat_xy = torch.cat((ww_tensor, spk_train_tensor), dim=0)
-            cc_f_1_xy = torch.corrcoef(concat_xy).cpu().numpy()[-1:, :-1]
-            cc_f_1_xy = np.nan_to_num(cc_f_1_xy)
-            cc_f_1_xy = cc_f_1_xy.reshape(2 * w, 2 * w)
-
-            m = np.where(abs(cc_f_1_xy) == np.max(abs(cc_f_1_xy)))
-            xt, yt = m[0][0], m[1][0]
-            x1 = int(np.maximum(0, m[0][0] - w + x0))
-            y1 = int(np.maximum(0, m[1][0] - w + y0))
-            
-            if plotting:
-                plt.figure()
-                plt.imshow(cc_f_1_xy.T, vmax=np.max(abs(cc_f_1_xy)), cmap='coolwarm', aspect='equal')
-                plt.xticks(np.linspace(0, cc_f_1_xy.shape[0] - 1, 3).astype(int))
-                plt.yticks(np.linspace(0, cc_f_1_xy.shape[1] - 1, 3).astype(int))
-                plt.title("Local x/y correlation search")
-                plt.xlabel("Local X position (pixels)")
-                plt.ylabel("Local Y position (pixels)")
-
-            print(xt, yt)
-            print(o, s, f)
-            print(x1, y1)
-            ttt = ttt + 1
-            if xt == x:
-                if yt == y:
-                    print('converged')
-                    div = False
-            elif ttt == 10:
-                div = False
-            x = xt
-            y = yt
-
-        print(x1, y1, o, s, f)
-        # We allow PyTorch's caching allocator to manage RAM naturally here
-        return (x1, y1, o, s, f)
-    
-    
     def findBestPos(x, y, o, s, nmin=5, plotting=False):
-        x0 = int(np.round(np.minimum(np.maximum(x * scale_x, margin), nx_full - margin)))
-        y0 = int(np.round(np.minimum(np.maximum(y * scale_y, margin), ny_full - margin)))
-        spk_train = np.mean(spks[[0, 2], :nmin * frames_per_minute, idx], axis=0).reshape(-1, 1)
-        x = x0
-        y = y0
-        div = True
-        ttt = 0
-        r = 1
-        w = 10
-
-        # PRE-ALLOCATE directly to device
-        spk_train_tensor = torch.as_tensor(spk_train.T, device='cuda', dtype=torch.float32)
-
-        while div:
-            print(x, y)
-            wavelets_complex = np.power(wavelets_r[:nmin * frames_per_minute, x, y], 2) + np.power(
-                wavelets_i[:nmin * frames_per_minute, x, y], 2)
-            
-            wavelets_tensor = torch.as_tensor(
-                wavelets_complex.reshape(nmin * frames_per_minute, -1).T, 
-                device='cuda', 
-                dtype=torch.float32
-            )
-            
-            concat_tensor = torch.cat((wavelets_tensor, spk_train_tensor), dim=0)
-            
-            cc_f_1 = torch.corrcoef(concat_tensor).cpu().numpy()[-1:, :-1]
-            cc_f_1 = cc_f_1.reshape(corr_shape)
-            
-            if plotting:
-                fig, ax = plt.subplots(n_orientations)
-                fig.suptitle("Local orientation/size/frequency correlation search")
-                if n_orientations == 1:
-                    ax = [ax]
-                for i in range(n_orientations):
-                    ax[i].imshow(cc_f_1[i].T, vmin=-np.max(abs(cc_f_1)), vmax=np.max(abs(cc_f_1)), cmap='coolwarm')
-                    ax[i].set_title(f"Orientation {i}")
-                    ax[i].set_xlabel("Size index")
-                    ax[i].set_ylabel("Frequency index")
-            
-            m = np.where(abs(cc_f_1) == np.max(abs(cc_f_1)))
-            o, s, f = m[0][0], m[1][0], m[2][0]
-
-            wc = np.sqrt(np.power(wavelets_r[:nmin * frames_per_minute, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
-            np.maximum(0, y0 - w):np.maximum(0, y0 - w) + (2 * w), o, s, f], 2) + np.power(
-                wavelets_i[:nmin * frames_per_minute, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
-                np.maximum(0, y0 - w):np.maximum(0, y0 - w) + (2 * w), o, s, f], 2))
-            
-            if r == 1:
-                wi = wavelets_i[:nmin * frames_per_minute, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
-                np.maximum(0, y0 - w):np.maximum(0, y0 - w) + (2 * w), o, s, f]
-                wr = wavelets_r[:nmin * frames_per_minute, np.maximum(0, x0 - w):np.maximum(0, x0 - w) + (2 * w),
-                np.maximum(0, y0 - w):np.maximum(0, y0 - w) + (2 * w), o, s, f]
-                wsin = np.max(wi)
-                wcos = np.max(wr)
-                m = np.argmax([wcos, wsin, np.max(wc)])
-                print(m, [wcos, wsin, np.max(wc)])
-                if m == 0:
-                    ww = wr
-                elif m == 1:
-                    ww = wi
-                else:
-                    ww = wc
-                r = 0
-
-            if ww.shape != (2 * w, 2 * w):
-                print('padding')
-                w_temp = np.zeros((ww.shape[0], 2 * w, 2 * w))
-                w_temp[:, :ww.shape[1], :ww.shape[2]] = ww
-                ww = w_temp
-
-            ww_tensor = torch.as_tensor(
-                ww.reshape(nmin * frames_per_minute, -1).T, 
-                device='cuda', 
-                dtype=torch.float32
-            )
-            concat_xy = torch.cat((ww_tensor, spk_train_tensor), dim=0)
-            
-            cc_f_1_xy = torch.corrcoef(concat_xy).cpu().numpy()[-1:, :-1]
-            cc_f_1_xy = np.nan_to_num(cc_f_1_xy)
-            cc_f_1_xy = cc_f_1_xy.reshape(2 * w, 2 * w)
-
-            m = np.where(abs(cc_f_1_xy) == np.max(abs(cc_f_1_xy)))
-            x1 = int(np.maximum(0, m[0][0] - w + x0))
-            y1 = int(np.maximum(0, m[1][0] - w + y0))
-            
-            if plotting:
-                plt.figure()
-                plt.imshow(cc_f_1_xy.T, vmax=np.max(abs(cc_f_1_xy)), cmap='coolwarm', aspect='equal')
-                plt.xticks(np.linspace(0, cc_f_1_xy.shape[0] - 1, 3).astype(int))
-                plt.yticks(np.linspace(0, cc_f_1_xy.shape[1] - 1, 3).astype(int))
-                plt.title("Local x/y correlation search")
-                plt.xlabel("Local X position (pixels)")
-                plt.ylabel("Local Y position (pixels)")
-            
-            print(x, y)
-            print(o, s, f)
-            print(x1, y1)
-            ttt = ttt + 1
-            if x1 == x:
-                if y1 == y:
-                    print('converged')
-                    div = False
-            elif ttt == 10:
-                div = False
-            x = x1
-            y = y1
-
-        print(x, y, o, s, f)
-        return (x, y, o, s, f)
+        return _findBestPos_phase_specific(x, y, o, s, nmin=nmin, plotting=plotting)
     
     
+    train_start = int(tt[0])
+    train_stop = min(train_start + n_min * frames_per_minute, wavelets_r.shape[0], spks.shape[1])
+    if train_stop - train_start <= 1:
+        raise ValueError("Full model needs at least two training frames.")
+
     if idxs==None:
         list_neurons= range(neuron_pos.shape[0])
     else:
         list_neurons=idxs
     for idx in list_neurons:  # np.asarray(neuron_pos[:, 1]>600).nonzero()[0]:[1024, 732, 1789, 3279, 614]:#
-        torch.cuda.empty_cache()
+        if compute_device == "cuda":
+            torch.cuda.empty_cache()
         print(idx)
         x, y, o, s = maxes1[:4, idx]
 
@@ -3138,10 +3049,10 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
 
         if memmapping:
             (x, y, o, s, f) = findBestPos_profiled(int(np.round(x)), int(np.round(y)), int(np.round(o)),
-                                                   int(np.round(s)), plotting=plotting)
+                                                   int(np.round(s)), nmin=n_min, plotting=plotting)
 
             (x1, y1, o1, s1, f1) = findBestPos_profiled(int(np.round(x1)), int(np.round(y1)), int(np.round(o1)),
-                                                        int(np.round(s1)), plotting=plotting)
+                                                        int(np.round(s1)), nmin=n_min, plotting=plotting)
         else:
             (x, y, o, s, f) = findBestPos(int(np.round(x)), int(np.round(y)), int(np.round(o)),
                                           int(np.round(s)), nmin=n_min, plotting=plotting)
@@ -3150,16 +3061,17 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                                                int(np.round(s1)), nmin=n_min, plotting=plotting)
 
         if memmapping:
-            wavelets_i_ = wavelets_i[tt[0]:n_min * frames_per_minute, x, y, :, :, :]
-            wavelets_r_ = wavelets_r[tt[0]:n_min * frames_per_minute, x, y, :, :, :]
+            wavelets_i_ = wavelets_i[train_start:train_stop, x, y, :, :, :]
+            wavelets_r_ = wavelets_r[train_start:train_stop, x, y, :, :, :]
             wc = np.sqrt(np.power(wavelets_r_, 2) + np.power(
                 wavelets_i_, 2))
         else:
-            wc = np.sqrt(np.power(wavelets_r[:n_min * frames_per_minute, x, y, :, :, :], 2) + np.power(
-                wavelets_i[:n_min * frames_per_minute, x, y, :, :, :], 2))
+            wc = np.sqrt(np.power(wavelets_r[train_start:train_stop, x, y, :, :, :], 2) + np.power(
+                wavelets_i[train_start:train_stop, x, y, :, :, :], 2))
 
-        wc_tensor = torch.as_tensor(wc.reshape(n_min * frames_per_minute, -1).T, device='cuda', dtype=torch.float32)
-        spks_tensor = torch.as_tensor(np.mean(spks[:, :n_min * frames_per_minute, idx], axis=0).reshape(1, -1), device='cuda', dtype=torch.float32)
+        train_frames = wc.shape[0]
+        wc_tensor = torch.as_tensor(wc.reshape(train_frames, -1).T, device=compute_device, dtype=torch.float32)
+        spks_tensor = torch.as_tensor(np.mean(spks[train_idx, train_start:train_stop, idx], axis=0).reshape(1, -1), device=compute_device, dtype=torch.float32)
         
         cc_f_1_o = torch.corrcoef(torch.cat((wc_tensor, spks_tensor), dim=0)).cpu().numpy()[-1:, :-1]
         cc_f_1_o = cc_f_1_o.reshape(corr_shape)
@@ -3177,14 +3089,15 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             })
 
             if memmapping:
-                wavelets_i_ = wavelets_i[tt[0]:n_min * frames_per_minute, x, y, :, :, :]
-                wavelets_r_ = wavelets_r[tt[0]:n_min * frames_per_minute, x, y, :, :, :]
+                wavelets_i_ = wavelets_i[train_start:train_stop, x, y, :, :, :]
+                wavelets_r_ = wavelets_r[train_start:train_stop, x, y, :, :, :]
                 wc = np.sqrt(np.power(wavelets_r_, 2) + np.power(wavelets_i_, 2))
             else:
-                wc = np.sqrt(np.power(wavelets_r[:n_min * frames_per_minute, x, y, :, :, :], 2) + np.power(
-                    wavelets_i[:n_min * frames_per_minute, x, y, :, :, :], 2))
+                wc = np.sqrt(np.power(wavelets_r[train_start:train_stop, x, y, :, :, :], 2) + np.power(
+                    wavelets_i[train_start:train_stop, x, y, :, :, :], 2))
 
-            wc_tensor_plot = torch.as_tensor(wc.reshape(n_min * frames_per_minute, -1).T, device='cuda', dtype=torch.float32)
+            plot_frames = wc.shape[0]
+            wc_tensor_plot = torch.as_tensor(wc.reshape(plot_frames, -1).T, device=compute_device, dtype=torch.float32)
             
             cc_f_1_xy = torch.corrcoef(torch.cat((wc_tensor_plot, spks_tensor), dim=0)).cpu().numpy()[-1:, :-1]
             if cc_f_1_xy.size == nx_full * ny_full:
@@ -3288,8 +3201,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         dphi[nans] = np.interp(dx(nans), dx(~nans), dphi[~nans])
 
         # Vectorized polar coordinate calculation (100x faster, zero unnecessary RAM)
-        rho_inhib = np.hypot(w_r.flatten(), w_i.flatten())
-        phi_inhib = np.arctan2(w_i.flatten(), w_r.flatten())
+        rho_inhib = np.hypot(w_r_inhib.flatten(), w_i_inhib.flatten())
+        phi_inhib = np.arctan2(w_i_inhib.flatten(), w_r_inhib.flatten())
         phi_inhib = np.unwrap(phi_inhib)
         dphi_inhib = np.diff(np.unwrap(phi_inhib), prepend=0) * hz
         dphi_inhib = np.clip(dphi_inhib, -2 * np.pi, 2 * np.pi)

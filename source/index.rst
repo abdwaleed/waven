@@ -15,6 +15,7 @@ Table of Contents
    :caption: Contents:
 
    quickstart
+   methods_transparency
    installation
    faq
 

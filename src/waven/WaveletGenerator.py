@@ -283,6 +283,7 @@ def downsample_video_binary(
     shape=(54, 135),
     chunk_size: Optional[int] = None,
     ratios=(1, 1),
+    save_path=None,
 ):
     """Downsample a binary stimulus movie to the analysis grid via disk streaming.
 
@@ -320,7 +321,8 @@ def downsample_video_binary(
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Reset video
     
     # Pre-allocate output directly on disk to save RAM
-    save_path = path[:-4] + '_downsampled.npy'
+    if save_path is None:
+        save_path = path[:-4] + '_downsampled.npy'
     output_shape = (total_frames, shape[0], shape[1])
     output_mmap = np.lib.format.open_memmap(save_path, mode='w+', dtype=bool, shape=output_shape)
     
@@ -426,6 +428,7 @@ def getWTfromNPY(
     WT_flat,
     s_idx,
     filter_chunk_size: Optional[int] = None,
+    frequency_index: Optional[int] = None,
 ):
     """Project video frames onto one Gabor scale, writing into ``WT_flat``.
 
@@ -446,9 +449,15 @@ def getWTfromNPY(
     video_flat = video_tensor.reshape(num_frames, -1).t()
     spatial_pixels = video_flat.shape[0]
 
-    # Libraries may be 6-D (with frequency) or 5-D (legacy); default to f_idx=0.
     if waveletLibrary.ndim == 6:
-        lib_phase = waveletLibrary[:, :, :, 0, phase, :]
+        if frequency_index is None:
+            raise ValueError(
+                "This Gabor slice still has an independent frequency axis. "
+                "Pass frequency_index explicitly, or use the coupled coarse "
+                "library for coarse RF decomposition. Refusing to silently "
+                "use frequency index 0."
+            )
+        lib_phase = waveletLibrary[:, :, :, int(frequency_index), phase, :]
     else:
         lib_phase = waveletLibrary[:, :, :, phase, :]
 
@@ -499,6 +508,13 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path):
 
     print(f"Loading Gabor library from {library_path} (mmap_mode='r')...", end="\n\n")
     L = load_array(library_path, mmap_mode='r')
+    if L.ndim >= 7:
+        raise ValueError(
+            "waveletDecomposition is the coarse RF path and expects a coupled "
+            "coarse library without an independent frequency axis. Build/use "
+            "the Coarse Library for coarse RF analysis, and reserve the Fine "
+            "Library for waveletDecompositionFull."
+        )
     
     prefix_shape = L.shape[:3]  # (lx, ly, thetas)
     num_filters = int(np.prod(prefix_shape))

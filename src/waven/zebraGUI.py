@@ -19,7 +19,6 @@ import threading
 import time
 import sys
 import gc
-from . import LoadPinkNoise as lpn
 import traceback
 import customtkinter as ctk
 
@@ -42,17 +41,79 @@ from .config import (
     coarse_grid_dimensions,
     parse_literal,
 )
-from .WaveletGenerator import *
-from .LoadPinkNoise import *
-from .Analysis_Utils import *
-from .performance import video_downsample_chunk_size
-from .pipeline import smooth_best_positions
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-import matplotlib.pyplot as plt
 import numpy as np
-import zarr
-from numcodecs import Blosc
-from .wavelet_io import convert_npy_to_zarr
+
+_ANALYSIS_IMPORTS_READY = False
+_PLOT_IMPORTS_READY = False
+plt = None
+FigureCanvasTkAgg = None
+NavigationToolbar2Tk = None
+
+
+def _ensure_plot_imports():
+    global _PLOT_IMPORTS_READY, plt, FigureCanvasTkAgg, NavigationToolbar2Tk
+    if _PLOT_IMPORTS_READY:
+        return
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as _FigureCanvasTkAgg
+    from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk as _NavigationToolbar2Tk
+    import matplotlib.pyplot as _plt
+
+    FigureCanvasTkAgg = _FigureCanvasTkAgg
+    NavigationToolbar2Tk = _NavigationToolbar2Tk
+    plt = _plt
+    _PLOT_IMPORTS_READY = True
+
+
+def _ensure_analysis_imports(label="analysis"):
+    global _ANALYSIS_IMPORTS_READY
+    global lpn, makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
+    global downsample_video_binary, waveletDecomposition, waveletDecompositionFull
+    global LoadData, compute_skewness_neurons, PearsonCorrelationPinkNoise, PlotTuningCurve
+    global run_Model, run_Full_Model, video_downsample_chunk_size, smooth_best_positions
+    global zarr, convert_npy_to_zarr
+    if _ANALYSIS_IMPORTS_READY:
+        return
+    _ensure_plot_imports()
+    import zarr as _zarr
+    from . import LoadPinkNoise as _lpn
+    from .WaveletGenerator import (
+        makeFilterLibrary as _makeFilterLibrary,
+        makeFilterLibrary2 as _makeFilterLibrary2,
+        makeGaborFilter as _makeGaborFilter,
+        downsample_video_binary as _downsample_video_binary,
+        waveletDecomposition as _waveletDecomposition,
+        waveletDecompositionFull as _waveletDecompositionFull,
+    )
+    from .LoadPinkNoise import LoadData as _LoadData
+    from .Analysis_Utils import (
+        compute_skewness_neurons as _compute_skewness_neurons,
+        PearsonCorrelationPinkNoise as _PearsonCorrelationPinkNoise,
+        PlotTuningCurve as _PlotTuningCurve,
+        run_Model as _run_Model,
+        run_Full_Model as _run_Full_Model,
+    )
+    from .performance import video_downsample_chunk_size as _video_downsample_chunk_size
+    from .pipeline import smooth_best_positions as _smooth_best_positions
+    from .wavelet_io import convert_npy_to_zarr as _convert_npy_to_zarr
+
+    lpn = _lpn
+    makeFilterLibrary = _makeFilterLibrary
+    makeFilterLibrary2 = _makeFilterLibrary2
+    makeGaborFilter = _makeGaborFilter
+    downsample_video_binary = _downsample_video_binary
+    waveletDecomposition = _waveletDecomposition
+    waveletDecompositionFull = _waveletDecompositionFull
+    LoadData = _LoadData
+    compute_skewness_neurons = _compute_skewness_neurons
+    PearsonCorrelationPinkNoise = _PearsonCorrelationPinkNoise
+    PlotTuningCurve = _PlotTuningCurve
+    run_Model = _run_Model
+    run_Full_Model = _run_Full_Model
+    video_downsample_chunk_size = _video_downsample_chunk_size
+    smooth_best_positions = _smooth_best_positions
+    zarr = _zarr
+    convert_npy_to_zarr = _convert_npy_to_zarr
+    _ANALYSIS_IMPORTS_READY = True
 
 
 class ToolTip(object):
@@ -148,91 +209,55 @@ def _zarr_output_path(path):
     return (stem if ext else path) + ".zarr"
 
 
-def _estimate_blosc_bytes(raw_bytes, sample):
-    if raw_bytes <= 0:
-        return 0
-    arr = np.ascontiguousarray(sample)
-    if arr.nbytes == 0:
-        return raw_bytes
-    try:
-        compressor = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
-        encoded = compressor.encode(arr)
-        ratio = max(len(encoded) / arr.nbytes, 0.02)
-        return int(raw_bytes * ratio)
-    except Exception:
-        return int(raw_bytes * 0.75)
-
-
 def _safe_name(value):
     return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in str(value)).strip("_") or "plot"
 
 
-def _prompt_workflow() -> str:
-    """Ask the user to choose a data workflow before opening the main GUI."""
-    ctk.set_appearance_mode("light")
-    ctk.set_default_color_theme("blue")
-    prompt_root = ctk.CTk()
-    prompt_root.withdraw()
-    dialog = ctk.CTkToplevel(prompt_root)
-    dialog.title("Select Data Workflow")
-    dialog.geometry("420x180")
-    dialog.resizable(False, False)
-    dialog.configure(fg_color="#F3F6F8")
-    dialog.transient(prompt_root)
+def _default_gabor_library_path(path_value, suffix):
+    base = Path(str(path_value or "gabors_library.npy")).expanduser()
+    if base.suffix:
+        return str(base.with_name(f"{base.stem}{suffix}{base.suffix}"))
+    return str(base.with_name(f"{base.name}{suffix}.npy"))
 
-    choice = {"workflow": None}
 
-    ctk.CTkLabel(
-        dialog,
-        text="Which neural data type are you analyzing?",
-        text_color="#1F2937",
-        font=ctk.CTkFont(size=14, weight="bold"),
-    ).pack(pady=(24, 12))
+def _normalise_gabor_params(gabor_param):
+    normalised = dict(gabor_param or {})
+    legacy_path = normalised.get("Save Path", "gabors_library.npy")
+    normalised.setdefault(
+        "Coarse Library Path",
+        _default_gabor_library_path(legacy_path, "_coarse"),
+    )
+    normalised.setdefault(
+        "Fine Library Path",
+        _default_gabor_library_path(legacy_path, "_fine"),
+    )
+    return normalised
 
-    button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-    button_frame.pack(pady=8)
 
-    def select(workflow):
-        choice["workflow"] = workflow
-        dialog.destroy()
-
-    ctk.CTkButton(
-        button_frame,
-        text="Two-Photon (2p)",
-        width=150,
-        height=34,
-        corner_radius=6,
-        command=lambda: select(WORKFLOW_2P),
-    ).pack(side=tk.LEFT, padx=8)
-    ctk.CTkButton(
-        button_frame,
-        text="Electrophysiology (Ephys)",
-        width=185,
-        height=34,
-        corner_radius=6,
-        fg_color="#374151",
-        hover_color="#111827",
-        command=lambda: select(WORKFLOW_EPHYS),
-    ).pack(side=tk.LEFT, padx=8)
-
-    dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
-    dialog.grab_set()
-    prompt_root.wait_window(dialog)
-    prompt_root.destroy()
-
-    if choice["workflow"] is None:
-        raise SystemExit(0)
-    return choice["workflow"]
+def _ordered_float_union(*sequences):
+    values = []
+    seen = set()
+    for sequence in sequences:
+        if sequence is None:
+            continue
+        for item in sequence:
+            value = float(item)
+            key = repr(value)
+            if key not in seen:
+                seen.add(key)
+                values.append(value)
+    return values
 
 
 def select_workflow() -> str:
-    """Public launch-time workflow selector used by script entry points."""
-    return _prompt_workflow()
+    """Return the default GUI workflow for backward-compatible callers."""
+    return WORKFLOW_2P
 
 
 def run(param_defaults, gabor_param, workflow=None):
-    if workflow is None:
-        workflow = _prompt_workflow()
+    if workflow not in (WORKFLOW_2P, WORKFLOW_EPHYS):
+        workflow = WORKFLOW_2P
+    gabor_param = _normalise_gabor_params(gabor_param)
 
     GABOR_LABELS = {
         "N_thetas": "Orientation Count",
@@ -241,7 +266,9 @@ def run(param_defaults, gabor_param, workflow=None):
         "Phases": "Phases (degrees)",
         "NX": "Stimulus Width (px)",
         "NY": "Stimulus Height (px)",
-        "Save Path": "Gabor Library Output",
+        "Save Path": "Legacy/Default Library Output",
+        "Coarse Library Path": "Coarse Library Output",
+        "Fine Library Path": "Fine Library Output",
     }
 
     ANALYSIS_LABELS = {
@@ -266,25 +293,31 @@ def run(param_defaults, gabor_param, workflow=None):
         "Number of Trials to Keep": "Trials to Retain",
         "Movie Path": "Stimulus Movie (.mp4)",
         "Library Path": "Gabor Library Path",
+        "Coarse Library Path": "Coarse Gabor Library Path",
+        "Fine Library Path": "Fine Gabor Library Path",
         "Spks Path": "Pre-aligned Spikes (.npy, optional)",
         "Full Model Wavelet Path": "Full-Model Wavelet Store",
         "Full Model Save Path": "Full-Model Results Directory",
         "Plot Cache Path": "Plot Cache File",
         "Recovery Cache Directory": "Recovery Checkpoint Directory",
+        "Train Trial Indices": "Train Trials",
+        "Test Trial Indices": "Test Trials",
+        "Use Last Minute Holdout": "Last-Minute Holdout",
         "Neuron ID": "Neuron Index",
     }
 
-    workflow_param_keys = AnalysisConfig.gui_param_keys(workflow)
-    merged_param_defaults = dict(DEFAULT_COMMON_PARAMS)
-    if workflow == WORKFLOW_2P:
-        merged_param_defaults.update(DEFAULT_TWO_PHOTON_PARAMS)
-    else:
-        merged_param_defaults.update(DEFAULT_EPHYS_PARAMS)
-    merged_param_defaults.update(param_defaults)
-    filtered_param_defaults = {
-        key: merged_param_defaults.get(key, "")
-        for key in workflow_param_keys
-    }
+    def workflow_display_name(value):
+        return "Two-Photon" if value == WORKFLOW_2P else "Electrophysiology"
+
+    def workflow_defaults(value):
+        keys = AnalysisConfig.gui_param_keys(value)
+        merged = dict(DEFAULT_COMMON_PARAMS)
+        if value == WORKFLOW_2P:
+            merged.update(DEFAULT_TWO_PHOTON_PARAMS)
+        else:
+            merged.update(DEFAULT_EPHYS_PARAMS)
+        merged.update(param_defaults)
+        return keys, {key: merged.get(key, "") for key in keys}
 
     FIELD_LABELS = {**GABOR_LABELS, **ANALYSIS_LABELS}
 
@@ -292,6 +325,8 @@ def run(param_defaults, gabor_param, workflow=None):
         "Save Path": "savefile",
         "Movie Path": "file",
         "Library Path": "file",
+        "Coarse Library Path": "file",
+        "Fine Library Path": "file",
         "Spks Path": "file",
         "Path Directory": "dir",
         "Dir": "dir",
@@ -916,6 +951,7 @@ def run(param_defaults, gabor_param, workflow=None):
 
     def _render_figure_records(records, message="Loaded plots from cache.", clear=True):
         def render():
+            _ensure_plot_imports()
             if clear:
                 clear_plot_tab(frame_plot_all)
                 clear_plot_tab(frame_plot_individual)
@@ -1026,14 +1062,50 @@ def run(param_defaults, gabor_param, workflow=None):
         else:
             print(f"Kept recovery checkpoint after failure: {task_dir}")
 
-    def create_gabor():
+    def _library_output_path(kind, base_path):
+        path = gabor_entries.get(f"{kind.title()} Library Path")
+        if path is not None and path.get().strip():
+            return path.get().strip()
+        root, ext = os.path.splitext(base_path)
+        return f"{root}_{kind}{ext or '.npy'}"
+
+    def _save_library_array(library, path_save, description):
+        update_progress(70, f"Saving {description}", "Writing output file")
+        os.makedirs(os.path.dirname(path_save) or ".", exist_ok=True)
+        if gabor_format_var.get() == "zarr":
+            output_path = os.path.splitext(path_save)[0] + ".zarr"
+            print(f"Saving {description} into Zarr container: {output_path}")
+            zarr.save(output_path, library)
+        else:
+            output_path = path_save
+            np.save(output_path, library)
+            print(f"{description} saved to: {output_path}")
+        return output_path
+
+    def create_gabor(kind="fine"):
+        _ensure_analysis_imports("Gabor library construction")
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
-        nx = int(gabor_entries["NX"].get())
-        ny = int(gabor_entries["NY"].get())
+        full_nx = int(gabor_entries["NX"].get())
+        full_ny = int(gabor_entries["NY"].get())
         n_theta = int(gabor_entries["N_thetas"].get())
         offsets = parse_literal(gabor_entries["Phases"].get(), "Phases")
         path_save = gabor_entries["Save Path"].get()
+        kind = kind.lower()
+        if kind not in {"coarse", "fine"}:
+            raise ValueError(f"Unknown Gabor library kind: {kind}")
+        if kind == "coarse":
+            nx, ny = coarse_grid_dimensions(full_nx, full_ny)
+            path_save = _library_output_path("coarse", path_save)
+            description = f"coarse coupled Gabor library ({nx} x {ny})"
+        else:
+            nx, ny = full_nx, full_ny
+            sigmas = _ordered_float_union(
+                sigmas,
+                parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
+            )
+            path_save = _library_output_path("fine", path_save)
+            description = f"fine independent-frequency Gabor library ({nx} x {ny})"
         xs = np.arange(nx)
         ys = np.arange(ny)
         thetas = np.array([(i * np.pi) / n_theta for i in range(n_theta)])
@@ -1041,30 +1113,30 @@ def run(param_defaults, gabor_param, workflow=None):
         offsets = np.array(offsets)
         frequencies = np.array(frequencies)
 
-        update_progress(5, "Building Gabor library", "Estimating filter bank")
-        if frequencies.size and np.any(frequencies != 0):
+        update_progress(5, f"Building {description}", "Estimating filter bank")
+        if kind == "fine" and frequencies.size and np.any(frequencies != 0):
             L = makeFilterLibrary2(xs, ys, thetas, sigmas, offsets, frequencies)
         else:
             frequency = frequencies[0] if frequencies.size else 0
             L = makeFilterLibrary(xs, ys, thetas, sigmas, offsets, frequency, freq=False)
 
-        update_progress(70, "Saving library", "Writing output file")
-        os.makedirs(os.path.dirname(path_save) or ".", exist_ok=True)
-        if gabor_format_var.get() == "zarr":
-            output_path = os.path.splitext(path_save)[0] + ".zarr"
-            print(f"Saving Gabor library into Zarr container: {output_path}")
-            zarr.save(output_path, L)
-        else:
-            output_path = path_save
-            np.save(output_path, L)
-            print(f"Gabor library saved to: {output_path}")
-        if "Library Path" in param_entries:
+        output_path = _save_library_array(L, path_save, description)
+        entry_key = "Coarse Library Path" if kind == "coarse" else "Fine Library Path"
+        if entry_key in gabor_entries:
+            gabor_entries[entry_key].delete(0, tk.END)
+            gabor_entries[entry_key].insert(0, output_path)
+        if kind == "fine" and "Library Path" in param_entries:
             param_entries["Library Path"].delete(0, tk.END)
             param_entries["Library Path"].insert(0, output_path)
             refresh_size_estimates()
-        update_progress(100, "Gabor library complete")
+        update_progress(100, f"{description} complete")
+
+    def create_both_gabor_libraries():
+        create_gabor("coarse")
+        create_gabor("fine")
 
     def run_wavelet():
+        _ensure_analysis_imports("stimulus wavelet generation")
         movpath = param_entries["Movie Path"].get().strip()
         if not movpath:
             print("Error: Movie Path is required.")
@@ -1079,24 +1151,43 @@ def run(param_defaults, gabor_param, workflow=None):
 
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
-        lib_path = param_entries["Library Path"].get()
+        fine_library_sigmas = _ordered_float_union(
+            sigmas,
+            parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
+        )
+        legacy_lib_path = param_entries["Library Path"].get()
+        coarse_lib_path = gabor_entries.get("Coarse Library Path")
+        fine_lib_path = gabor_entries.get("Fine Library Path")
+        coarse_lib_path = coarse_lib_path.get().strip() if coarse_lib_path else ""
+        fine_lib_path = fine_lib_path.get().strip() if fine_lib_path else ""
+        if not coarse_lib_path:
+            coarse_lib_path = legacy_lib_path
+        if not fine_lib_path:
+            fine_lib_path = legacy_lib_path
+        if not coarse_lib_path:
+            raise ValueError("Coarse Library Path is required. Click Build Coarse Library first.")
+        if not fine_lib_path:
+            raise ValueError("Fine Library Path is required. Click Build Fine Library first.")
         nx = int(param_entries["NX"].get())
         ny = int(param_entries["NY"].get())
         n_thetas = int(gabor_entries["N_thetas"].get())
+        coarse_nx, coarse_ny = coarse_grid_dimensions(nx, ny)
+        full_downsample_path = movpath[:-4] + '_downsampled.npy'
+        coarse_downsample_path = movpath[:-4] + '_coarse_downsampled.npy'
 
         coarse_cache_present = os.path.exists(
             os.path.join(wavelet_folder, "dwt_downsampled_videodata.npy")
         )
-        highres_present = (
+        coarse_phase_present = (
             os.path.exists(os.path.join(wavelet_folder, "dwt_videodata_0.npy"))
             and os.path.exists(os.path.join(wavelet_folder, "dwt_videodata_1.npy"))
         )
         if coarse_cache_present:
             print(f"Found existing coarse RF wavelet output in {wavelet_folder}. Reusing it.")
-        elif highres_present:
-            print(f"Found existing high-resolution wavelets in {wavelet_folder}. Skipping decomposition.")
+        elif coarse_phase_present:
+            print(f"Found existing coarse phase wavelets in {wavelet_folder}. Skipping coarse decomposition.")
         else:
-            print("Step 1/2: Downsampling stimulus movie and real phase decomposition...")
+            print("Step 1/2: Downsampling stimulus movie for coarse RF and real phase decomposition...")
             _write_recovery_step("wavelet_downsampling_started", wavelet_folder=wavelet_folder)
             visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
             analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
@@ -1113,20 +1204,20 @@ def run(param_defaults, gabor_param, workflow=None):
                 movpath,
                 visual_coverage,
                 analysis_coverage,
-                shape=(ny, nx),
+                shape=(coarse_ny, coarse_nx),
                 chunk_size=video_downsample_chunk_size(),
                 ratios=(ratio_x, ratio_y),
+                save_path=coarse_downsample_path,
             )
-            videodata = np.load(movpath[:-4] + '_downsampled.npy')
+            videodata = np.load(coarse_downsample_path)
             videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
 
-            waveletDecomposition(videodata, 0, sigmas, wavelet_folder, lib_path)
+            waveletDecomposition(videodata, 0, sigmas, wavelet_folder, coarse_lib_path)
             _write_recovery_step("coarse_phase_real_complete", path=os.path.join(wavelet_folder, "dwt_videodata_0.npy"))
             print("Step 2/2: Wavelet decomposition (imaginary phase)...")
-            waveletDecomposition(videodata, 1, sigmas, wavelet_folder, lib_path)
+            waveletDecomposition(videodata, 1, sigmas, wavelet_folder, coarse_lib_path)
             _write_recovery_step("coarse_phase_imaginary_complete", path=os.path.join(wavelet_folder, "dwt_videodata_1.npy"))
 
-        coarse_nx, coarse_ny = coarse_grid_dimensions(nx, ny)
         print(
             f"Coarse RF grid derived from config: {coarse_nx} x {coarse_ny} "
             f"(20% of {nx} x {ny})"
@@ -1148,8 +1239,8 @@ def run(param_defaults, gabor_param, workflow=None):
         lpn.coarseWavelet(
             wavelet_folder,
             False,
-            nx0=nx,
-            ny0=ny,
+            nx0=coarse_nx,
+            ny0=coarse_ny,
             no=n_thetas,
             ns=len(sigmas),
             nf=1,
@@ -1184,7 +1275,26 @@ def run(param_defaults, gabor_param, workflow=None):
             "Sigmas Full Model",
         )
         print("Step 4: Generating full-resolution wavelets for run_Full_Model...")
-        videodata = np.load(movpath[:-4] + '_downsampled.npy')
+        if not os.path.exists(full_downsample_path):
+            visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
+            analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
+            if visual_coverage != analysis_coverage:
+                visual_coverage_arr = np.array(visual_coverage)
+                analysis_coverage_arr = np.array(analysis_coverage)
+                ratio_x = 1 - ((visual_coverage_arr[0] - visual_coverage_arr[1]) - (analysis_coverage_arr[0] - analysis_coverage_arr[1])) / (visual_coverage_arr[0] - visual_coverage_arr[1])
+                ratio_y = 1 - ((visual_coverage_arr[2] - visual_coverage_arr[3]) - (analysis_coverage_arr[2] - analysis_coverage_arr[3])) / (visual_coverage_arr[2] - visual_coverage_arr[3])
+            else:
+                ratio_x = ratio_y = 1
+            downsample_video_binary(
+                movpath,
+                visual_coverage,
+                analysis_coverage,
+                shape=(ny, nx),
+                chunk_size=video_downsample_chunk_size(),
+                ratios=(ratio_x, ratio_y),
+                save_path=full_downsample_path,
+            )
+        videodata = np.load(full_downsample_path)
         videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
         for phase in (0, 1):
             suffix = "_r" if phase == 0 else "_i"
@@ -1198,8 +1308,8 @@ def run(param_defaults, gabor_param, workflow=None):
                 sigmas_full,
                 frequencies,
                 full_output,
-                lib_path,
-                library_sigmas=sigmas,
+                fine_lib_path,
+                library_sigmas=fine_library_sigmas,
             )
             _write_recovery_step(f"full_model_phase_{phase}_complete", path=target)
 
@@ -1228,6 +1338,7 @@ def run(param_defaults, gabor_param, workflow=None):
     
     def embed_interactive_figure(fig, parent_container, title=None):
         """Embed a matplotlib figure with navigation toolbar in ``parent_container``."""
+        _ensure_plot_imports()
         section = ctk.CTkFrame(parent_container, corner_radius=8, fg_color="#FFFFFF")
         section.pack(side=tk.TOP, fill=tk.BOTH, expand=False, pady=8, padx=8)
         graph_title = title or _figure_title(fig)
@@ -1330,6 +1441,7 @@ def run(param_defaults, gabor_param, workflow=None):
             embed_interactive_figure(fig, parent, f"{title_prefix} {index}")
 
     def capture_new_figures(callback):
+        _ensure_plot_imports()
         before = set(plt.get_fignums())
         result = callback()
         after = set(plt.get_fignums())
@@ -1343,6 +1455,7 @@ def run(param_defaults, gabor_param, workflow=None):
         return path + os.sep
     
     def plot_data():
+        _ensure_analysis_imports("coarse RF analysis")
         rf_extra = {
             "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
             "show_sem_errorbars": _sem_enabled(),
@@ -1739,6 +1852,72 @@ def run(param_defaults, gabor_param, workflow=None):
             raise ValueError(f"Neuron ID {neuron_id} is outside the loaded range.")
         return neuron_id
 
+    def _parse_bool_entry(value, label):
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", ""}:
+            return False
+        raise ValueError(f"{label} must be True or False.")
+
+    def _parse_trial_indices_entry(value, n_trials, label, train_indices=None):
+        text = str(value).strip()
+        if text.lower() in {"", "auto"}:
+            if train_indices is None:
+                defaults = [0, 2]
+                indices = [idx for idx in defaults if idx < n_trials]
+                return indices or [0]
+            train_set = set(int(idx) for idx in train_indices)
+            indices = [idx for idx in range(n_trials) if idx not in train_set]
+            if not indices:
+                raise ValueError(
+                    "Automatic test trial selection found no held-out trials. "
+                    "Use fewer training trials or enter explicit Test Trial Indices."
+                )
+            return indices
+        parsed = parse_literal(text, label)
+        if isinstance(parsed, int):
+            parsed = [parsed]
+        if not isinstance(parsed, (list, tuple)):
+            raise ValueError(f"{label} must be a list of trial indices or 'auto'.")
+        indices = [int(idx) for idx in parsed]
+        if not indices:
+            raise ValueError(f"{label} cannot be empty.")
+        invalid = [idx for idx in indices if idx < 0 or idx >= n_trials]
+        if invalid:
+            raise ValueError(
+                f"{label} contains out-of-range trial index/indices {invalid}; "
+                f"available trials are 0 through {n_trials - 1}."
+            )
+        return indices
+
+    def _model_split_settings(state):
+        n_trials = int(state["spks"].shape[0])
+        if n_trials < 2:
+            raise ValueError("Model cross-validation requires at least two trials.")
+        train_idx = _parse_trial_indices_entry(
+            param_entries["Train Trial Indices"].get(),
+            n_trials,
+            "Train Trial Indices",
+        )
+        test_idx = _parse_trial_indices_entry(
+            param_entries["Test Trial Indices"].get(),
+            n_trials,
+            "Test Trial Indices",
+            train_indices=train_idx,
+        )
+        overlap = sorted(set(train_idx) & set(test_idx))
+        if overlap:
+            raise ValueError(f"Train and test trial indices overlap: {overlap}")
+        return {
+            "train_idx": train_idx,
+            "test_idx": test_idx,
+            "lastmin": _parse_bool_entry(
+                param_entries["Use Last Minute Holdout"].get(),
+                "Use Last Minute Holdout",
+            ),
+        }
+
     def _require_rf_state():
         if not analysis_state:
             raise RuntimeError("Run Coarse RF Analysis before model plotting.")
@@ -1751,9 +1930,16 @@ def run(param_defaults, gabor_param, workflow=None):
         root.after(0, render)
 
     def plot_run_model_outputs():
+        _ensure_analysis_imports("run_Model plot capture")
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
-        cache_extra = {"model": "run_Model", "neuron": neuron_id, "show_sem_errorbars": _sem_enabled()}
+        split_settings = _model_split_settings(state)
+        cache_extra = {
+            "model": "run_Model",
+            "neuron": neuron_id,
+            "show_sem_errorbars": _sem_enabled(),
+            **split_settings,
+        }
         cached = _get_cached_entry("run_model", neuron_id=neuron_id, extra=cache_extra)
         if cached:
             _render_figure_records(
@@ -1787,6 +1973,9 @@ def run(param_defaults, gabor_param, workflow=None):
                 dt1=dt1,
                 n_min=5,
                 double_wavelet_model=False,
+                train_idx=split_settings["train_idx"],
+                test_idx=split_settings["test_idx"],
+                lastmin=split_settings["lastmin"],
                 plotting=True,
                 frames_per_minute=frames_per_minute,
                 show_sem_errorbars=_sem_enabled(),
@@ -1811,9 +2000,16 @@ def run(param_defaults, gabor_param, workflow=None):
         _append_model_figures(figures, f"run_Model neuron {neuron_id}")
 
     def plot_run_full_model_outputs():
+        _ensure_analysis_imports("run_Full_Model plot capture")
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
-        cache_extra = {"model": "run_Full_Model", "neuron": neuron_id, "show_sem_errorbars": _sem_enabled()}
+        split_settings = _model_split_settings(state)
+        cache_extra = {
+            "model": "run_Full_Model",
+            "neuron": neuron_id,
+            "show_sem_errorbars": _sem_enabled(),
+            **split_settings,
+        }
         cached = _get_cached_entry("run_full_model", neuron_id=neuron_id, extra=cache_extra)
         if cached:
             _render_figure_records(
@@ -1850,10 +2046,10 @@ def run(param_defaults, gabor_param, workflow=None):
                 n_min=5,
                 tt=[0, min(state["nb_frames"], state["spks"].shape[1])],
                 memmapping=True,
-                train_idx=[0, 2],
-                test_idx=[1, 3],
+                train_idx=split_settings["train_idx"],
+                test_idx=split_settings["test_idx"],
                 double_wavelet_model=False,
-                lastmin=False,
+                lastmin=split_settings["lastmin"],
                 plotting=True,
                 frames_per_minute=frames_per_minute,
                 hz=int(param_entries["Hz"].get()),
@@ -1972,15 +2168,17 @@ def run(param_defaults, gabor_param, workflow=None):
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 state = json.load(handle)
-            if state.get("workflow") and state["workflow"] != workflow:
-                print(
-                    f"Warning: loaded workflow {state['workflow']} does not match current workflow {workflow}."
-                )
+            loaded_workflow = state.get("workflow")
+            if loaded_workflow in (WORKFLOW_2P, WORKFLOW_EPHYS) and loaded_workflow != workflow:
+                workflow_var.set(loaded_workflow)
+                set_workflow_from_panel(loaded_workflow)
             for key, value in state.get("gabor", {}).items():
                 if key in gabor_entries:
                     gabor_entries[key].delete(0, tk.END)
                     gabor_entries[key].insert(0, str(value))
-            for key, value in state.get("analysis", {}).items():
+            analysis_values = state.get("analysis", {})
+            render_parameter_fields(preserve_values=True, loaded_values=analysis_values)
+            for key, value in analysis_values.items():
                 if key in param_entries:
                     param_entries[key].delete(0, tk.END)
                     param_entries[key].insert(0, str(value))
@@ -2039,18 +2237,7 @@ def run(param_defaults, gabor_param, workflow=None):
             else:
                 num_f = 1
                 ndim_label = "single-frequency bank"
-            sample = makeGaborFilter(
-                0,
-                0,
-                0,
-                sigmas[0] if sigmas.size else 1,
-                offsets[0] if offsets.size else 0,
-                frequencies[0] if frequencies.size else 0,
-                lx=nx,
-                ly=ny,
-                freq=True,
-            ).astype(np.float16, copy=False).ravel()
-            flat_size = sample.size
+            flat_size = nx * ny
             total_bytes = nx * ny * n_theta * max(1, len(sigmas)) * num_f * max(1, len(offsets)) * flat_size * np.dtype(np.float16).itemsize
             if gabor_format_var.get() == "zarr":
                 zarr_path = _zarr_output_path(gabor_entries["Save Path"].get())
@@ -2058,7 +2245,7 @@ def run(param_defaults, gabor_param, workflow=None):
                 if exact_bytes is not None:
                     gabor_size_label.configure(text=f"Current Zarr size: {_format_bytes(exact_bytes)}")
                 else:
-                    zarr_bytes = _estimate_blosc_bytes(total_bytes, sample)
+                    zarr_bytes = int(total_bytes * 0.75)
                     gabor_size_label.configure(
                         text=f"Estimated Zarr disk size: {_format_bytes(zarr_bytes)} ({ndim_label})"
                     )
@@ -2086,7 +2273,7 @@ def run(param_defaults, gabor_param, workflow=None):
             n_frequencies = len(frequencies)
             coarse_nx, coarse_ny = coarse_grid_dimensions(nx, ny)
             bytes_per_float = np.dtype(np.float32).itemsize
-            highres_coarse_bytes = 2 * n_frames * nx * ny * n_thetas * n_sigmas * bytes_per_float
+            coarse_phase_bytes = 2 * n_frames * coarse_nx * coarse_ny * n_thetas * n_sigmas * bytes_per_float
             coarse_cache_bytes = 3 * n_frames * coarse_nx * coarse_ny * n_thetas * n_sigmas * bytes_per_float
             full_model_raw_bytes = 2 * n_frames * nx * ny * n_thetas * n_sigmas_full * n_frequencies * bytes_per_float
             if wavelet_format_var.get() == "zarr":
@@ -2101,14 +2288,13 @@ def run(param_defaults, gabor_param, workflow=None):
                     full_model_bytes = exact_i + exact_r
                     label = "Current wavelet disk usage"
                 else:
-                    sample = np.sin(np.linspace(0, 8 * np.pi, 20000, dtype=np.float32))
-                    full_model_bytes = _estimate_blosc_bytes(full_model_raw_bytes, sample)
+                    full_model_bytes = int(full_model_raw_bytes * 0.75)
                     label = "Estimated wavelet disk usage"
                 total_bytes = coarse_cache_bytes + full_model_bytes
                 wavelet_size_label.configure(
                     text=(
                         f"{label}: {_format_bytes(total_bytes)} "
-                        f"(Zarr full model + coarse RF output; temp recovery peak +{_format_bytes(highres_coarse_bytes)})"
+                        f"(Zarr full model + coarse RF output; temp coarse phases +{_format_bytes(coarse_phase_bytes)})"
                     )
                 )
             else:
@@ -2116,7 +2302,7 @@ def run(param_defaults, gabor_param, workflow=None):
                 wavelet_size_label.configure(
                     text=(
                         f"Estimated wavelet disk usage: {_format_bytes(total_bytes)} "
-                        f"(NPY final output; temp recovery peak +{_format_bytes(highres_coarse_bytes)})"
+                        f"(NPY final output; temp coarse phases +{_format_bytes(coarse_phase_bytes)})"
                     )
                 )
         except Exception:
@@ -2169,7 +2355,7 @@ def run(param_defaults, gabor_param, workflow=None):
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
-    workflow_label = "Two-Photon" if workflow == WORKFLOW_2P else "Electrophysiology"
+    workflow_label = workflow_display_name(workflow)
     root.title(f"Neuron Analysis Toolkit — {workflow_label}")
 
     def on_closing():
@@ -2182,11 +2368,13 @@ def run(param_defaults, gabor_param, workflow=None):
     root.protocol("WM_DELETE_WINDOW", on_closing)
     
     root.geometry("1600x1000")
+    root.resizable(True, True)
 
     try:
         icon_base64 = ''
-        app_icon = tk.PhotoImage(data=icon_base64)
-        root.iconphoto(True, app_icon)
+        if icon_base64:
+            app_icon = tk.PhotoImage(data=icon_base64)
+            root.iconphoto(True, app_icon)
     except Exception as e:
         print(f"Failed to load custom icon: {e}")
     
@@ -2426,6 +2614,48 @@ def run(param_defaults, gabor_param, workflow=None):
     # --- Session configuration ---
     frame_session = ttk.LabelFrame(frame_left, text="Session Configuration", padding=15)
     frame_session.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10), padx=10)
+
+    workflow_var = tk.StringVar(value=workflow)
+
+    def set_workflow_from_panel(value):
+        nonlocal workflow, workflow_label
+        workflow = value
+        workflow_label = workflow_display_name(workflow)
+        root.title(f"Neuron Analysis Toolkit — {workflow_label}")
+        try:
+            frame_params.configure(text=f"Experiment Configuration ({workflow_label})")
+            render_parameter_fields(preserve_values=True)
+            refresh_size_estimates()
+        except NameError:
+            pass
+
+    workflow_frame = ctk.CTkFrame(frame_session, fg_color="transparent")
+    workflow_frame.pack(fill=tk.X, pady=(0, 8))
+    ctk.CTkLabel(
+        workflow_frame,
+        text="Neural data type",
+        text_color=text_color,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).pack(anchor="w", pady=(0, 4))
+    workflow_segment = ctk.CTkSegmentedButton(
+        workflow_frame,
+        values=[WORKFLOW_2P, WORKFLOW_EPHYS],
+        variable=workflow_var,
+        command=set_workflow_from_panel,
+        height=28,
+        corner_radius=6,
+        border_width=1,
+        fg_color="#E5E7EB",
+        selected_color=primary_btn,
+        selected_hover_color="#1D4ED8",
+        unselected_color="#F3F4F6",
+        unselected_hover_color="#E5E7EB",
+        text_color="#FFFFFF",
+        text_color_disabled="#9CA3AF",
+    )
+    workflow_segment.pack(fill=tk.X)
+    workflow_segment.set(workflow)
+
     btn_load_state = ctk.CTkButton(
         frame_session,
         text="Load Configuration",
@@ -2453,19 +2683,41 @@ def run(param_defaults, gabor_param, workflow=None):
         add_config_row(frame_gabor, label, default, gabor_entries, i, frame_color, GABOR_LABELS)
 
     gabor_format_var = tk.StringVar(value="npy")
-    btn_submit_gabor = ctk.CTkButton(
+    btn_submit_coarse_gabor = ctk.CTkButton(
         frame_gabor,
-        text="Build Gabor Library",
+        text="Build Coarse Library",
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
         hover_color="#1D4ED8",
-        command=run_in_thread(create_gabor, "Gabor library construction"),
+        command=run_in_thread(lambda: create_gabor("coarse"), "Coarse Gabor library construction"),
     )
-    btn_submit_gabor.grid(row=len(gabor_param), column=0, columnspan=2, pady=(15, 0), sticky="ew")
+    btn_submit_coarse_gabor.grid(row=len(gabor_param), column=0, columnspan=2, pady=(15, 0), sticky="ew")
+
+    btn_submit_fine_gabor = ctk.CTkButton(
+        frame_gabor,
+        text="Build Fine Library",
+        height=34,
+        corner_radius=6,
+        fg_color="#374151",
+        hover_color="#111827",
+        command=run_in_thread(lambda: create_gabor("fine"), "Fine Gabor library construction"),
+    )
+    btn_submit_fine_gabor.grid(row=len(gabor_param) + 1, column=0, columnspan=2, pady=(6, 0), sticky="ew")
+
+    btn_submit_both_gabor = ctk.CTkButton(
+        frame_gabor,
+        text="Build Coarse + Fine Libraries",
+        height=34,
+        corner_radius=6,
+        fg_color=success_btn,
+        hover_color="#065F46",
+        command=run_in_thread(create_both_gabor_libraries, "Coarse and fine Gabor library construction"),
+    )
+    btn_submit_both_gabor.grid(row=len(gabor_param) + 2, column=0, columnspan=2, pady=(6, 0), sticky="ew")
 
     format_frame = ctk.CTkFrame(frame_gabor, fg_color="transparent")
-    format_frame.grid(row=len(gabor_param)+1, column=0, columnspan=2, pady=(10, 0), sticky="w")
+    format_frame.grid(row=len(gabor_param)+3, column=0, columnspan=2, pady=(10, 0), sticky="w")
     ctk.CTkLabel(format_frame, text="Library format:", text_color=muted_text).pack(side=tk.LEFT)
 
     def _set_gabor_format(val):
@@ -2505,7 +2757,7 @@ def run(param_defaults, gabor_param, workflow=None):
         background=frame_color,
         foreground=text_color,
     )
-    gabor_size_label.grid(row=len(gabor_param)+2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    gabor_size_label.grid(row=len(gabor_param)+4, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     # --- 2 · Stimulus wavelet pipeline ---
     frame_processing = ttk.LabelFrame(frame_left, text="2 · Stimulus Wavelet Pipeline", padding=15)
@@ -2597,6 +2849,9 @@ def run(param_defaults, gabor_param, workflow=None):
             "Hz",
             "Number of Frames",
             "Number of Trials to Keep",
+            "Train Trial Indices",
+            "Test Trial Indices",
+            "Use Last Minute Holdout",
             "Block End",
         ],
         "Spatial & Wavelet": [
@@ -2613,17 +2868,37 @@ def run(param_defaults, gabor_param, workflow=None):
         ],
     }
 
-    for section_title, section_keys in PARAMETER_GROUPS.items():
-        section_frame = ttk.LabelFrame(frame_params, text=section_title, padding=(10, 8))
-        section_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
-        section_frame.columnconfigure(1, weight=1)
-        section_row = 0
-        for key in section_keys:
-            if key not in workflow_param_keys:
-                continue
-            default = filtered_param_defaults.get(key, "")
-            add_config_row(section_frame, key, default, param_entries, section_row, frame_color, ANALYSIS_LABELS)
-            section_row += 1
+    def render_parameter_fields(preserve_values=False, loaded_values=None):
+        existing_values = {}
+        if preserve_values:
+            existing_values = {
+                key: entry.get()
+                for key, entry in param_entries.items()
+                if key != "Neuron ID"
+            }
+        if loaded_values:
+            existing_values.update({str(key): str(value) for key, value in loaded_values.items()})
+
+        for widget in frame_params.winfo_children():
+            widget.destroy()
+        for key in list(param_entries):
+            if key != "Neuron ID":
+                param_entries.pop(key, None)
+
+        workflow_param_keys, filtered_param_defaults = workflow_defaults(workflow)
+        for section_title, section_keys in PARAMETER_GROUPS.items():
+            section_frame = ttk.LabelFrame(frame_params, text=section_title, padding=(10, 8))
+            section_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+            section_frame.columnconfigure(1, weight=1)
+            section_row = 0
+            for key in section_keys:
+                if key not in workflow_param_keys:
+                    continue
+                default = existing_values.get(key, filtered_param_defaults.get(key, ""))
+                add_config_row(section_frame, key, default, param_entries, section_row, frame_color, ANALYSIS_LABELS)
+                section_row += 1
+
+    render_parameter_fields()
     refresh_size_estimates()
 
     # --- 3 · Neural & RF analysis ---
@@ -2746,7 +3021,9 @@ def run(param_defaults, gabor_param, workflow=None):
     frame_controls.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 5))
 
     all_buttons = [
-        btn_submit_gabor,
+        btn_submit_coarse_gabor,
+        btn_submit_fine_gabor,
+        btn_submit_both_gabor,
         btn_submit_wavelet,
         btn_submit_plot,
         btn_runRF,

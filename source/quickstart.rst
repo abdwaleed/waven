@@ -95,40 +95,34 @@ further documentation can be found here <https://github.com/skriabineSop/waven/t
 
 GUI documentation can be found here <https://docs.google.com/presentation/d/1nEv07CzCwYUoozucwwqi6qgS_t0jBy7KwqHKKoh2f2U/edit?usp=sharing>
 
-3. **To create a new Gabor library**
+3. **To create new coarse and fine Gabor libraries**
 
 .. code-block:: python
 
-	if f!=0:
-	    freq=True
-	else:
-	    freq=False
-	L = wg.makeFilterLibrary(xs, ys, thetas, sigmas, offsets, f, freq=freq)
-	np.save(path_save, L)
-	lib_path=path_save
+	import waven
+
+	config = waven.PipelineConfig.from_json("pipeline_config.json")
+	coarse_library_path = waven.create_coarse_gabor_library(config.gabor)
+	fine_library_path = waven.create_fine_gabor_library(
+	    config.gabor,
+	    extra_sigmas=config.analysis.sigmas_full_model,
+	)
 
 An already made Gabor Library well suited for mice can be found here <>
 
-4. **Downsampling and adjusting the range of visual coverage to your analysis:**
+4. **Preparing coarse RF and full-model wavelets:**
 
 .. code-block:: python
 	
-	if (visual_coverage!=analysis_coverage):
-	    visual_coverage=np.array(visual_coverage)
-	    analysis_coverage=np.array(analysis_coverage)
-	    ratio_x=1-((visual_coverage[0]-visual_coverage[1])-(analysis_coverage[0]-analysis_coverage[1]))/(visual_coverage[0]-visual_coverage[1])
-	    ratio_y=1-((visual_coverage[2]-visual_coverage[3])-(analysis_coverage[2]-analysis_coverage[3]))/(visual_coverage[2]-visual_coverage[3])
-	else:
-	    ratio_x=1
-	    ratio_y=1
-
-	## downsamples and wavelet transforms the stimulus
-	wg.downsample_video_binary(movpath,visual_coverage,  analysis_coverage, shape=(ny, nx), chunk_size=1000, ratios=(ratio_x, ratio_y))
-	path=os.path.dirname(movpath)
-	videodata=np.load(movpath[:-4]+'_downsampled.npy')
-
-	wg.waveletDecomposition(videodata, 0, sigmas, path, lib_path)
-	wg.waveletDecomposition(videodata, 1, sigmas, path, lib_path)
+	coarse_dir = waven.prepare_stimulus_wavelets(
+	    config.analysis,
+	    library_path=coarse_library_path,
+	)
+	full_dir = waven.prepare_full_model_wavelets(
+	    config.analysis,
+	    config.gabor,
+	    library_path=fine_library_path,
+	)
 
 5. **Loading you neural activity and neuron positions :**
 

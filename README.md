@@ -11,6 +11,11 @@ This project provides a Python package designed to analyze neuronal responses in
 **General Documentation and tutorial**<br />
 can be found here <https://waven.readthedocs.io/en/latest/><br />
 
+**Methods transparency guide**<br />
+For a start-to-finish explanation of how the current GUI workflow computes,
+saves, caches, plots, and exports results, see
+`source/methods_transparency.rst`.<br />
+
 
 **Stimulus Generation package**<br />
 check out <https://github.com/mwshinn/zebra_noise><br />
@@ -154,12 +159,17 @@ Here is a quick explanation of each parameter:
 ```
 documentation can be found here <https://docs.google.com/presentation/d/1nEv07CzCwYUoozucwwqi6qgS_t0jBy7KwqHKKoh2f2U/edit?usp=sharing>
 
-3. **To create a new Gabor library**
+3. **To create new Gabor libraries**
 
 ```python
 
-    library_path = create_gabor_library(config.gabor)
-    print(f"Created Gabor library: {library_path}")
+    coarse_library_path = waven.create_coarse_gabor_library(config.gabor)
+    fine_library_path = waven.create_fine_gabor_library(
+        config.gabor,
+        extra_sigmas=config.analysis.sigmas_full_model,
+    )
+    print(f"Created coarse Gabor library: {coarse_library_path}")
+    print(f"Created fine Gabor library: {fine_library_path}")
 ```
 
 An already made Gabor Library well suited for mice can be found on FigShare <https://doi.org/10.5522/04/31295536>
@@ -169,13 +179,18 @@ An already made Gabor Library well suited for mice can be found on FigShare <htt
 ```python
 
 	config = waven.PipelineConfig.from_json(Path('path to pipeline_config.json'))
-	library_path = config.analysis.library_path
 	
-	output_dir = prepare_stimulus_wavelets(
+	coarse_output_dir = waven.prepare_stimulus_wavelets(
         config.analysis,
-        library_path=library_path,
+        library_path=config.gabor.coarse_save_path,
     )
-	print(f"Prepared wavelets in: {output_dir}")
+	full_output_dir = waven.prepare_full_model_wavelets(
+        config.analysis,
+        config.gabor,
+        library_path=config.gabor.fine_save_path,
+    )
+	print(f"Prepared coarse wavelets in: {coarse_output_dir}")
+	print(f"Prepared full-model wavelets in: {full_output_dir}")
 ```
 For more effiscient analysis, we advise to save the resulting library as a zarr folder (check the wavelet_zarr.py script for more details) and to set the parameter "Full Model Wavelet Path" to the path of the zarr folder, this way the wavelet decomposition will be skipped when running the full model.
 
