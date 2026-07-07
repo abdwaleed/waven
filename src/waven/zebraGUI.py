@@ -43,6 +43,17 @@ from .config import (
 )
 import numpy as np
 
+from .gui_support import (
+    ToolTip,
+    _build_size_text,
+    _folder_size_bytes,
+    _format_bytes,
+    _normalise_gabor_params,
+    _ordered_float_union,
+    _parse_data_dir,
+    _safe_name,
+    _zarr_output_path,
+)
 _ANALYSIS_IMPORTS_READY = False
 _GABOR_IMPORTS_READY = False
 _WAVELET_IMPORTS_READY = False
@@ -73,7 +84,7 @@ def _ensure_gabor_imports(label="Gabor library construction"):
     global makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
     if _GABOR_IMPORTS_READY:
         return
-    from .WaveletGenerator import (
+    from .wavelets.filters import (
         makeFilterLibrary as _makeFilterLibrary,
         makeFilterLibrary2 as _makeFilterLibrary2,
         makeGaborFilter as _makeGaborFilter,
@@ -87,12 +98,12 @@ def _ensure_gabor_imports(label="Gabor library construction"):
 
 def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     global _WAVELET_IMPORTS_READY
-    global lpn, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
+    global coarseWavelet, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
     global video_downsample_chunk_size, convert_npy_to_zarr
     if _WAVELET_IMPORTS_READY:
         return
-    from . import LoadPinkNoise as _lpn
-    from .WaveletGenerator import (
+    from .stimulus import coarseWavelet as _coarseWavelet
+    from .wavelets.decomposition import (
         downsample_video_binary as _downsample_video_binary,
         waveletDecomposition as _waveletDecomposition,
         waveletDecompositionFull as _waveletDecompositionFull,
@@ -100,7 +111,7 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     from .performance import video_downsample_chunk_size as _video_downsample_chunk_size
     from .wavelet_io import convert_npy_to_zarr as _convert_npy_to_zarr
 
-    lpn = _lpn
+    coarseWavelet = _coarseWavelet
     downsample_video_binary = _downsample_video_binary
     waveletDecomposition = _waveletDecomposition
     waveletDecompositionFull = _waveletDecompositionFull
@@ -116,11 +127,13 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     if _RF_IMPORTS_READY:
         return
     _ensure_plot_imports()
-    from .Analysis_Utils import (
+    from .analysis.receptive_fields import (
         compute_skewness_neurons as _compute_skewness_neurons,
         PearsonCorrelationPinkNoise as _PearsonCorrelationPinkNoise,
-        PlotTuningCurve as _PlotTuningCurve,
         repetability_trial3 as _repetability_trial3,
+    )
+    from .analysis.nonlinear_models import (
+        PlotTuningCurve as _PlotTuningCurve,
     )
 
     compute_skewness_neurons = _compute_skewness_neurons
@@ -136,7 +149,7 @@ def _ensure_model_imports(label="model plot capture"):
     if _MODEL_IMPORTS_READY:
         return
     _ensure_plot_imports()
-    from .Analysis_Utils import (
+    from .analysis.model_runs import (
         run_Model as _run_Model,
         run_Full_Model as _run_Full_Model,
     )
@@ -158,138 +171,6 @@ def _ensure_analysis_imports(label="analysis"):
     _ensure_model_imports(label)
     _ANALYSIS_IMPORTS_READY = True
 
-
-class ToolTip(object):
-    def __init__(self, widget):
-        self.widget = widget
-        self.tipwindow = None
-        self.id = None
-        self.x = self.y = 0
-        self.widget.bind('<Enter>', self.enter)
-        self.widget.bind('<Leave>', self.leave)
-
-    def enter(self, event=None):
-        self.schedule()
-
-    def leave(self, event=None):
-        self.unschedule()
-        self.hidetip()
-
-    def schedule(self):
-        self.unschedule()
-        self.id = self.widget.after(500, self.showtip)
-
-    def unschedule(self):
-        id = self.id
-        self.id = None
-        if id:
-            self.widget.after_cancel(id)
-
-    def showtip(self, event=None):
-        text = self.widget.get()
-        if not text: return
-        x, y, cx, cy = self.widget.bbox("insert") or (0,0,0,0)
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 20
-        self.tipwindow = tw = tk.Toplevel(self.widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry("+%d+%d" % (x, y))
-        label = tk.Label(tw, text=text, justify=tk.LEFT,
-                      background="#ffffe0", relief=tk.SOLID, borderwidth=1,
-                      font=("Segoe UI Variable Display", "9", "normal"))
-        label.pack(ipadx=1)
-
-    def hidetip(self):
-        tw = self.tipwindow
-        self.tipwindow = None
-        if tw: tw.destroy()
-
-def _parse_data_dir(value):
-    try:
-        parsed = parse_literal(value, "Dir")
-    except ValueError:
-        parsed = value
-    if parsed is None:
-        return []
-    if isinstance(parsed, (list, tuple)):
-        return [str(path) for path in parsed]
-    return [str(parsed)]
-
-
-def _format_bytes(size):
-    if size is None or size < 0:
-        return "0.00 GB"
-    return f"{size / (1024 ** 3):.2f} GB"
-
-
-def _build_size_text(gb_bytes):
-    return _format_bytes(gb_bytes)
-
-
-def _folder_size_bytes(path):
-    total = 0
-    if not path or not os.path.exists(path):
-        return None
-    if os.path.isfile(path):
-        return os.path.getsize(path)
-    for root_dir, _, filenames in os.walk(path):
-        for filename in filenames:
-            file_path = os.path.join(root_dir, filename)
-            try:
-                total += os.path.getsize(file_path)
-            except OSError:
-                pass
-    return total
-
-
-def _zarr_output_path(path):
-    path = str(path).strip()
-    if not path:
-        return path
-    if path.endswith(".zarr"):
-        return path
-    stem, ext = os.path.splitext(path)
-    return (stem if ext else path) + ".zarr"
-
-
-def _safe_name(value):
-    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in str(value)).strip("_") or "plot"
-
-
-def _default_gabor_library_path(path_value, suffix):
-    base = Path(str(path_value or "gabors_library.npy")).expanduser()
-    if base.suffix:
-        return str(base.with_name(f"{base.stem}{suffix}{base.suffix}"))
-    return str(base.with_name(f"{base.name}{suffix}.npy"))
-
-
-def _normalise_gabor_params(gabor_param):
-    normalised = dict(gabor_param or {})
-    legacy_path = normalised.get("Save Path", "gabors_library.npy")
-    normalised.setdefault(
-        "Coarse Library Path",
-        _default_gabor_library_path(legacy_path, "_coarse"),
-    )
-    normalised.setdefault(
-        "Fine Library Path",
-        _default_gabor_library_path(legacy_path, "_fine"),
-    )
-    return normalised
-
-
-def _ordered_float_union(*sequences):
-    values = []
-    seen = set()
-    for sequence in sequences:
-        if sequence is None:
-            continue
-        for item in sequence:
-            value = float(item)
-            key = repr(value)
-            if key not in seen:
-                seen.add(key)
-                values.append(value)
-    return values
 
 
 def select_workflow() -> str:
@@ -1286,7 +1167,7 @@ def run(param_defaults, gabor_param, workflow=None):
             os.makedirs(full_output, exist_ok=True)
 
         print("Step 3: Generating coarse wavelet cache for RF analysis...")
-        lpn.coarseWavelet(
+        coarseWavelet(
             wavelet_folder,
             False,
             nx0=coarse_nx,

@@ -113,10 +113,10 @@ def validate_spike_data(spikes: np.ndarray, neuron_pos: np.ndarray) -> None:
 
 def create_gabor_library(config: GaborConfig) -> Path:
     """Create and save the Gabor filter library described by ``config``."""
-    from . import WaveletGenerator as wg
+    from .wavelets import filters as wf
 
     if config.has_independent_frequencies:
-        filter_library = wg.makeFilterLibrary2(
+        filter_library = wf.makeFilterLibrary2(
             config.x_positions,
             config.y_positions,
             config.theta_radians,
@@ -126,7 +126,7 @@ def create_gabor_library(config: GaborConfig) -> Path:
         )
     else:
         frequency = config.frequencies[0] if config.frequencies else 0.0
-        filter_library = wg.makeFilterLibrary(
+        filter_library = wf.makeFilterLibrary(
             config.x_positions,
             config.y_positions,
             config.theta_radians,
@@ -143,13 +143,13 @@ def create_gabor_library(config: GaborConfig) -> Path:
 
 def create_coarse_gabor_library(config: GaborConfig) -> Path:
     """Create the coupled coarse RF Gabor library used for paper-style RF search."""
-    from . import WaveletGenerator as wg
+    from .wavelets import filters as wf
 
     coarse_nx, coarse_ny = coarse_grid_dimensions(config.nx, config.ny)
     xs = np.arange(coarse_nx)
     ys = np.arange(coarse_ny)
     frequency = config.frequencies[0] if config.frequencies else 0.0
-    filter_library = wg.makeFilterLibrary(
+    filter_library = wf.makeFilterLibrary(
         xs,
         ys,
         config.theta_radians,
@@ -168,7 +168,7 @@ def create_fine_gabor_library(
     extra_sigmas: Optional[Sequence[float]] = None,
 ) -> Path:
     """Create the full-resolution independent size/frequency Gabor library."""
-    from . import WaveletGenerator as wg
+    from .wavelets import filters as wf
 
     if extra_sigmas:
         merged_sigmas = tuple(dict.fromkeys(
@@ -179,7 +179,7 @@ def create_fine_gabor_library(
 
     library_sigmas = config.sigmas_array
     if config.has_independent_frequencies:
-        filter_library = wg.makeFilterLibrary2(
+        filter_library = wf.makeFilterLibrary2(
             config.x_positions,
             config.y_positions,
             config.theta_radians,
@@ -189,7 +189,7 @@ def create_fine_gabor_library(
         )
     else:
         frequency = config.frequencies[0] if config.frequencies else 0.0
-        filter_library = wg.makeFilterLibrary(
+        filter_library = wf.makeFilterLibrary(
             config.x_positions,
             config.y_positions,
             config.theta_radians,
@@ -246,7 +246,7 @@ def prepare_stimulus_wavelets(
     Chunk size for video downsampling is chosen from available RAM when
     ``chunk_size`` is omitted.
     """
-    from . import WaveletGenerator as wg
+    from .wavelets import decomposition as wd
     from .performance import video_downsample_chunk_size
 
     if chunk_size is None:
@@ -262,7 +262,7 @@ def prepare_stimulus_wavelets(
     coarse_downsampled_path = analysis.movie_path.with_name(
         f"{analysis.movie_path.stem}_coarse_downsampled.npy"
     )
-    wg.downsample_video_binary(
+    wd.downsample_video_binary(
         str(analysis.movie_path),
         np.array(analysis.visual_coverage),
         np.array(analysis.analysis_coverage),
@@ -279,14 +279,14 @@ def prepare_stimulus_wavelets(
         - np.logical_not(video_data).astype(int)
     )
 
-    wg.waveletDecomposition(
+    wd.waveletDecomposition(
         video_data,
         0,
         analysis.sigmas_array,
         str(analysis.path_directory),
         str(library_path),
     )
-    wg.waveletDecomposition(
+    wd.waveletDecomposition(
         video_data,
         1,
         analysis.sigmas_array,
@@ -337,7 +337,7 @@ def prepare_full_model_wavelets(
     output_dir: Optional[Path] = None,
 ) -> Path:
     """Build full-resolution wavelet arrays used by :func:`run_Full_Model`."""
-    from . import WaveletGenerator as wg
+    from .wavelets import decomposition as wd
     from .performance import video_downsample_chunk_size
 
     library_path = Path(library_path or gabor.fine_save_path)
@@ -351,7 +351,7 @@ def prepare_full_model_wavelets(
     require_file(library_path, "Gabor library")
     if not downsampled_path.exists():
         ratio_x, ratio_y = analysis.coverage_ratios()
-        wg.downsample_video_binary(
+        wd.downsample_video_binary(
             str(analysis.movie_path),
             np.array(analysis.visual_coverage),
             np.array(analysis.analysis_coverage),
@@ -373,7 +373,7 @@ def prepare_full_model_wavelets(
         if target.exists():
             print(f"Found existing full-model wavelets: {target}")
             continue
-        wg.waveletDecompositionFull(
+        wd.waveletDecompositionFull(
             video_data,
             phase,
             analysis.sigmas_full_model,
@@ -393,9 +393,9 @@ def load_coarse_wavelets(analysis: AnalysisConfig, gabor: GaborConfig) -> Wavele
 
     Results are cached as ``dwt_downsampled_videodata.npy`` under the path directory.
     """
-    from . import LoadPinkNoise as lpn
+    from .stimulus import wavelet_cache
 
-    wavelets_r, wavelets_i, wavelets_complex = lpn.coarseWavelet(
+    wavelets_r, wavelets_i, wavelets_complex = wavelet_cache.coarseWavelet(
         str(analysis.path_directory),
         False,
         nx0=analysis.coarse_nx,

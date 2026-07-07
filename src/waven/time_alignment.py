@@ -52,10 +52,10 @@ def load_two_photon_spikes(
     When ``spks_path`` is set, reads pre-aligned ``spikes.npy`` and sibling
     ``pos.npy`` and skips suite2p alignment.
     """
-    from . import LoadPinkNoise as lpn
+    from .data import neural as neural_io
 
     if spks_path is None:
-        spikes, aligned_spikes, neuron_pos = lpn.loadSPKMesoscope(
+        spikes, aligned_spikes, neuron_pos = neural_io.loadSPKMesoscope(
             experiment_info,
             list(data_dirs),
             suite2p_dir,
@@ -67,7 +67,7 @@ def load_two_photon_spikes(
             method=method,
         )
         if correct_positions:
-            neuron_pos = lpn.correctNeuronPos(neuron_pos, resolution)
+            neuron_pos = neural_io.correctNeuronPos(neuron_pos, resolution, n_planes)
     else:
         spikes = np.load(spks_path, mmap_mode="r")
         pos_path = spks_path.parent / "pos.npy"
@@ -335,7 +335,7 @@ def load_aligned_spikes(
 
 
 # Re-export core 2p alignment helpers for visibility in the codebase.
-from .LoadPinkNoise import align_datas, correctNeuronPos, loadSPKMesoscope  # noqa: E402
+from .data.neural import align_datas, correctNeuronPos, loadSPKMesoscope  # noqa: E402
 
 __all__ = [
     "AlignedNeuralData",
