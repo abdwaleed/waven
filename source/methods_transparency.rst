@@ -9,19 +9,21 @@ to make the pipeline auditable: each section names the relevant code, the data
 arrays being created, the assumptions made, and the files that connect one step
 to the next.
 
-The main GUI entry point is ``src/waven/zebraGUI.py``.  The core scientific
-operations live in:
+The main GUI implementation is ``src/waven/app/gui.py``.  The legacy
+``src/waven/zebraGUI.py`` module remains as a compatibility wrapper.  The core
+scientific operations live in:
 
-* ``src/waven/WaveletGenerator.py`` for Gabor filter construction, video
+* ``src/waven/wavelets/filters.py`` and
+  ``src/waven/wavelets/decomposition.py`` for Gabor filter construction, video
   downsampling, and wavelet projection.
-* ``src/waven/LoadPinkNoise.py`` for coarse wavelet cache loading/building and
-  some two-photon support utilities.
+* ``src/waven/stimulus/wavelet_cache.py`` for coarse wavelet cache
+  loading/building, with two-photon data support in ``src/waven/data/neural.py``.
 * ``src/waven/time_alignment.py`` for two-photon and electrophysiology alignment
   dispatch.
-* ``src/waven/Analysis_Utils.py`` for receptive-field estimation, tuning curves,
-  simple model fitting, and the full model.
-* ``src/waven/wavelet_io.py`` for conversion of full-model wavelet ``.npy``
-  arrays into compressed Zarr stores.
+* ``src/waven/analysis/`` for receptive-field estimation, tuning curves, simple
+  model fitting, and the full model.
+* ``src/waven/storage/wavelet_zarr.py`` for conversion of full-model wavelet
+  ``.npy`` arrays into compressed Zarr stores.
 
 
 Workflow Summary
@@ -550,10 +552,10 @@ Where to Audit or Modify
 
 Use these code locations when checking or changing specific behavior:
 
-* GUI button flow and file lifecycle: ``src/waven/zebraGUI.py``
+* GUI button flow and file lifecycle: ``src/waven/app/gui.py``
 * Workflow-specific parameter defaults: ``src/waven/config.py``
-* Gabor construction: ``src/waven/WaveletGenerator.py``
-* Coarse RF cache creation: ``src/waven/LoadPinkNoise.py``
+* Gabor construction: ``src/waven/wavelets/filters.py``
+* Coarse RF cache creation: ``src/waven/stimulus/wavelet_cache.py``
 * Alignment: ``src/waven/time_alignment.py``
-* RF/tuning/model math: ``src/waven/Analysis_Utils.py``
-* Zarr conversion: ``src/waven/wavelet_io.py``
+* RF/tuning/model math: ``src/waven/analysis/``
+* Zarr conversion: ``src/waven/storage/wavelet_zarr.py``

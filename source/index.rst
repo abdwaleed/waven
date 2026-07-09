@@ -15,6 +15,8 @@ Table of Contents
    :caption: Contents:
 
    quickstart
+   developer_guide
+   code_reference
    methods_transparency
    installation
    faq

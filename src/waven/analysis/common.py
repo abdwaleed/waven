@@ -48,6 +48,6 @@ from sklearn.feature_extraction import image
 from sklearn.metrics import explained_variance_score, r2_score
 
 from ..config import coarse_grid_dimensions, coarse_to_full_scale
-from ..performance import gpu_neuron_chunk_size, model_parallel_jobs
-from ..zarr_compat import load_array
+from ..runtime.performance import gpu_neuron_chunk_size, model_parallel_jobs
+from ..storage.array_store import load_array
 

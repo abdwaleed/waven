@@ -22,8 +22,8 @@ import torch.nn.functional as F
 from skimage import transform
 
 from ..config import coarse_grid_dimensions
-from ..performance import get_gpu_count
-from ..zarr_compat import load_array
+from ..runtime.performance import get_gpu_count
+from ..storage.array_store import load_array
 
 def _feature_shape(wavelets, no=None, ns=None, nf=None):
     """Infer orientation, sigma, and optional frequency dimensions."""

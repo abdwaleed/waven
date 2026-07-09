@@ -9,6 +9,7 @@ import itertools
 import math
 import os
 import shutil
+import time
 
 import matplotlib
 
@@ -22,7 +23,8 @@ import numpy as np
 from skimage.filters import gabor_kernel
 from tqdm import tqdm
 
-from ..performance import available_ram_bytes, has_enough_ram as _has_enough_ram
+from ..runtime.performance import available_ram_bytes, has_enough_ram as _has_enough_ram
+from ..runtime.task_control import check_cancelled, progress_message
 
 def has_enough_ram(required_bytes: int, safety_margin: float = 1.20) -> bool:
     """Return True when an array of ``required_bytes`` can live in free RAM.
@@ -148,7 +150,7 @@ def _universal_gabor_engine(save_path, xs, ys, base_shape, kernels):
 # LEGACY ROUTERS
 # =====================================================================
 
-def makeFilterLibrary(xs, ys, thetas, sigmas, offsets, f, freq=True):
+def makeFilterLibrary(xs, ys, thetas, sigmas, offsets, f, freq=True, cancel_event=None):
     """
     builds the Gabor library
 
@@ -176,8 +178,10 @@ def makeFilterLibrary(xs, ys, thetas, sigmas, offsets, f, freq=True):
     # Allocate exactly the RAM needed once
     library = np.zeros((lx, ly, num_t, num_s, num_o, flat_size), dtype=np.float16)
 
+    progress_start = time.time()
     for i, x in enumerate(xs):
-        print(x)
+        check_cancelled(cancel_event)
+        print(progress_message("Gabor library", i + 1, len(xs), progress_start, unit="x"))
         for j, y in enumerate(ys):
             for t_idx, t in enumerate(thetas):
                 for s_idx, s in enumerate(sigmas):
@@ -189,7 +193,7 @@ def makeFilterLibrary(xs, ys, thetas, sigmas, offsets, f, freq=True):
     return library
 
 
-def makeFilterLibrary2(xs, ys, thetas, sigmas, offsets, frequencies):
+def makeFilterLibrary2(xs, ys, thetas, sigmas, offsets, frequencies, cancel_event=None):
     """
     Pre-allocated array approach. Stops RAM fragmentation and speeds up CPU processing.
     """
@@ -205,8 +209,10 @@ def makeFilterLibrary2(xs, ys, thetas, sigmas, offsets, frequencies):
     # Allocate exactly the RAM needed once
     library = np.zeros((lx, ly, num_t, num_s, num_f, num_o, flat_size), dtype=np.float16)
     
+    progress_start = time.time()
     for i, x in enumerate(xs):
-        print(f"Processing X coordinate: {x}")
+        check_cancelled(cancel_event)
+        print(progress_message("Gabor library", i + 1, len(xs), progress_start, unit="x"))
         for j, y in enumerate(ys):
             for t_idx, t in enumerate(thetas):
                 for s_idx, s in enumerate(sigmas):

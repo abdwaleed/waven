@@ -247,7 +247,7 @@ def prepare_stimulus_wavelets(
     ``chunk_size`` is omitted.
     """
     from .wavelets import decomposition as wd
-    from .performance import video_downsample_chunk_size
+    from .runtime.performance import video_downsample_chunk_size
 
     if chunk_size is None:
         chunk_size = video_downsample_chunk_size()
@@ -338,7 +338,7 @@ def prepare_full_model_wavelets(
 ) -> Path:
     """Build full-resolution wavelet arrays used by :func:`run_Full_Model`."""
     from .wavelets import decomposition as wd
-    from .performance import video_downsample_chunk_size
+    from .runtime.performance import video_downsample_chunk_size
 
     library_path = Path(library_path or gabor.fine_save_path)
     output_dir = output_dir or analysis.full_model_wavelet_path or analysis.path_directory

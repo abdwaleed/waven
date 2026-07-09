@@ -7,6 +7,7 @@ This module owns the legacy ``dwt_videodata_*`` and
 """
 import math
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import matplotlib
@@ -22,8 +23,10 @@ import torch.nn.functional as F
 from skimage import transform
 
 from ..config import coarse_grid_dimensions
-from ..performance import coarse_wavelet_chunk_size_gpu_or_cpu, get_gpu_count, has_enough_ram
-from ..zarr_compat import load_array
+from ..runtime.performance import coarse_wavelet_chunk_size_gpu_or_cpu, get_gpu_count, has_enough_ram
+from ..runtime.task_control import check_cancelled, progress_message
+from ..storage.array_store import load_array
+
 
 def _ensure_trailing_sep(path):
     """Return ``path`` with a trailing path separator for legacy string joins."""
@@ -261,6 +264,7 @@ def coarseWavelet(
     nx=None,
     ny=None,
     chunk_size=None,
+    cancel_event=None,
 ):
     """Load or build spatially downsampled wavelets for receptive-field analysis."""
     
@@ -311,7 +315,7 @@ def coarseWavelet(
     use_memmap = not has_enough_ram(total_required, safety_margin=1.20)
 
     if use_memmap:
-        print("Low RAM detected: using disk-backed memmap arrays for coarse wavelet cache.")
+        print("Low RAM detected: using disk-backed arrays for coarse wavelet cache.")
         mmap_r = os.path.join(path, "dwt_r_downsampled.mmap")
         mmap_i = os.path.join(path, "dwt_i_downsampled.mmap")
         mmap_c = os.path.join(path, "dwt_c_downsampled.mmap")
@@ -319,6 +323,7 @@ def coarseWavelet(
         w_i_downsampled = np.lib.format.open_memmap(mmap_i, mode="w+", dtype=np.float32, shape=target_shape_full)
         w_c_downsampled = np.lib.format.open_memmap(mmap_c, mode="w+", dtype=np.float32, shape=target_shape_full)
     else:
+        print(f"Using RAM for coarse wavelet cache working arrays ({total_required / (1024**3):.2f} GB).")
         w_r_downsampled = np.empty(target_shape_full, dtype=np.float32)
         w_i_downsampled = np.empty(target_shape_full, dtype=np.float32)
         w_c_downsampled = np.empty(target_shape_full, dtype=np.float32)
@@ -329,6 +334,7 @@ def coarseWavelet(
 
     def process_chunk(chunk_index):
         """Worker function to process a single chunk on a specific device."""
+        check_cancelled(cancel_event)
         start = chunk_index * chunk_size
         end = min((chunk_index + 1) * chunk_size, n_frames)
         chunk_len = end - start
@@ -390,10 +396,13 @@ def coarseWavelet(
     
     # Execute workers and populate output arrays
     print(f"Dispatching to {max_workers} concurrent worker(s)...")
+    progress_start = time.time()
+    completed_chunks = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(process_chunk, i) for i in range(n_chunks)]
         
         for future in as_completed(futures):
+            check_cancelled(cancel_event)
             chunk_idx, start, end, out_r, out_i, out_c, hw_used, err = future.result()
             
             if err:
@@ -402,7 +411,11 @@ def coarseWavelet(
             w_r_downsampled[start:end] = out_r
             w_i_downsampled[start:end] = out_i
             w_c_downsampled[start:end] = out_c
-            print(f"Finished Chunk {chunk_idx + 1} / {n_chunks} [Hardware: {hw_used}]")
+            completed_chunks += 1
+            print(
+                f"{progress_message('Coarse wavelet cache', completed_chunks, n_chunks, progress_start, unit='chunks')} "
+                f"[Hardware: {hw_used}]"
+            )
 
     print("\nSaving cache to disk...")
     _validate_legacy_coarse_shape(w_r_downsampled, nx, ny, no, ns, "Real coarse wavelets")

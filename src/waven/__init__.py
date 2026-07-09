@@ -41,7 +41,7 @@ try:
 except Exception:  # pragma: no cover - package may be imported from source
     __version__ = "0+unknown"
 
-_PUBLIC_SUBMODULES = {"analysis_utils", "gui"}
+_PUBLIC_SUBMODULES = {"analysis_utils", "app", "gui", "runtime", "storage"}
 
 
 def __getattr__(name: str):
@@ -77,5 +77,8 @@ __all__ = [
     "run_simple_model",
     "smooth_best_positions",
     "analysis_utils",
+    "app",
     "gui",
+    "runtime",
+    "storage",
 ]

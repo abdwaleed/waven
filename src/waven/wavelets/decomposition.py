@@ -7,6 +7,7 @@ wavelet coefficient arrays to disk. Filter-bank construction lives in
 import gc
 import math
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
@@ -25,8 +26,44 @@ import skimage.transform
 import torch
 from tqdm import tqdm
 
-from ..performance import resolve_compute_device, video_downsample_chunk_size, wavelet_filter_chunk_size
+from ..runtime.performance import resolve_compute_device, video_downsample_chunk_size, wavelet_filter_chunk_size
+from ..runtime.task_control import check_cancelled, progress_message
 from .filters import has_enough_ram
+
+
+def _array_bytes(shape, dtype=np.float32):
+    """Return exact bytes for an array shape/dtype pair."""
+    return int(math.prod(tuple(int(v) for v in shape)) * np.dtype(dtype).itemsize)
+
+
+def _maybe_load_into_ram(array, label):
+    """Copy disk-backed arrays into RAM when repeated access will be faster."""
+    shape = getattr(array, "shape", None)
+    dtype = getattr(array, "dtype", np.float32)
+    if shape is None:
+        return array
+    required = _array_bytes(shape, dtype)
+    if has_enough_ram(required, safety_margin=1.35):
+        print(f"Loading {label} into RAM for faster repeated access ({required / (1024**3):.2f} GB).")
+        return np.asarray(array)
+    print(f"Keeping {label} disk-backed to avoid memory pressure ({required / (1024**3):.2f} GB).")
+    return array
+
+
+def _open_zarr_array(zarr_module, path, **kwargs):
+    """Open a Zarr array across Zarr 2/3 compressor API differences."""
+    try:
+        return zarr_module.open(path, **kwargs)
+    except TypeError:
+        compressor = kwargs.pop("compressor", None)
+        if compressor is not None:
+            kwargs["compressors"] = [compressor]
+            try:
+                return zarr_module.open(path, **kwargs)
+            except Exception:
+                kwargs.pop("compressors", None)
+        return zarr_module.open(path, **kwargs)
+
 
 def _process_binary_chunk(frames_buffer, xi, xe, yi, ye, shape, actual_len):
     """Background worker for binary downsampling."""
@@ -44,6 +81,7 @@ def downsample_video_binary(
     chunk_size: Optional[int] = None,
     ratios=(1, 1),
     save_path=None,
+    cancel_event=None,
 ):
     """Downsample a binary stimulus movie to the analysis grid via disk streaming.
 
@@ -88,9 +126,11 @@ def downsample_video_binary(
     
     frames_buffer = []
     frame_idx = 0
+    progress_start = time.time()
     
     print(f"Downsampling {total_frames} frames directly to disk...", end="\n\n")
     while True:
+        check_cancelled(cancel_event)
         ret, img = cap.read()
         if not ret:
             break
@@ -106,10 +146,12 @@ def downsample_video_binary(
             # Write chunk directly to disk
             output_mmap[frame_idx : frame_idx + chunk_size] = chunk_resized >= 0.5
             frame_idx += chunk_size
+            print(progress_message("Video downsample", frame_idx, total_frames, progress_start, unit="frames"))
             frames_buffer.clear()
             gc.collect()
             
     # Process remaining frames
+    check_cancelled(cancel_event)
     if frames_buffer:
         rem_size = len(frames_buffer)
         # CAST TO FLOAT32 HERE as well
@@ -117,6 +159,8 @@ def downsample_video_binary(
         chunk_cropped = chunk_arr[:, xi:xe, yi:ye]
         chunk_resized = skimage.transform.resize(chunk_cropped, (rem_size, shape[0], shape[1]), anti_aliasing=True)
         output_mmap[frame_idx : frame_idx + rem_size] = chunk_resized >= 0.5
+        frame_idx += rem_size
+        print(progress_message("Video downsample", frame_idx, total_frames, progress_start, unit="frames"))
         
     output_mmap.flush()
     del output_mmap
@@ -189,6 +233,7 @@ def getWTfromNPY(
     s_idx,
     filter_chunk_size: Optional[int] = None,
     frequency_index: Optional[int] = None,
+    cancel_event=None,
 ):
     """Project video frames onto one Gabor scale, writing into ``WT_flat``.
 
@@ -232,6 +277,7 @@ def getWTfromNPY(
     num_filters = lib_flat.shape[0]
 
     for start in range(0, num_filters, filter_chunk_size):
+        check_cancelled(cancel_event)
         end = min(start + filter_chunk_size, num_filters)
         lib_chunk = torch.as_tensor(
             lib_flat[start:end, :],
@@ -258,16 +304,16 @@ def waveletTransform3D(frame, L):
     return output.detach().cpu().numpy()
 
 
-def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path):
+def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path, cancel_event=None):
     """Decompose a downsampled movie into Gabor wavelet coefficients.
 
     Chooses in-memory or memory-mapped output based on ``has_enough_ram``, then
     iterates over sigma scales and fills ``dwt_videodata_{phase}.npy``.
     """
-    from ..zarr_compat import load_array
+    from ..storage.array_store import load_array
 
     print(f"Loading Gabor library from {library_path} (mmap_mode='r')...", end="\n\n")
-    L = load_array(library_path, mmap_mode='r')
+    L = _maybe_load_into_ram(load_array(library_path, mmap_mode='r'), "coarse Gabor library")
     if L.ndim >= 7:
         raise ValueError(
             "waveletDecomposition is the coarse RF path and expects a coupled "
@@ -288,26 +334,34 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path):
     # Legacy analysis expects time-first wavelet arrays for coarse decomposition.
     final_shape = (T,) + prefix_shape + (len(sigmas),)
     
-    required_bytes = math.prod(final_shape) * 4
+    required_bytes = _array_bytes(final_shape, np.float32)
     
     save_path = os.path.join(folder_path, f'dwt_videodata_{phase}.npy')
     
-    # --- DYNAMIC HARDWARE ROUTING ---
-    if has_enough_ram(required_bytes, safety_margin=1.15):
+    temp_bytes = _array_bytes((num_filters, T, 1), np.float32)
+    working_bytes = required_bytes + temp_bytes
+
+    # Prefer RAM for compute and use disk-backed output only when memory is tight.
+    if has_enough_ram(working_bytes, safety_margin=1.20):
         WT_final = np.zeros(final_shape, dtype=np.float32)
         use_mmap = False
+        print(f"Using RAM output for coarse phase {phase} ({working_bytes / (1024**3):.2f} GB working set).")
     else:
         WT_final = np.lib.format.open_memmap(save_path, mode='w+', dtype=np.float32, shape=final_shape)
         use_mmap = True
+        print(f"Using disk-backed output for coarse phase {phase}; RAM is below safe working set.")
 
     temp_flat = np.empty((num_filters, T, 1), dtype=np.float32)
 
+    start_time = time.time()
     for s, ss in enumerate(sigmas):
+        check_cancelled(cancel_event)
         print(f"Processing sigma {s + 1}/{len(sigmas)}...", end="\n\n")
         temp_flat.fill(0)
-        getWTfromNPY(videodata, L[:, :, :, s], phase, WT_flat=temp_flat, s_idx=0)
+        getWTfromNPY(videodata, L[:, :, :, s], phase, WT_flat=temp_flat, s_idx=0, cancel_event=cancel_event)
         spatial = temp_flat[:, :, 0].reshape(prefix_shape + (T,))
         WT_final[..., s] = np.transpose(spatial, (3, 0, 1, 2))
+        print(progress_message(f"Coarse phase {phase}", s + 1, len(sigmas), start_time))
         
         gc.collect() 
         torch.cuda.empty_cache() 
@@ -331,6 +385,9 @@ def waveletDecompositionFull(
     library_path,
     library_sigmas=None,
     sigma_indices=None,
+    output_format="npy",
+    zarr_chunks=None,
+    cancel_event=None,
 ):
     """Decompose a movie into full-resolution wavelets for ``run_Full_Model``.
 
@@ -344,14 +401,16 @@ def waveletDecompositionFull(
         "for full-model decomposition...",
         end="\n\n",
     )
-    from ..zarr_compat import load_array
+    from ..storage.array_store import load_array
 
-    library = load_array(library_path, mmap_mode="r")
+    library = _maybe_load_into_ram(load_array(library_path, mmap_mode="r"), "fine Gabor library")
     lx, ly, num_t = int(library.shape[0]), int(library.shape[1]), int(library.shape[2])
     num_frames = videodata.shape[0]
     sigmas = np.asarray(sigmas, dtype=float)
     frequencies = np.asarray(frequencies, dtype=float)
     ns = len(sigmas)
+    if frequencies.size == 0:
+        frequencies = np.asarray([0.0], dtype=float)
     nf = len(frequencies)
     if library.ndim < 7 and nf > 1:
         raise ValueError(
@@ -373,13 +432,49 @@ def waveletDecompositionFull(
         sigma_indices = tuple(int(i) for i in sigma_indices)
 
     phase_suffix = "_r" if phase == 0 else "_i"
-    save_path = os.path.join(folder_path, f"dwt_videodata2{phase_suffix}.npy")
+    output_format = str(output_format or "npy").lower()
+    if output_format not in {"npy", "zarr"}:
+        raise ValueError(f"Unsupported full-model wavelet output format: {output_format}")
+    save_ext = ".zarr" if output_format == "zarr" else ".npy"
+    save_path = os.path.join(folder_path, f"dwt_videodata2{phase_suffix}{save_ext}")
     final_shape = (num_frames, lx, ly, num_t, ns, nf)
-    required_bytes = math.prod(final_shape) * 4
+    required_bytes = _array_bytes(final_shape, np.float32)
+    num_filters = lx * ly * num_t
+    temp_bytes = _array_bytes((num_filters, num_frames, 1), np.float32)
+    working_bytes = required_bytes + temp_bytes
 
-    if has_enough_ram(required_bytes, safety_margin=1.15):
+    if output_format == "zarr":
+        try:
+            import zarr
+            from numcodecs import Blosc
+        except ImportError as exc:
+            raise ImportError(
+                "Zarr wavelet output requires the 'zarr' and 'numcodecs' packages. "
+                "Install project requirements or select 'npy' as the full-model format."
+            ) from exc
+        os.makedirs(folder_path, exist_ok=True)
+        compressor = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
+        if zarr_chunks is None:
+            zarr_chunks = (min(num_frames, 1800), 1, 1, num_t, ns, nf)
+        zarr_chunks = tuple(
+            min(int(dim), int(max(1, chunk)))
+            for dim, chunk in zip(final_shape, zarr_chunks)
+        )
+        wt_final = _open_zarr_array(
+            zarr,
+            save_path,
+            mode="w",
+            shape=final_shape,
+            chunks=zarr_chunks,
+            dtype=np.float32,
+            compressor=compressor,
+        )
+        use_mmap = False
+        print(f"Writing full-model phase {phase} directly to Zarr: {save_path}")
+    elif has_enough_ram(working_bytes, safety_margin=1.20):
         wt_final = np.zeros(final_shape, dtype=np.float32)
         use_mmap = False
+        print(f"Using RAM output for full-model phase {phase} ({working_bytes / (1024**3):.2f} GB working set).")
     else:
         wt_final = np.lib.format.open_memmap(
             save_path,
@@ -388,12 +483,16 @@ def waveletDecompositionFull(
             shape=final_shape,
         )
         use_mmap = True
+        print(f"Using disk-backed output for full-model phase {phase}; RAM is below safe working set.")
 
-    num_filters = lx * ly * num_t
     temp_flat = np.zeros((num_filters, num_frames, 1), dtype=np.float32)
 
+    total_steps = max(1, len(sigma_indices) * nf)
+    completed_steps = 0
+    start_time = time.time()
     for out_s, lib_s in enumerate(sigma_indices):
         for f_idx in range(nf):
+            check_cancelled(cancel_event)
             if library.ndim >= 7:
                 lib_slice = library[:, :, :, lib_s, f_idx]
             elif library.ndim == 6:
@@ -407,17 +506,22 @@ def waveletDecompositionFull(
                 phase,
                 WT_flat=temp_flat,
                 s_idx=0,
+                cancel_event=cancel_event,
             )
             spatial = temp_flat[:, :, 0].reshape(lx, ly, num_t, num_frames)
             wt_final[:, :, :, :, out_s, f_idx] = np.transpose(
                 spatial,
                 (3, 0, 1, 2),
             )
+            completed_steps += 1
+            print(progress_message(f"Full-model phase {phase}", completed_steps, total_steps, start_time))
             gc.collect()
             if resolve_compute_device(prefer_gpu=True) == "cuda":
                 torch.cuda.empty_cache()
 
-    if use_mmap:
+    if output_format == "zarr":
+        print(f"Success! Saved full-model Zarr array to {save_path}", end="\n\n")
+    elif use_mmap:
         wt_final.flush()
         del wt_final
         print(f"Success! Saved streamed full-model array to {save_path}")
