@@ -180,7 +180,7 @@
     
     
       <div class="md-header__source">
-        <a href="https://github.com/skriabineSop/waven" title="Go to repository" class="md-source" data-md-component="source">
+        <a href="https://github.com/abdwaleed/waven" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
@@ -226,7 +226,7 @@
   </label>
   
     <div class="md-nav__source">
-      <a href="https://github.com/skriabineSop/waven" title="Go to repository" class="md-source" data-md-component="source">
+      <a href="https://github.com/abdwaleed/waven" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
@@ -707,6 +707,8 @@
       
         
       
+        
+      
     
     
     
@@ -776,6 +778,34 @@
     
   
     Pipeline Intuition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-mindmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Mindmap
   
 
     
@@ -927,6 +957,17 @@
     <span class="md-ellipsis">
       
         Temporary outputs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#practical-storage-advice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Practical storage advice
       
     </span>
   </a>
@@ -1527,6 +1568,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#practical-storage-advice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Practical storage advice
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1550,26 +1602,123 @@
 <h1 id="file-lifecycle">File lifecycle<a class="headerlink" href="#file-lifecycle" title="Permanent link">&para;</a></h1>
 <p>Large files are intentionally reused across runs.</p>
 <h2 id="durable-outputs">Durable outputs<a class="headerlink" href="#durable-outputs" title="Permanent link">&para;</a></h2>
-<ul>
-<li>coarse and fine Gabor libraries (<code>.npy</code> or <code>.zarr</code>);</li>
-<li><code>&lt;movie&gt;_coarse_downsampled.npy</code>;</li>
-<li><code>&lt;movie&gt;_downsampled.npy</code>;</li>
-<li><code>dwt_downsampled_videodata.npy</code>;</li>
-<li><code>dwt_videodata2_r.npy</code> / <code>.zarr</code>;</li>
-<li><code>dwt_videodata2_i.npy</code> / <code>.zarr</code>;</li>
-<li>aligned <code>spikes.npy</code> and <code>pos.npy</code>;</li>
-<li><code>plot_cache.pkl.gz</code>;</li>
-<li>full-model <code>model_results/</code>;</li>
-<li>explicit exports.</li>
-</ul>
+<table>
+<thead>
+<tr>
+<th>Output</th>
+<th>Typical shape or contents</th>
+<th>dtype/format</th>
+<th>Keep?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>coarse Gabor library</td>
+<td><code>(coarse_nx, coarse_ny, n_orientations, n_sigmas, n_phases, coarse_nx * coarse_ny)</code></td>
+<td><code>.npy</code>, <code>float16</code></td>
+<td>Yes, if config axes match.</td>
+</tr>
+<tr>
+<td>fine Gabor library</td>
+<td><code>(NX, NY, n_orientations, n_sigmas, n_frequencies, n_phases, NX * NY)</code></td>
+<td><code>.npy</code>, <code>float16</code></td>
+<td>Yes, but it can be very large.</td>
+</tr>
+<tr>
+<td><code>&lt;movie&gt;_coarse_downsampled.npy</code></td>
+<td><code>(n_frames, coarse_ny, coarse_nx)</code></td>
+<td><code>bool</code></td>
+<td>Yes, cheap and useful for resume.</td>
+</tr>
+<tr>
+<td><code>&lt;movie&gt;_downsampled.npy</code></td>
+<td><code>(n_frames, NY, NX)</code></td>
+<td><code>bool</code></td>
+<td>Yes, cheap relative to wavelets.</td>
+</tr>
+<tr>
+<td><code>dwt_downsampled_videodata.npy</code></td>
+<td><code>(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)</code></td>
+<td><code>.npy</code>, <code>float32</code></td>
+<td>Yes, this is the durable coarse RF cache.</td>
+</tr>
+<tr>
+<td><code>dwt_videodata2_r.npy</code> / <code>.zarr</code></td>
+<td><code>(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)</code></td>
+<td><code>float32</code></td>
+<td>Yes when running full models.</td>
+</tr>
+<tr>
+<td><code>dwt_videodata2_i.npy</code> / <code>.zarr</code></td>
+<td>same as real phase</td>
+<td><code>float32</code></td>
+<td>Yes when running full models.</td>
+</tr>
+<tr>
+<td>aligned <code>spikes.npy</code> and <code>pos.npy</code></td>
+<td>spikes: <code>(n_trials, n_frames, n_neurons)</code>; positions: <code>(n_neurons, 2 or 3)</code></td>
+<td>numeric <code>.npy</code></td>
+<td>Yes, these make reruns reproducible.</td>
+</tr>
+<tr>
+<td><code>plot_cache.pkl.gz</code></td>
+<td>precomputed GUI plotting payload</td>
+<td>compressed pickle</td>
+<td>Optional; keep for faster GUI startup.</td>
+</tr>
+<tr>
+<td><code>model_results/</code></td>
+<td>parameters, predictions, metrics, exports</td>
+<td>mixed arrays and metadata</td>
+<td>Yes for analysis records.</td>
+</tr>
+<tr>
+<td>explicit exports</td>
+<td>PNG/SVG/NPZ/JSON/Pickle bundles</td>
+<td>mixed</td>
+<td>Yes for figures and paper provenance.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="temporary-outputs">Temporary outputs<a class="headerlink" href="#temporary-outputs" title="Permanent link">&para;</a></h2>
-<ul>
-<li>coarse real/imaginary phase files after the durable cache is written;</li>
-<li>low-RAM memory-map scratch files;</li>
-<li>plot-cache temporary files;</li>
-<li>recovery checkpoint folders after successful completion.</li>
-</ul>
+<table>
+<thead>
+<tr>
+<th>Output</th>
+<th>Why it exists</th>
+<th>Removal rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dwt_videodata_0.npy</code>, <code>dwt_videodata_1.npy</code></td>
+<td>Intermediate coarse real/imaginary phase files used to build the durable cache.</td>
+<td>Can be regenerated from the coarse downsampled movie and coarse library.</td>
+</tr>
+<tr>
+<td><code>dwt_r_downsampled.mmap</code>, <code>dwt_i_downsampled.mmap</code>, <code>dwt_c_downsampled.mmap</code></td>
+<td>Low-RAM scratch arrays for coarse cache construction.</td>
+<td>Remove after successful cache creation.</td>
+</tr>
+<tr>
+<td>plot-cache temporary files</td>
+<td>Atomic writes for GUI cache updates.</td>
+<td>Remove after successful cache write.</td>
+</tr>
+<tr>
+<td>recovery checkpoint folders</td>
+<td>Resume metadata for long GUI tasks.</td>
+<td>Removed after success/cancel; kept after failure for debugging.</td>
+</tr>
+</tbody>
+</table>
 <p>Interrupted long tasks can usually be resumed by rerunning the same button.</p>
+<h2 id="practical-storage-advice">Practical storage advice<a class="headerlink" href="#practical-storage-advice" title="Permanent link">&para;</a></h2>
+<p>Keep durable outputs on a local SSD when possible. Network drives can make
+wavelet decomposition look stalled because every chunk read/write crosses the
+network. If disk space is limited, delete full-model phase files before deleting
+libraries or downsampled movies; the phase files are usually the largest and can
+be regenerated from smaller inputs.</p>
 
 
 

@@ -24,3 +24,49 @@ The RF stage computes:
 - Pearson correlation between wavelet features and neural responses;
 - preferred azimuth, elevation, orientation, size, and frequency;
 - OSI and gOSI distributions in the GUI.
+
+## Inputs
+
+RF analysis needs aligned neural responses and the coarse wavelet cache:
+
+| Input | Shape | Meaning |
+| --- | --- | --- |
+| `spikes` | `(n_trials, n_frames, n_neurons)` | Trial responses aligned to stimulus frames. Values may be deconvolved activity, thresholded events, or aligned spike-like responses depending on workflow. |
+| `neuron_pos` | `(n_neurons, 2)` or `(n_neurons, 3)` | Anatomical positions used for scatter plots, quality overlays, shank/unit grouping, and neighborhood smoothing. |
+| `wavelets_complex` | `(n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` | Combined coarse wavelet coefficients used as stimulus features. |
+
+`run_rf_analysis` truncates all time-dependent inputs to the shortest available
+frame count. That protects against small movie/spike/cache length mismatches,
+but large mismatches should be treated as an alignment problem.
+
+## RF tensor
+
+The stimulus cache is reshaped to `(n_frames, n_features)`, where:
+
+```text
+n_features = coarse_nx * coarse_ny * n_orientations * n_sigmas * n_frequencies
+```
+
+The RF output is then organized back into feature axes:
+
+```text
+(n_neurons, coarse_nx, coarse_ny, n_orientations, n_sigmas, n_frequencies)
+```
+
+For each neuron, `waven` stores both the full RF tensor and the preferred feature
+indices. Preferred azimuth and elevation are derived from the `x` and `y` index
+plus `Analysis Coverage`; preferred size is derived from sigma in pixels and
+converted to approximate visual degrees for display.
+
+## Quality interpretation
+
+Repeatability asks whether the neuron responds consistently across repeated
+trials. Skewness flags neurons whose activity is dominated by rare large events.
+The GUI does not silently delete low-quality neurons; it lowers their visual
+alpha so population structure remains visible while the quality mask is still
+obvious.
+
+OSI and gOSI are computed from the orientation tuning slice at the preferred
+position, size, and frequency. They should be read alongside repeatability and
+the raw tuning curve. A high selectivity value on a noisy, low-repeatability
+neuron is a hypothesis to inspect, not a conclusion by itself.

@@ -272,9 +272,9 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
 
 
 def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visual_coverage, neuron_pos,
-                   wavelet_path='/media/sophie/Expansion1/UCL/utils/2screens/10/',
-                   savepath='/home/sophie/Pictures/img zebra/supp/supp/', n_min=5, tt=[0, 18000],
-                   memmapping=True, train_idx=[0, 2], test_idx=[1, 3], double_wavelet_model=False, lastmin=False,
+                   wavelet_path='.',
+                   savepath='outputs', n_min=5, tt=None,
+                   memmapping=True, train_idx=None, test_idx=None, double_wavelet_model=False, lastmin=False,
                    plotting=False, frames_per_minute=None,
                    hz=DEFAULT_MOVIE_FRAME_RATE_HZ, show_sem_errorbars=False):
     """Function for run Full Model.
@@ -306,6 +306,12 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     Returns:
         Result produced by the operation.
     """
+    if tt is None:
+        tt = [0, 18000]
+    if train_idx is None:
+        train_idx = [0, 2]
+    if test_idx is None:
+        test_idx = [1, 3]
     if frames_per_minute is None:
         frames_per_minute = int(hz) * SECONDS_PER_MINUTE
     frames_per_minute = int(frames_per_minute)

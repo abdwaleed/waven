@@ -1,7 +1,7 @@
 """
 Created on Wed Mar 25 19:31:32 2025
 
-@author: Sophie Skriabine
+Legacy compatibility module.
 """
 import os
 
@@ -130,7 +130,7 @@ def load_stimulus(pathdir, wavelets_r, wavelets_i, nx=161, ny=60):
         (wavelets.shape[0], wavelets.shape[1] * wavelets.shape[2] * wavelets.shape[3] * wavelets.shape[4]))
     return wavelets
 
-def load_stimulus_simple_cell(path='/media/sophie/Expansion1/UCL/datatest/',nx=27, ny=11, no=8,ns=6, nf=1, downsampling=False):
+def load_stimulus_simple_cell(path='.',nx=27, ny=11, no=8,ns=6, nf=1, downsampling=False):
     #wavelets_r=np.load(path+'dwt_videodata_r.npy')
     #wavelets_i = np.load(path+'dwt_videodata_i.npy')
     """Function for load stimulus simple cell.
@@ -162,7 +162,7 @@ def load_stimulus_simple_cell(path='/media/sophie/Expansion1/UCL/datatest/',nx=2
 
 
 
-def load_stimulus_simple_cell2_i(path='/media/sophie/Expansion1/UCL/datatest/', tt=[0,9000], downsampling=False):
+def load_stimulus_simple_cell2_i(path='.', tt=[0,9000], downsampling=False):
 
 
     """Function for load stimulus simple cell2 i.
@@ -185,7 +185,7 @@ def load_stimulus_simple_cell2_i(path='/media/sophie/Expansion1/UCL/datatest/', 
     return wavelets_i
 
 
-def load_stimulus_simple_cell2_r(path='/media/sophie/Expansion1/UCL/datatest/',tt=[0,9000], downsampling=False):
+def load_stimulus_simple_cell2_r(path='.',tt=[0,9000], downsampling=False):
     """Function for load stimulus simple cell2 r.
 
     Args:
@@ -208,7 +208,7 @@ def load_stimulus_simple_cell2_r(path='/media/sophie/Expansion1/UCL/datatest/',t
 
     return wavelets_r
 
-def load_stimulus_simple_cell2(path='/media/sophie/Expansion1/UCL/datatest/', tt=[0, 9000], downsampling=False):
+def load_stimulus_simple_cell2(path='.', tt=[0, 9000], downsampling=False):
     """Function for load stimulus simple cell2.
 
     Args:
@@ -1138,7 +1138,7 @@ def get_rfs(i, r2, r1, i2, i1,y2, y1, neuron_pos):
     #     ax[i, 3].imshow(RFS[:, :, i, 3].T, vmin=vmin, vmax=vmax,cmap='coolwarm')
 
     RFS = np.array([RFS_r_1, RFS_r_2, RFS_i_1, RFS_i_2])
-    np.save('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/rfs/rfs_%d_HR.npy' % i, RFS)
+    np.save('rfs_%d_HR.npy' % i, RFS)
 
 
 def plotRFS(RFSs):

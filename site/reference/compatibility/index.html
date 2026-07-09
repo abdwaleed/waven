@@ -180,7 +180,7 @@
     
     
       <div class="md-header__source">
-        <a href="https://github.com/skriabineSop/waven" title="Go to repository" class="md-source" data-md-component="source">
+        <a href="https://github.com/abdwaleed/waven" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
@@ -226,7 +226,7 @@
   </label>
   
     <div class="md-nav__source">
-      <a href="https://github.com/skriabineSop/waven" title="Go to repository" class="md-source" data-md-component="source">
+      <a href="https://github.com/abdwaleed/waven" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
@@ -705,6 +705,8 @@
       
         
       
+        
+      
     
     
     
@@ -774,6 +776,34 @@
     
   
     Pipeline Intuition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/code-mindmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Mindmap
   
 
     
@@ -7772,6 +7802,36 @@
 <h1 id="compatibility-modules">Compatibility modules<a class="headerlink" href="#compatibility-modules" title="Permanent link">&para;</a></h1>
 <p>These modules preserve older import paths. New code should prefer the lowercase
 domain packages used elsewhere in the reference.</p>
+<p>Compatibility pages can be noisy because they expose historical modules with
+large APIs. Treat them as migration references:</p>
+<table>
+<thead>
+<tr>
+<th>Historical module</th>
+<th>Prefer new code from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>waven.WaveletGenerator</code></td>
+<td><code>waven.wavelets.filters</code>, <code>waven.wavelets.decomposition</code></td>
+</tr>
+<tr>
+<td><code>waven.LoadPinkNoise</code></td>
+<td><code>waven.stimulus.wavelet_cache</code>, <code>waven.stimulus.full_model</code></td>
+</tr>
+<tr>
+<td><code>waven.Analysis_Utils</code></td>
+<td><code>waven.analysis.*</code> and <code>waven.pipeline</code></td>
+</tr>
+<tr>
+<td><code>waven.zebraGUI</code></td>
+<td><code>waven.app.gui</code></td>
+</tr>
+</tbody>
+</table>
+<p>If you are writing a new script, start with <a href="../pipeline/">Pipeline</a>. Use this
+page only when an older notebook imports one of these names.</p>
 
 
 <div class="doc doc-object doc-module">
@@ -11480,7 +11540,7 @@ older scripts working while the source tree uses clearer module boundaries.</p>
 
 
 <a href="#waven.LoadPinkNoise.load_stimulus_simple_cell2" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_stimulus_simple_cell2</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/&#39;</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ny0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ns</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">nf</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_stimulus_simple_cell2</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ny0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ns</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">nf</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -11511,7 +11571,7 @@ older scripts working while the source tree uses clearer module boundaries.</p>
               </div>
             </td>
             <td>
-                  <code>&#39;/media/sophie/Expansion1/UCL/datatest/&#39;</code>
+                  <code>&#39;.&#39;</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -11693,7 +11753,7 @@ older scripts working while the source tree uses clearer module boundaries.</p>
 <span class="normal">284</span>
 <span class="normal">285</span>
 <span class="normal">286</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_stimulus_simple_cell2</span><span class="p">(</span>
-    <span class="n">path</span><span class="o">=</span><span class="s2">&quot;/media/sophie/Expansion1/UCL/datatest/&quot;</span><span class="p">,</span>
+    <span class="n">path</span><span class="o">=</span><span class="s2">&quot;.&quot;</span><span class="p">,</span>
     <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
     <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
@@ -11752,7 +11812,7 @@ older scripts working while the source tree uses clearer module boundaries.</p>
 
 
 <a href="#waven.LoadPinkNoise.load_stimulus_simple_cell2_i" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_stimulus_simple_cell2_i</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/&#39;</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ny0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ns</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">nf</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_stimulus_simple_cell2_i</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ny0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ns</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">nf</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -11790,7 +11850,7 @@ older scripts working while the source tree uses clearer module boundaries.</p>
 <span class="normal">206</span>
 <span class="normal">207</span>
 <span class="normal">208</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_stimulus_simple_cell2_i</span><span class="p">(</span>
-    <span class="n">path</span><span class="o">=</span><span class="s2">&quot;/media/sophie/Expansion1/UCL/datatest/&quot;</span><span class="p">,</span>
+    <span class="n">path</span><span class="o">=</span><span class="s2">&quot;.&quot;</span><span class="p">,</span>
     <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
     <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
@@ -11831,7 +11891,7 @@ older scripts working while the source tree uses clearer module boundaries.</p>
 
 
 <a href="#waven.LoadPinkNoise.load_stimulus_simple_cell2_r" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_stimulus_simple_cell2_r</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/&#39;</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ny0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ns</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">nf</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_stimulus_simple_cell2_r</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ny0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">no</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ns</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">nf</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -11869,7 +11929,7 @@ older scripts working while the source tree uses clearer module boundaries.</p>
 <span class="normal">236</span>
 <span class="normal">237</span>
 <span class="normal">238</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_stimulus_simple_cell2_r</span><span class="p">(</span>
-    <span class="n">path</span><span class="o">=</span><span class="s2">&quot;/media/sophie/Expansion1/UCL/datatest/&quot;</span><span class="p">,</span>
+    <span class="n">path</span><span class="o">=</span><span class="s2">&quot;.&quot;</span><span class="p">,</span>
     <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">downsampling</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
     <span class="n">nx0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
@@ -16643,7 +16703,7 @@ interpolates z-scored spike traces onto <code>Nb_frames</code> bins per trial.</
     <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
         <span class="n">ax</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">stim</span><span class="p">[</span><span class="n">tp</span> <span class="o">-</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span>
     <span class="k">if</span> <span class="n">save</span><span class="p">:</span>
-        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3000reconstructed.tif&#39;</span><span class="p">,</span> <span class="n">img</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">54</span><span class="p">,</span> <span class="mi">135</span><span class="p">))</span>
+        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;tp3000reconstructed.tif&#39;</span><span class="p">,</span> <span class="n">img</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">54</span><span class="p">,</span> <span class="mi">135</span><span class="p">))</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -17086,12 +17146,12 @@ interpolates z-scored spike traces onto <code>Nb_frames</code> bins per trial.</
     <span class="nb">print</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">corrcoef</span><span class="p">(</span><span class="n">vs</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">videodata</span><span class="p">[</span><span class="n">tp</span> <span class="o">-</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">dt</span><span class="p">:</span><span class="n">tp</span> <span class="o">-</span> <span class="n">dt</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">flatten</span><span class="p">()))</span>
 
     <span class="k">if</span> <span class="n">save</span><span class="p">:</span>
-        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520videodata.tif&#39;</span><span class="p">,</span>
+        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;tp3520videodata.tif&#39;</span><span class="p">,</span>
                          <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">videodata</span><span class="p">[</span><span class="n">tp</span> <span class="o">-</span> <span class="n">dt</span><span class="p">:</span><span class="n">tp</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">))</span>
 
     <span class="n">vc</span> <span class="o">=</span> <span class="n">vis_t</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">@</span> <span class="n">L</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">pixel_count</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">save</span><span class="p">:</span>
-        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520reconstructed_1wavelet.tif&#39;</span><span class="p">,</span>
+        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;tp3520reconstructed_1wavelet.tif&#39;</span><span class="p">,</span>
                          <span class="p">(</span><span class="n">vs</span> <span class="o">+</span> <span class="n">vc</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">ny_full</span><span class="p">,</span> <span class="n">nx_full</span><span class="p">))</span>
 
     <span class="k">return</span> <span class="p">(</span><span class="n">vs</span> <span class="o">+</span> <span class="n">vc</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">ny_full</span><span class="p">,</span> <span class="n">nx_full</span><span class="p">)</span>
@@ -31128,7 +31188,7 @@ All nans in arr, stay nans in gauss.</p>
 
 
 <a href="#waven.LoadPinkNoise.run_Full_Model" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">run_Full_Model</span><span class="p">(</span><span class="n">maxes0</span><span class="p">,</span> <span class="n">maxes1</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">idxs</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">sigmas</span><span class="p">,</span> <span class="n">frequencies</span><span class="p">,</span> <span class="n">visual_coverage</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">wavelet_path</span><span class="o">=</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/utils/2screens/10/&#39;</span><span class="p">,</span> <span class="n">savepath</span><span class="o">=</span><span class="s1">&#39;/home/sophie/Pictures/img zebra/supp/supp/&#39;</span><span class="p">,</span> <span class="n">n_min</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">18000</span><span class="p">],</span> <span class="n">memmapping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">train_idx</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">test_idx</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="n">double_wavelet_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lastmin</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">frames_per_minute</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">hz</span><span class="o">=</span><span class="n">DEFAULT_MOVIE_FRAME_RATE_HZ</span><span class="p">,</span> <span class="n">show_sem_errorbars</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">run_Full_Model</span><span class="p">(</span><span class="n">maxes0</span><span class="p">,</span> <span class="n">maxes1</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">idxs</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">sigmas</span><span class="p">,</span> <span class="n">frequencies</span><span class="p">,</span> <span class="n">visual_coverage</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">wavelet_path</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">savepath</span><span class="o">=</span><span class="s1">&#39;outputs&#39;</span><span class="p">,</span> <span class="n">n_min</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">memmapping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">train_idx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">test_idx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">double_wavelet_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lastmin</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">frames_per_minute</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">hz</span><span class="o">=</span><span class="n">DEFAULT_MOVIE_FRAME_RATE_HZ</span><span class="p">,</span> <span class="n">show_sem_errorbars</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -31294,7 +31354,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>&#39;/media/sophie/Expansion1/UCL/utils/2screens/10/&#39;</code>
+                  <code>&#39;.&#39;</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -31309,7 +31369,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>&#39;/home/sophie/Pictures/img zebra/supp/supp/&#39;</code>
+                  <code>&#39;outputs&#39;</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -31339,7 +31399,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>[0, 18000]</code>
+                  <code>None</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -31369,7 +31429,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>[0, 2]</code>
+                  <code>None</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -31384,7 +31444,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>[1, 3]</code>
+                  <code>None</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -32124,10 +32184,16 @@ All nans in arr, stay nans in gauss.</p>
 <span class="normal">890</span>
 <span class="normal">891</span>
 <span class="normal">892</span>
-<span class="normal">893</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_Full_Model</span><span class="p">(</span><span class="n">maxes0</span><span class="p">,</span> <span class="n">maxes1</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">idxs</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">sigmas</span><span class="p">,</span> <span class="n">frequencies</span><span class="p">,</span> <span class="n">visual_coverage</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span>
-                   <span class="n">wavelet_path</span><span class="o">=</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/utils/2screens/10/&#39;</span><span class="p">,</span>
-                   <span class="n">savepath</span><span class="o">=</span><span class="s1">&#39;/home/sophie/Pictures/img zebra/supp/supp/&#39;</span><span class="p">,</span> <span class="n">n_min</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">18000</span><span class="p">],</span>
-                   <span class="n">memmapping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">train_idx</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">test_idx</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="n">double_wavelet_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lastmin</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="normal">893</span>
+<span class="normal">894</span>
+<span class="normal">895</span>
+<span class="normal">896</span>
+<span class="normal">897</span>
+<span class="normal">898</span>
+<span class="normal">899</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_Full_Model</span><span class="p">(</span><span class="n">maxes0</span><span class="p">,</span> <span class="n">maxes1</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">idxs</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">sigmas</span><span class="p">,</span> <span class="n">frequencies</span><span class="p">,</span> <span class="n">visual_coverage</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span>
+                   <span class="n">wavelet_path</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span>
+                   <span class="n">savepath</span><span class="o">=</span><span class="s1">&#39;outputs&#39;</span><span class="p">,</span> <span class="n">n_min</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">memmapping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">train_idx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">test_idx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">double_wavelet_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lastmin</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
                    <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">frames_per_minute</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
                    <span class="n">hz</span><span class="o">=</span><span class="n">DEFAULT_MOVIE_FRAME_RATE_HZ</span><span class="p">,</span> <span class="n">show_sem_errorbars</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Function for run Full Model.</span>
@@ -32159,6 +32225,12 @@ All nans in arr, stay nans in gauss.</p>
 <span class="sd">    Returns:</span>
 <span class="sd">        Result produced by the operation.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">tt</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">tt</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">18000</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">train_idx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">train_idx</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">test_idx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">test_idx</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
     <span class="k">if</span> <span class="n">frames_per_minute</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">frames_per_minute</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">hz</span><span class="p">)</span> <span class="o">*</span> <span class="n">SECONDS_PER_MINUTE</span>
     <span class="n">frames_per_minute</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">frames_per_minute</span><span class="p">)</span>
@@ -32774,13 +32846,7 @@ All nans in arr, stay nans in gauss.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\analysis\model_runs.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">896</span>
-<span class="normal">897</span>
-<span class="normal">898</span>
-<span class="normal">899</span>
-<span class="normal">900</span>
-<span class="normal">901</span>
-<span class="normal">902</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">902</span>
 <span class="normal">903</span>
 <span class="normal">904</span>
 <span class="normal">905</span>
@@ -32796,7 +32862,13 @@ All nans in arr, stay nans in gauss.</p>
 <span class="normal">915</span>
 <span class="normal">916</span>
 <span class="normal">917</span>
-<span class="normal">918</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">plotNeuralRaster</span><span class="p">(</span><span class="n">spks</span><span class="p">):</span>
+<span class="normal">918</span>
+<span class="normal">919</span>
+<span class="normal">920</span>
+<span class="normal">921</span>
+<span class="normal">922</span>
+<span class="normal">923</span>
+<span class="normal">924</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">plotNeuralRaster</span><span class="p">(</span><span class="n">spks</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Plot neurons sorted by the first sparse-SVD component.</span>
 
 <span class="sd">    Parameters</span>
@@ -36207,7 +36279,7 @@ code that still imports :mod:<code>waven.Analysis_Utils</code>.</p>
     <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
         <span class="n">ax</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">stim</span><span class="p">[</span><span class="n">tp</span> <span class="o">-</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span>
     <span class="k">if</span> <span class="n">save</span><span class="p">:</span>
-        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3000reconstructed.tif&#39;</span><span class="p">,</span> <span class="n">img</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">54</span><span class="p">,</span> <span class="mi">135</span><span class="p">))</span>
+        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;tp3000reconstructed.tif&#39;</span><span class="p">,</span> <span class="n">img</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">54</span><span class="p">,</span> <span class="mi">135</span><span class="p">))</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -36650,12 +36722,12 @@ code that still imports :mod:<code>waven.Analysis_Utils</code>.</p>
     <span class="nb">print</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">corrcoef</span><span class="p">(</span><span class="n">vs</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">videodata</span><span class="p">[</span><span class="n">tp</span> <span class="o">-</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">dt</span><span class="p">:</span><span class="n">tp</span> <span class="o">-</span> <span class="n">dt</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">flatten</span><span class="p">()))</span>
 
     <span class="k">if</span> <span class="n">save</span><span class="p">:</span>
-        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520videodata.tif&#39;</span><span class="p">,</span>
+        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;tp3520videodata.tif&#39;</span><span class="p">,</span>
                          <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">videodata</span><span class="p">[</span><span class="n">tp</span> <span class="o">-</span> <span class="n">dt</span><span class="p">:</span><span class="n">tp</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">))</span>
 
     <span class="n">vc</span> <span class="o">=</span> <span class="n">vis_t</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">@</span> <span class="n">L</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">pixel_count</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">save</span><span class="p">:</span>
-        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520reconstructed_1wavelet.tif&#39;</span><span class="p">,</span>
+        <span class="n">tifffile</span><span class="o">.</span><span class="n">imwrite</span><span class="p">(</span><span class="s1">&#39;tp3520reconstructed_1wavelet.tif&#39;</span><span class="p">,</span>
                          <span class="p">(</span><span class="n">vs</span> <span class="o">+</span> <span class="n">vc</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">ny_full</span><span class="p">,</span> <span class="n">nx_full</span><span class="p">))</span>
 
     <span class="k">return</span> <span class="p">(</span><span class="n">vs</span> <span class="o">+</span> <span class="n">vc</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">ny_full</span><span class="p">,</span> <span class="n">nx_full</span><span class="p">)</span>
@@ -50692,7 +50764,7 @@ All nans in arr, stay nans in gauss.</p>
 
 
 <a href="#waven.Analysis_Utils.run_Full_Model" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">run_Full_Model</span><span class="p">(</span><span class="n">maxes0</span><span class="p">,</span> <span class="n">maxes1</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">idxs</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">sigmas</span><span class="p">,</span> <span class="n">frequencies</span><span class="p">,</span> <span class="n">visual_coverage</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">wavelet_path</span><span class="o">=</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/utils/2screens/10/&#39;</span><span class="p">,</span> <span class="n">savepath</span><span class="o">=</span><span class="s1">&#39;/home/sophie/Pictures/img zebra/supp/supp/&#39;</span><span class="p">,</span> <span class="n">n_min</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">18000</span><span class="p">],</span> <span class="n">memmapping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">train_idx</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">test_idx</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="n">double_wavelet_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lastmin</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">frames_per_minute</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">hz</span><span class="o">=</span><span class="n">DEFAULT_MOVIE_FRAME_RATE_HZ</span><span class="p">,</span> <span class="n">show_sem_errorbars</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">run_Full_Model</span><span class="p">(</span><span class="n">maxes0</span><span class="p">,</span> <span class="n">maxes1</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">idxs</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">sigmas</span><span class="p">,</span> <span class="n">frequencies</span><span class="p">,</span> <span class="n">visual_coverage</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">wavelet_path</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">savepath</span><span class="o">=</span><span class="s1">&#39;outputs&#39;</span><span class="p">,</span> <span class="n">n_min</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">memmapping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">train_idx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">test_idx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">double_wavelet_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lastmin</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">frames_per_minute</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">hz</span><span class="o">=</span><span class="n">DEFAULT_MOVIE_FRAME_RATE_HZ</span><span class="p">,</span> <span class="n">show_sem_errorbars</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -50858,7 +50930,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>&#39;/media/sophie/Expansion1/UCL/utils/2screens/10/&#39;</code>
+                  <code>&#39;.&#39;</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -50873,7 +50945,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>&#39;/home/sophie/Pictures/img zebra/supp/supp/&#39;</code>
+                  <code>&#39;outputs&#39;</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -50903,7 +50975,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>[0, 18000]</code>
+                  <code>None</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -50933,7 +51005,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>[0, 2]</code>
+                  <code>None</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -50948,7 +51020,7 @@ All nans in arr, stay nans in gauss.</p>
               </div>
             </td>
             <td>
-                  <code>[1, 3]</code>
+                  <code>None</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -51688,10 +51760,16 @@ All nans in arr, stay nans in gauss.</p>
 <span class="normal">890</span>
 <span class="normal">891</span>
 <span class="normal">892</span>
-<span class="normal">893</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_Full_Model</span><span class="p">(</span><span class="n">maxes0</span><span class="p">,</span> <span class="n">maxes1</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">idxs</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">sigmas</span><span class="p">,</span> <span class="n">frequencies</span><span class="p">,</span> <span class="n">visual_coverage</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span>
-                   <span class="n">wavelet_path</span><span class="o">=</span><span class="s1">&#39;/media/sophie/Expansion1/UCL/utils/2screens/10/&#39;</span><span class="p">,</span>
-                   <span class="n">savepath</span><span class="o">=</span><span class="s1">&#39;/home/sophie/Pictures/img zebra/supp/supp/&#39;</span><span class="p">,</span> <span class="n">n_min</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">18000</span><span class="p">],</span>
-                   <span class="n">memmapping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">train_idx</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">test_idx</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="n">double_wavelet_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lastmin</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="normal">893</span>
+<span class="normal">894</span>
+<span class="normal">895</span>
+<span class="normal">896</span>
+<span class="normal">897</span>
+<span class="normal">898</span>
+<span class="normal">899</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_Full_Model</span><span class="p">(</span><span class="n">maxes0</span><span class="p">,</span> <span class="n">maxes1</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">idxs</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">sigmas</span><span class="p">,</span> <span class="n">frequencies</span><span class="p">,</span> <span class="n">visual_coverage</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span>
+                   <span class="n">wavelet_path</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span>
+                   <span class="n">savepath</span><span class="o">=</span><span class="s1">&#39;outputs&#39;</span><span class="p">,</span> <span class="n">n_min</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">tt</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                   <span class="n">memmapping</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">train_idx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">test_idx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">double_wavelet_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lastmin</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
                    <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">frames_per_minute</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
                    <span class="n">hz</span><span class="o">=</span><span class="n">DEFAULT_MOVIE_FRAME_RATE_HZ</span><span class="p">,</span> <span class="n">show_sem_errorbars</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Function for run Full Model.</span>
@@ -51723,6 +51801,12 @@ All nans in arr, stay nans in gauss.</p>
 <span class="sd">    Returns:</span>
 <span class="sd">        Result produced by the operation.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">tt</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">tt</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">18000</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">train_idx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">train_idx</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">test_idx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">test_idx</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
     <span class="k">if</span> <span class="n">frames_per_minute</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">frames_per_minute</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">hz</span><span class="p">)</span> <span class="o">*</span> <span class="n">SECONDS_PER_MINUTE</span>
     <span class="n">frames_per_minute</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">frames_per_minute</span><span class="p">)</span>
@@ -52338,13 +52422,7 @@ All nans in arr, stay nans in gauss.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\analysis\model_runs.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">896</span>
-<span class="normal">897</span>
-<span class="normal">898</span>
-<span class="normal">899</span>
-<span class="normal">900</span>
-<span class="normal">901</span>
-<span class="normal">902</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">902</span>
 <span class="normal">903</span>
 <span class="normal">904</span>
 <span class="normal">905</span>
@@ -52360,7 +52438,13 @@ All nans in arr, stay nans in gauss.</p>
 <span class="normal">915</span>
 <span class="normal">916</span>
 <span class="normal">917</span>
-<span class="normal">918</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">plotNeuralRaster</span><span class="p">(</span><span class="n">spks</span><span class="p">):</span>
+<span class="normal">918</span>
+<span class="normal">919</span>
+<span class="normal">920</span>
+<span class="normal">921</span>
+<span class="normal">922</span>
+<span class="normal">923</span>
+<span class="normal">924</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">plotNeuralRaster</span><span class="p">(</span><span class="n">spks</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Plot neurons sorted by the first sparse-SVD component.</span>
 
 <span class="sd">    Parameters</span>
@@ -58894,7 +58978,74 @@ All nans in arr, stay nans in gauss.</p>
 <span class="normal">4407</span>
 <span class="normal">4408</span>
 <span class="normal">4409</span>
-<span class="normal">4410</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">param_defaults</span><span class="p">,</span> <span class="n">gabor_param</span><span class="p">,</span> <span class="n">workflow</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="normal">4410</span>
+<span class="normal">4411</span>
+<span class="normal">4412</span>
+<span class="normal">4413</span>
+<span class="normal">4414</span>
+<span class="normal">4415</span>
+<span class="normal">4416</span>
+<span class="normal">4417</span>
+<span class="normal">4418</span>
+<span class="normal">4419</span>
+<span class="normal">4420</span>
+<span class="normal">4421</span>
+<span class="normal">4422</span>
+<span class="normal">4423</span>
+<span class="normal">4424</span>
+<span class="normal">4425</span>
+<span class="normal">4426</span>
+<span class="normal">4427</span>
+<span class="normal">4428</span>
+<span class="normal">4429</span>
+<span class="normal">4430</span>
+<span class="normal">4431</span>
+<span class="normal">4432</span>
+<span class="normal">4433</span>
+<span class="normal">4434</span>
+<span class="normal">4435</span>
+<span class="normal">4436</span>
+<span class="normal">4437</span>
+<span class="normal">4438</span>
+<span class="normal">4439</span>
+<span class="normal">4440</span>
+<span class="normal">4441</span>
+<span class="normal">4442</span>
+<span class="normal">4443</span>
+<span class="normal">4444</span>
+<span class="normal">4445</span>
+<span class="normal">4446</span>
+<span class="normal">4447</span>
+<span class="normal">4448</span>
+<span class="normal">4449</span>
+<span class="normal">4450</span>
+<span class="normal">4451</span>
+<span class="normal">4452</span>
+<span class="normal">4453</span>
+<span class="normal">4454</span>
+<span class="normal">4455</span>
+<span class="normal">4456</span>
+<span class="normal">4457</span>
+<span class="normal">4458</span>
+<span class="normal">4459</span>
+<span class="normal">4460</span>
+<span class="normal">4461</span>
+<span class="normal">4462</span>
+<span class="normal">4463</span>
+<span class="normal">4464</span>
+<span class="normal">4465</span>
+<span class="normal">4466</span>
+<span class="normal">4467</span>
+<span class="normal">4468</span>
+<span class="normal">4469</span>
+<span class="normal">4470</span>
+<span class="normal">4471</span>
+<span class="normal">4472</span>
+<span class="normal">4473</span>
+<span class="normal">4474</span>
+<span class="normal">4475</span>
+<span class="normal">4476</span>
+<span class="normal">4477</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">param_defaults</span><span class="p">,</span> <span class="n">gabor_param</span><span class="p">,</span> <span class="n">workflow</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Function for run.</span>
 
 <span class="sd">    Args:</span>
@@ -59752,6 +59903,7 @@ All nans in arr, stay nans in gauss.</p>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">fields</span> <span class="o">=</span> <span class="p">{</span>
             <span class="s2">&quot;workflow&quot;</span><span class="p">:</span> <span class="n">workflow</span><span class="p">,</span>
+            <span class="s2">&quot;analysis_scale&quot;</span><span class="p">:</span> <span class="n">_selected_analysis_scale</span><span class="p">(),</span>
             <span class="s2">&quot;gabor&quot;</span><span class="p">:</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">_field_value</span><span class="p">(</span><span class="n">gabor_entries</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">gabor_entries</span><span class="p">)},</span>
             <span class="s2">&quot;analysis&quot;</span><span class="p">:</span> <span class="p">{</span>
                 <span class="n">key</span><span class="p">:</span> <span class="n">_field_value</span><span class="p">(</span><span class="n">param_entries</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
@@ -60705,6 +60857,27 @@ All nans in arr, stay nans in gauss.</p>
             <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">path_save</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;.zarr&quot;</span>
         <span class="k">return</span> <span class="n">path_save</span>
 
+    <span class="k">def</span><span class="w"> </span><span class="nf">_selected_analysis_scale</span><span class="p">():</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the currently selected analysis scale.&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">analysis_scale_var</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">NameError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s2">&quot;coarse&quot;</span>
+        <span class="k">return</span> <span class="n">value</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;coarse&quot;</span><span class="p">,</span> <span class="s2">&quot;full&quot;</span><span class="p">}</span> <span class="k">else</span> <span class="s2">&quot;coarse&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_scale_label</span><span class="p">(</span><span class="n">scale</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a short user-facing label for an analysis scale.&quot;&quot;&quot;</span>
+        <span class="n">scale</span> <span class="o">=</span> <span class="n">scale</span> <span class="ow">or</span> <span class="n">_selected_analysis_scale</span><span class="p">()</span>
+        <span class="k">return</span> <span class="s2">&quot;Full model&quot;</span> <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span> <span class="k">else</span> <span class="s2">&quot;Coarse RF&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_selected_gabor_kind</span><span class="p">():</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the library kind required by the current analysis scale.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="s2">&quot;fine&quot;</span> <span class="k">if</span> <span class="n">_selected_analysis_scale</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span> <span class="k">else</span> <span class="s2">&quot;coarse&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">create_selected_gabor_library</span><span class="p">():</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Build the Gabor library required by the selected analysis scale.&quot;&quot;&quot;</span>
+        <span class="n">create_gabor</span><span class="p">(</span><span class="n">_selected_gabor_kind</span><span class="p">())</span>
+
     <span class="k">def</span><span class="w"> </span><span class="nf">create_gabor</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;fine&quot;</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Function for create gabor.</span>
 
@@ -60805,7 +60978,7 @@ All nans in arr, stay nans in gauss.</p>
         <span class="n">create_gabor</span><span class="p">(</span><span class="s2">&quot;coarse&quot;</span><span class="p">)</span>
         <span class="n">create_gabor</span><span class="p">(</span><span class="s2">&quot;fine&quot;</span><span class="p">)</span>
 
-    <span class="k">def</span><span class="w"> </span><span class="nf">run_wavelet</span><span class="p">():</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_wavelet</span><span class="p">(</span><span class="n">scale</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Function for run wavelet.</span>
 
 <span class="sd">        Returns:</span>
@@ -60813,6 +60986,9 @@ All nans in arr, stay nans in gauss.</p>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">_ensure_wavelet_imports</span><span class="p">(</span><span class="s2">&quot;stimulus wavelet generation&quot;</span><span class="p">)</span>
         <span class="n">_raise_if_cancelled</span><span class="p">()</span>
+        <span class="n">scale</span> <span class="o">=</span> <span class="n">scale</span> <span class="ow">or</span> <span class="n">_selected_analysis_scale</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">scale</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;coarse&quot;</span><span class="p">,</span> <span class="s2">&quot;full&quot;</span><span class="p">}:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown wavelet decomposition scale: </span><span class="si">{</span><span class="n">scale</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">movpath</span> <span class="o">=</span> <span class="n">param_entries</span><span class="p">[</span><span class="s2">&quot;Movie Path&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">()</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">movpath</span><span class="p">:</span>
             <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error: Movie Path is required.&quot;</span><span class="p">)</span>
@@ -60840,10 +61016,10 @@ All nans in arr, stay nans in gauss.</p>
             <span class="n">coarse_lib_path</span> <span class="o">=</span> <span class="n">legacy_lib_path</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">fine_lib_path</span><span class="p">:</span>
             <span class="n">fine_lib_path</span> <span class="o">=</span> <span class="n">legacy_lib_path</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">coarse_lib_path</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Coarse Library Path is required. Click Build Coarse Library first.&quot;</span><span class="p">)</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">fine_lib_path</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Fine Library Path is required. Click Build Fine Library first.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;coarse&quot;</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">coarse_lib_path</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Coarse Library Path is required. Select Coarse RF and click Build Gabor Library first.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">fine_lib_path</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Fine Library Path is required. Select Full model and click Build Gabor Library first.&quot;</span><span class="p">)</span>
         <span class="n">nx</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">param_entries</span><span class="p">[</span><span class="s2">&quot;NX&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>
         <span class="n">ny</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">param_entries</span><span class="p">[</span><span class="s2">&quot;NY&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>
         <span class="n">n_thetas</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">gabor_entries</span><span class="p">[</span><span class="s2">&quot;N_thetas&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>
@@ -60882,75 +61058,125 @@ All nans in arr, stay nans in gauss.</p>
             <span class="nb">len</span><span class="p">(</span><span class="n">sigmas</span><span class="p">),</span>
         <span class="p">)</span>
         <span class="n">coarse_cache_shape</span> <span class="o">=</span> <span class="p">(</span><span class="mi">3</span><span class="p">,)</span> <span class="o">+</span> <span class="n">coarse_phase_shape</span>
-        <span class="n">coarse_cache_ready</span> <span class="o">=</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">coarse_cache_path</span><span class="p">,</span> <span class="n">coarse_cache_shape</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;coarse&quot;</span><span class="p">:</span>
+            <span class="n">current_wavelet_dir</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">wavelet_folder</span>
+            <span class="n">coarse_cache_ready</span> <span class="o">=</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">coarse_cache_path</span><span class="p">,</span> <span class="n">coarse_cache_shape</span><span class="p">)</span>
 
-        <span class="k">if</span> <span class="n">coarse_cache_ready</span><span class="p">:</span>
-            <span class="n">update_progress</span><span class="p">(</span><span class="mi">45</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Reusing coarse RF cache&quot;</span><span class="p">)</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed coarse RF wavelet cache, reusing </span><span class="si">{</span><span class="n">coarse_cache_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_cache_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">coarse_cache_path</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="n">coarse_cache_shape</span><span class="p">)</span>
-        <span class="k">else</span><span class="p">:</span>
-            <span class="n">update_progress</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing coarse stimulus movie&quot;</span><span class="p">)</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 1/5: Preparing coarse stimulus movie...&quot;</span><span class="p">)</span>
-            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">coarse_downsample_path</span><span class="p">):</span>
-                <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">coarse_downsample_path</span><span class="p">)</span>
-            <span class="k">if</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">coarse_downsample_path</span><span class="p">,</span> <span class="p">(</span><span class="n">expected_frames</span><span class="p">,</span> <span class="n">coarse_ny</span><span class="p">,</span> <span class="n">coarse_nx</span><span class="p">)):</span>
-                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed coarse downsampled movie, reusing </span><span class="si">{</span><span class="n">coarse_downsample_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-                <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_downsampling_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">coarse_downsample_path</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">coarse_cache_ready</span><span class="p">:</span>
+                <span class="n">update_progress</span><span class="p">(</span><span class="mi">80</span><span class="p">,</span> <span class="s2">&quot;Coarse wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Reusing coarse RF cache&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed coarse RF wavelet cache, reusing </span><span class="si">{</span><span class="n">coarse_cache_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_cache_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">coarse_cache_path</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="n">coarse_cache_shape</span><span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
-                <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;wavelet_downsampling_started&quot;</span><span class="p">,</span> <span class="n">wavelet_folder</span><span class="o">=</span><span class="n">wavelet_folder</span><span class="p">)</span>
-                <span class="n">ratio_x</span><span class="p">,</span> <span class="n">ratio_y</span> <span class="o">=</span> <span class="n">_coverage_ratios</span><span class="p">()</span>
-                <span class="n">downsample_video_binary</span><span class="p">(</span>
-                    <span class="n">movpath</span><span class="p">,</span>
-                    <span class="n">visual_coverage</span><span class="p">,</span>
-                    <span class="n">analysis_coverage</span><span class="p">,</span>
-                    <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">coarse_ny</span><span class="p">,</span> <span class="n">coarse_nx</span><span class="p">),</span>
-                    <span class="n">chunk_size</span><span class="o">=</span><span class="n">video_downsample_chunk_size</span><span class="p">(),</span>
-                    <span class="n">ratios</span><span class="o">=</span><span class="p">(</span><span class="n">ratio_x</span><span class="p">,</span> <span class="n">ratio_y</span><span class="p">),</span>
-                    <span class="n">save_path</span><span class="o">=</span><span class="n">coarse_downsample_path</span><span class="p">,</span>
-                    <span class="n">cancel_event</span><span class="o">=</span><span class="n">_current_cancel_event</span><span class="p">(),</span>
-                <span class="p">)</span>
-            <span class="n">_raise_if_cancelled</span><span class="p">()</span>
-            <span class="n">videodata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">coarse_downsample_path</span><span class="p">,</span> <span class="n">mmap_mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
-            <span class="n">videodata</span> <span class="o">=</span> <span class="n">videodata</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_not</span><span class="p">(</span><span class="n">videodata</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+                <span class="n">update_progress</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;Coarse wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing coarse stimulus movie&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 1/4: Preparing coarse stimulus movie...&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">coarse_downsample_path</span><span class="p">):</span>
+                    <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">coarse_downsample_path</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">coarse_downsample_path</span><span class="p">,</span> <span class="p">(</span><span class="n">expected_frames</span><span class="p">,</span> <span class="n">coarse_ny</span><span class="p">,</span> <span class="n">coarse_nx</span><span class="p">)):</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed coarse downsampled movie, reusing </span><span class="si">{</span><span class="n">coarse_downsample_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_downsampling_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">coarse_downsample_path</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;wavelet_downsampling_started&quot;</span><span class="p">,</span> <span class="n">wavelet_folder</span><span class="o">=</span><span class="n">wavelet_folder</span><span class="p">)</span>
+                    <span class="n">ratio_x</span><span class="p">,</span> <span class="n">ratio_y</span> <span class="o">=</span> <span class="n">_coverage_ratios</span><span class="p">()</span>
+                    <span class="n">downsample_video_binary</span><span class="p">(</span>
+                        <span class="n">movpath</span><span class="p">,</span>
+                        <span class="n">visual_coverage</span><span class="p">,</span>
+                        <span class="n">analysis_coverage</span><span class="p">,</span>
+                        <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">coarse_ny</span><span class="p">,</span> <span class="n">coarse_nx</span><span class="p">),</span>
+                        <span class="n">chunk_size</span><span class="o">=</span><span class="n">video_downsample_chunk_size</span><span class="p">(),</span>
+                        <span class="n">ratios</span><span class="o">=</span><span class="p">(</span><span class="n">ratio_x</span><span class="p">,</span> <span class="n">ratio_y</span><span class="p">),</span>
+                        <span class="n">save_path</span><span class="o">=</span><span class="n">coarse_downsample_path</span><span class="p">,</span>
+                        <span class="n">cancel_event</span><span class="o">=</span><span class="n">_current_cancel_event</span><span class="p">(),</span>
+                    <span class="p">)</span>
+                <span class="n">_raise_if_cancelled</span><span class="p">()</span>
+                <span class="n">videodata</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">coarse_downsample_path</span><span class="p">,</span> <span class="n">mmap_mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
+                <span class="n">videodata</span> <span class="o">=</span> <span class="n">videodata</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_not</span><span class="p">(</span><span class="n">videodata</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
 
-            <span class="n">update_progress</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing coarse real phase&quot;</span><span class="p">)</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 2/5: Preparing coarse real phase wavelets...&quot;</span><span class="p">)</span>
-            <span class="k">if</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">real_phase_path</span><span class="p">,</span> <span class="n">coarse_phase_shape</span><span class="p">):</span>
-                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed coarse real phase, reusing </span><span class="si">{</span><span class="n">real_phase_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-                <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_phase_real_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">real_phase_path</span><span class="p">)</span>
-            <span class="k">else</span><span class="p">:</span>
-                <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">real_phase_path</span><span class="p">)</span>
-                <span class="n">waveletDecomposition</span><span class="p">(</span>
-                    <span class="n">videodata</span><span class="p">,</span>
-                    <span class="mi">0</span><span class="p">,</span>
-                    <span class="n">sigmas</span><span class="p">,</span>
+                <span class="n">update_progress</span><span class="p">(</span><span class="mi">25</span><span class="p">,</span> <span class="s2">&quot;Coarse wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing coarse real phase&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 2/4: Preparing coarse real phase wavelets...&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">real_phase_path</span><span class="p">,</span> <span class="n">coarse_phase_shape</span><span class="p">):</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed coarse real phase, reusing </span><span class="si">{</span><span class="n">real_phase_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_phase_real_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">real_phase_path</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">real_phase_path</span><span class="p">)</span>
+                    <span class="n">waveletDecomposition</span><span class="p">(</span>
+                        <span class="n">videodata</span><span class="p">,</span>
+                        <span class="mi">0</span><span class="p">,</span>
+                        <span class="n">sigmas</span><span class="p">,</span>
+                        <span class="n">wavelet_folder</span><span class="p">,</span>
+                        <span class="n">coarse_lib_path</span><span class="p">,</span>
+                        <span class="n">cancel_event</span><span class="o">=</span><span class="n">_current_cancel_event</span><span class="p">(),</span>
+                    <span class="p">)</span>
+                    <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_phase_real_complete&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">real_phase_path</span><span class="p">)</span>
+
+                <span class="n">update_progress</span><span class="p">(</span><span class="mi">45</span><span class="p">,</span> <span class="s2">&quot;Coarse wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing coarse imaginary phase&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 3/4: Preparing coarse imaginary phase wavelets...&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">imag_phase_path</span><span class="p">,</span> <span class="n">coarse_phase_shape</span><span class="p">):</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed coarse imaginary phase, reusing </span><span class="si">{</span><span class="n">imag_phase_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_phase_imaginary_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">imag_phase_path</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">imag_phase_path</span><span class="p">)</span>
+                    <span class="n">waveletDecomposition</span><span class="p">(</span>
+                        <span class="n">videodata</span><span class="p">,</span>
+                        <span class="mi">1</span><span class="p">,</span>
+                        <span class="n">sigmas</span><span class="p">,</span>
+                        <span class="n">wavelet_folder</span><span class="p">,</span>
+                        <span class="n">coarse_lib_path</span><span class="p">,</span>
+                        <span class="n">cancel_event</span><span class="o">=</span><span class="n">_current_cancel_event</span><span class="p">(),</span>
+                    <span class="p">)</span>
+                    <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_phase_imaginary_complete&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">imag_phase_path</span><span class="p">)</span>
+
+                <span class="n">update_progress</span><span class="p">(</span><span class="mi">68</span><span class="p">,</span> <span class="s2">&quot;Coarse wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Generating coarse RF cache&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 4/4: Generating coarse wavelet cache for RF analysis...&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">coarse_cache_path</span><span class="p">):</span>
+                    <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">coarse_cache_path</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">scratch_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;dwt_r_downsampled.mmap&quot;</span><span class="p">,</span> <span class="s2">&quot;dwt_i_downsampled.mmap&quot;</span><span class="p">,</span> <span class="s2">&quot;dwt_c_downsampled.mmap&quot;</span><span class="p">):</span>
+                    <span class="n">scratch_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wavelet_folder</span><span class="p">,</span> <span class="n">scratch_name</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">scratch_path</span><span class="p">):</span>
+                        <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">scratch_path</span><span class="p">)</span>
+                <span class="n">coarseWavelet</span><span class="p">(</span>
                     <span class="n">wavelet_folder</span><span class="p">,</span>
-                    <span class="n">coarse_lib_path</span><span class="p">,</span>
+                    <span class="kc">False</span><span class="p">,</span>
+                    <span class="n">nx0</span><span class="o">=</span><span class="n">coarse_nx</span><span class="p">,</span>
+                    <span class="n">ny0</span><span class="o">=</span><span class="n">coarse_ny</span><span class="p">,</span>
+                    <span class="n">no</span><span class="o">=</span><span class="n">n_thetas</span><span class="p">,</span>
+                    <span class="n">ns</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">sigmas</span><span class="p">),</span>
+                    <span class="n">nf</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                    <span class="n">nx</span><span class="o">=</span><span class="n">coarse_nx</span><span class="p">,</span>
+                    <span class="n">ny</span><span class="o">=</span><span class="n">coarse_ny</span><span class="p">,</span>
+                    <span class="n">chunk_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
                     <span class="n">cancel_event</span><span class="o">=</span><span class="n">_current_cancel_event</span><span class="p">(),</span>
                 <span class="p">)</span>
-                <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_phase_real_complete&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">real_phase_path</span><span class="p">)</span>
+                <span class="n">_raise_if_cancelled</span><span class="p">()</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">coarse_cache_path</span><span class="p">,</span> <span class="n">coarse_cache_shape</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Coarse cache was written with an unexpected shape: </span><span class="si">{</span><span class="n">coarse_cache_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_cache_complete&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">coarse_cache_path</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">intermediate_path</span> <span class="ow">in</span> <span class="p">(</span><span class="n">real_phase_path</span><span class="p">,</span> <span class="n">imag_phase_path</span><span class="p">):</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">intermediate_path</span><span class="p">):</span>
+                            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">intermediate_path</span><span class="p">)</span>
+                            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Removed intermediate coarse phase file: </span><span class="si">{</span><span class="n">intermediate_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not remove intermediate file </span><span class="si">{</span><span class="n">intermediate_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-            <span class="n">update_progress</span><span class="p">(</span><span class="mi">32</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing coarse imaginary phase&quot;</span><span class="p">)</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 3/5: Preparing coarse imaginary phase wavelets...&quot;</span><span class="p">)</span>
-            <span class="k">if</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">imag_phase_path</span><span class="p">,</span> <span class="n">coarse_phase_shape</span><span class="p">):</span>
-                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed coarse imaginary phase, reusing </span><span class="si">{</span><span class="n">imag_phase_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-                <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_phase_imaginary_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">imag_phase_path</span><span class="p">)</span>
-            <span class="k">else</span><span class="p">:</span>
-                <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">imag_phase_path</span><span class="p">)</span>
-                <span class="n">waveletDecomposition</span><span class="p">(</span>
-                    <span class="n">videodata</span><span class="p">,</span>
-                    <span class="mi">1</span><span class="p">,</span>
-                    <span class="n">sigmas</span><span class="p">,</span>
-                    <span class="n">wavelet_folder</span><span class="p">,</span>
-                    <span class="n">coarse_lib_path</span><span class="p">,</span>
-                    <span class="n">cancel_event</span><span class="o">=</span><span class="n">_current_cancel_event</span><span class="p">(),</span>
-                <span class="p">)</span>
-                <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_phase_imaginary_complete&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">imag_phase_path</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">scratch_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;dwt_r_downsampled.mmap&quot;</span><span class="p">,</span> <span class="s2">&quot;dwt_i_downsampled.mmap&quot;</span><span class="p">,</span> <span class="s2">&quot;dwt_c_downsampled.mmap&quot;</span><span class="p">):</span>
+                    <span class="n">scratch_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wavelet_folder</span><span class="p">,</span> <span class="n">scratch_name</span><span class="p">)</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">scratch_path</span><span class="p">):</span>
+                            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">scratch_path</span><span class="p">)</span>
+                            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Removed temporary coarse cache scratch file: </span><span class="si">{</span><span class="n">scratch_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not remove temporary scratch file </span><span class="si">{</span><span class="n">scratch_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-        <span class="nb">print</span><span class="p">(</span>
-            <span class="sa">f</span><span class="s2">&quot;Coarse RF grid derived from config: </span><span class="si">{</span><span class="n">coarse_nx</span><span class="si">}</span><span class="s2"> x </span><span class="si">{</span><span class="n">coarse_ny</span><span class="si">}</span><span class="s2"> &quot;</span>
-            <span class="sa">f</span><span class="s2">&quot;(20% of </span><span class="si">{</span><span class="n">nx</span><span class="si">}</span><span class="s2"> x </span><span class="si">{</span><span class="n">ny</span><span class="si">}</span><span class="s2">)&quot;</span>
-        <span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Coarse RF grid derived from config: </span><span class="si">{</span><span class="n">coarse_nx</span><span class="si">}</span><span class="s2"> x </span><span class="si">{</span><span class="n">coarse_ny</span><span class="si">}</span><span class="s2"> &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;(20% of </span><span class="si">{</span><span class="n">nx</span><span class="si">}</span><span class="s2"> x </span><span class="si">{</span><span class="n">ny</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Coarse wavelet files are ready: </span><span class="si">{</span><span class="n">wavelet_folder</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">update_progress</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot;Coarse wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Coarse RF cache ready&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+
+        <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span><span class="p">:</span>
+            <span class="n">update_progress</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Full wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing full-model outputs&quot;</span><span class="p">)</span>
 
         <span class="n">full_output_target</span> <span class="o">=</span> <span class="n">param_entries</span><span class="p">[</span><span class="s2">&quot;Full Model Wavelet Path&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">()</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">full_output_target</span><span class="p">:</span>
@@ -60963,55 +61189,12 @@ All nans in arr, stay nans in gauss.</p>
             <span class="n">full_output</span> <span class="o">=</span> <span class="n">full_output_target</span>
             <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">full_output</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">coarse_cache_ready</span><span class="p">:</span>
-            <span class="n">update_progress</span><span class="p">(</span><span class="mi">48</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Generating coarse RF cache&quot;</span><span class="p">)</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 4/5: Generating coarse wavelet cache for RF analysis...&quot;</span><span class="p">)</span>
-            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">coarse_cache_path</span><span class="p">):</span>
-                <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">coarse_cache_path</span><span class="p">)</span>
-            <span class="k">for</span> <span class="n">scratch_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;dwt_r_downsampled.mmap&quot;</span><span class="p">,</span> <span class="s2">&quot;dwt_i_downsampled.mmap&quot;</span><span class="p">,</span> <span class="s2">&quot;dwt_c_downsampled.mmap&quot;</span><span class="p">):</span>
-                <span class="n">scratch_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wavelet_folder</span><span class="p">,</span> <span class="n">scratch_name</span><span class="p">)</span>
-                <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">scratch_path</span><span class="p">):</span>
-                    <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">scratch_path</span><span class="p">)</span>
-            <span class="n">coarseWavelet</span><span class="p">(</span>
-                <span class="n">wavelet_folder</span><span class="p">,</span>
-                <span class="kc">False</span><span class="p">,</span>
-                <span class="n">nx0</span><span class="o">=</span><span class="n">coarse_nx</span><span class="p">,</span>
-                <span class="n">ny0</span><span class="o">=</span><span class="n">coarse_ny</span><span class="p">,</span>
-                <span class="n">no</span><span class="o">=</span><span class="n">n_thetas</span><span class="p">,</span>
-                <span class="n">ns</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">sigmas</span><span class="p">),</span>
-                <span class="n">nf</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
-                <span class="n">nx</span><span class="o">=</span><span class="n">coarse_nx</span><span class="p">,</span>
-                <span class="n">ny</span><span class="o">=</span><span class="n">coarse_ny</span><span class="p">,</span>
-                <span class="n">chunk_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-                <span class="n">cancel_event</span><span class="o">=</span><span class="n">_current_cancel_event</span><span class="p">(),</span>
-            <span class="p">)</span>
-            <span class="n">_raise_if_cancelled</span><span class="p">()</span>
-            <span class="k">if</span> <span class="ow">not</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">coarse_cache_path</span><span class="p">,</span> <span class="n">coarse_cache_shape</span><span class="p">):</span>
-                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Coarse cache was written with an unexpected shape: </span><span class="si">{</span><span class="n">coarse_cache_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;coarse_cache_complete&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">coarse_cache_path</span><span class="p">)</span>
-            <span class="k">for</span> <span class="n">intermediate_path</span> <span class="ow">in</span> <span class="p">(</span><span class="n">real_phase_path</span><span class="p">,</span> <span class="n">imag_phase_path</span><span class="p">):</span>
-                <span class="k">try</span><span class="p">:</span>
-                    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">intermediate_path</span><span class="p">):</span>
-                        <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">intermediate_path</span><span class="p">)</span>
-                        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Removed intermediate coarse phase file: </span><span class="si">{</span><span class="n">intermediate_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
-                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not remove intermediate file </span><span class="si">{</span><span class="n">intermediate_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-            <span class="k">for</span> <span class="n">scratch_name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;dwt_r_downsampled.mmap&quot;</span><span class="p">,</span> <span class="s2">&quot;dwt_i_downsampled.mmap&quot;</span><span class="p">,</span> <span class="s2">&quot;dwt_c_downsampled.mmap&quot;</span><span class="p">):</span>
-                <span class="n">scratch_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">wavelet_folder</span><span class="p">,</span> <span class="n">scratch_name</span><span class="p">)</span>
-                <span class="k">try</span><span class="p">:</span>
-                    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">scratch_path</span><span class="p">):</span>
-                        <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">scratch_path</span><span class="p">)</span>
-                        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Removed temporary coarse cache scratch file: </span><span class="si">{</span><span class="n">scratch_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
-                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not remove temporary scratch file </span><span class="si">{</span><span class="n">scratch_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
         <span class="n">sigmas_full</span> <span class="o">=</span> <span class="n">parse_literal</span><span class="p">(</span>
             <span class="n">param_entries</span><span class="p">[</span><span class="s2">&quot;Sigmas Full Model&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(),</span>
             <span class="s2">&quot;Sigmas Full Model&quot;</span><span class="p">,</span>
         <span class="p">)</span>
-        <span class="n">update_progress</span><span class="p">(</span><span class="mi">65</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing full-resolution wavelets&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 5/5: Generating full-resolution wavelets for run_Full_Model...&quot;</span><span class="p">)</span>
+        <span class="n">update_progress</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="s2">&quot;Full wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Preparing full-resolution stimulus movie&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Step 1/3: Preparing full-resolution stimulus movie...&quot;</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">_artifact_matches</span><span class="p">(</span><span class="n">full_downsample_path</span><span class="p">,</span> <span class="p">(</span><span class="n">expected_frames</span><span class="p">,</span> <span class="n">ny</span><span class="p">,</span> <span class="n">nx</span><span class="p">)):</span>
             <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed full-resolution downsampled movie, reusing </span><span class="si">{</span><span class="n">full_downsample_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;full_downsampling_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">full_downsample_path</span><span class="p">)</span>
@@ -61055,7 +61238,7 @@ All nans in arr, stay nans in gauss.</p>
                 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resume: found completed full-model wavelets, reusing </span><span class="si">{</span><span class="n">target</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
                 <span class="n">_write_recovery_step</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;full_model_phase_</span><span class="si">{</span><span class="n">phase</span><span class="si">}</span><span class="s2">_reused&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">target</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="n">full_model_shape</span><span class="p">)</span>
                 <span class="k">continue</span>
-            <span class="n">update_progress</span><span class="p">(</span><span class="mi">75</span> <span class="o">+</span> <span class="n">phase</span> <span class="o">*</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Writing full-model phase </span><span class="si">{</span><span class="n">phase</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">update_progress</span><span class="p">(</span><span class="mi">45</span> <span class="o">+</span> <span class="n">phase</span> <span class="o">*</span> <span class="mi">25</span><span class="p">,</span> <span class="s2">&quot;Full wavelet decomposition&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Writing full-model phase </span><span class="si">{</span><span class="n">phase</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">_register_cancel_cleanup_path</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
             <span class="n">waveletDecompositionFull</span><span class="p">(</span>
                 <span class="n">videodata</span><span class="p">,</span>
@@ -61076,12 +61259,12 @@ All nans in arr, stay nans in gauss.</p>
         <span class="k">if</span> <span class="n">is_zarr_wavelet</span><span class="p">:</span>
             <span class="n">_write_recovery_step</span><span class="p">(</span><span class="s2">&quot;full_model_zarr_complete&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="n">full_output_target</span><span class="p">)</span>
             <span class="nb">print</span><span class="p">(</span>
-                <span class="sa">f</span><span class="s2">&quot;All wavelet files are ready. Coarse NPY cache: </span><span class="si">{</span><span class="n">wavelet_folder</span><span class="si">}</span><span class="s2"> | &quot;</span>
-                <span class="sa">f</span><span class="s2">&quot;Full-model Zarr: </span><span class="si">{</span><span class="n">full_output_target</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Full-model wavelet files are ready. Zarr output: </span><span class="si">{</span><span class="n">full_output_target</span><span class="si">}</span><span class="s2">&quot;</span>
             <span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;All wavelet files are ready. Coarse: </span><span class="si">{</span><span class="n">wavelet_folder</span><span class="si">}</span><span class="s2"> | Full-model NPY: </span><span class="si">{</span><span class="n">full_output</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="n">update_progress</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Wavelet files ready&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Full-model wavelet files are ready. NPY output: </span><span class="si">{</span><span class="n">full_output</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">update_progress</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot;Full wavelet decomposition&quot;</span><span class="p">,</span> <span class="s2">&quot;Full-model wavelets ready&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">embed_interactive_figure</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">parent_container</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Embed a matplotlib figure with navigation toolbar in ``parent_container``.&quot;&quot;&quot;</span>
@@ -61964,6 +62147,12 @@ All nans in arr, stay nans in gauss.</p>
         <span class="p">)</span>
         <span class="n">_append_model_figures</span><span class="p">(</span><span class="n">figures</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;run_Full_Model neuron </span><span class="si">{</span><span class="n">neuron_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
+    <span class="k">def</span><span class="w"> </span><span class="nf">plot_selected_model_outputs</span><span class="p">():</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Run the model plotter that matches the selected analysis scale.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">_selected_analysis_scale</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">plot_run_full_model_outputs</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">plot_run_model_outputs</span><span class="p">()</span>
+
     <span class="k">def</span><span class="w"> </span><span class="nf">click_save</span><span class="p">():</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Function for click save.&quot;&quot;&quot;</span>
         <span class="k">try</span><span class="p">:</span>
@@ -62029,6 +62218,7 @@ All nans in arr, stay nans in gauss.</p>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Function for save app state.&quot;&quot;&quot;</span>
         <span class="n">state</span> <span class="o">=</span> <span class="p">{</span>
             <span class="s2">&quot;workflow&quot;</span><span class="p">:</span> <span class="n">workflow</span><span class="p">,</span>
+            <span class="s2">&quot;analysis_scale&quot;</span><span class="p">:</span> <span class="n">_selected_analysis_scale</span><span class="p">(),</span>
             <span class="s2">&quot;gabor&quot;</span><span class="p">:</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">entry</span><span class="o">.</span><span class="n">get</span><span class="p">()</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">gabor_entries</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
             <span class="s2">&quot;analysis&quot;</span><span class="p">:</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">entry</span><span class="o">.</span><span class="n">get</span><span class="p">()</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">param_entries</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
             <span class="s2">&quot;save_options&quot;</span><span class="p">:</span> <span class="p">{</span>
@@ -62068,6 +62258,10 @@ All nans in arr, stay nans in gauss.</p>
             <span class="k">if</span> <span class="n">loaded_workflow</span> <span class="ow">in</span> <span class="p">(</span><span class="n">WORKFLOW_2P</span><span class="p">,</span> <span class="n">WORKFLOW_EPHYS</span><span class="p">)</span> <span class="ow">and</span> <span class="n">loaded_workflow</span> <span class="o">!=</span> <span class="n">workflow</span><span class="p">:</span>
                 <span class="n">workflow_var</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">loaded_workflow</span><span class="p">)</span>
                 <span class="n">set_workflow_from_panel</span><span class="p">(</span><span class="n">loaded_workflow</span><span class="p">)</span>
+            <span class="n">loaded_scale</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;analysis_scale&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">loaded_scale</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;coarse&quot;</span><span class="p">,</span> <span class="s2">&quot;full&quot;</span><span class="p">}:</span>
+                <span class="n">analysis_scale_var</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">loaded_scale</span><span class="p">)</span>
+                <span class="n">set_analysis_scale_from_panel</span><span class="p">(</span><span class="n">loaded_scale</span><span class="p">)</span>
             <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;gabor&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
                 <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">gabor_entries</span><span class="p">:</span>
                     <span class="n">gabor_entries</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">tk</span><span class="o">.</span><span class="n">END</span><span class="p">)</span>
@@ -62188,29 +62382,30 @@ All nans in arr, stay nans in gauss.</p>
                 <span class="n">offsets</span><span class="p">,</span>
                 <span class="n">frequencies</span><span class="p">,</span>
             <span class="p">)</span>
+            <span class="n">scale</span> <span class="o">=</span> <span class="n">_selected_analysis_scale</span><span class="p">()</span>
             <span class="k">if</span> <span class="n">gabor_format_var</span><span class="o">.</span><span class="n">get</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;zarr&quot;</span><span class="p">:</span>
-                <span class="n">coarse_exact</span> <span class="o">=</span> <span class="n">_folder_size_bytes</span><span class="p">(</span><span class="n">_zarr_output_path</span><span class="p">(</span><span class="n">_library_output_path</span><span class="p">(</span><span class="s2">&quot;coarse&quot;</span><span class="p">,</span> <span class="n">gabor_entries</span><span class="p">[</span><span class="s2">&quot;Save Path&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">())))</span>
-                <span class="n">fine_exact</span> <span class="o">=</span> <span class="n">_folder_size_bytes</span><span class="p">(</span><span class="n">_zarr_output_path</span><span class="p">(</span><span class="n">_library_output_path</span><span class="p">(</span><span class="s2">&quot;fine&quot;</span><span class="p">,</span> <span class="n">gabor_entries</span><span class="p">[</span><span class="s2">&quot;Save Path&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">())))</span>
-                <span class="k">if</span> <span class="n">coarse_exact</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">fine_exact</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-                    <span class="n">parts</span> <span class="o">=</span> <span class="p">[]</span>
-                    <span class="k">if</span> <span class="n">coarse_exact</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-                        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;coarse current </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">coarse_exact</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-                    <span class="k">if</span> <span class="n">fine_exact</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-                        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;fine current </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">fine_exact</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-                    <span class="n">gabor_size_label</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Gabor Zarr size: &quot;</span> <span class="o">+</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">))</span>
+                <span class="n">kind</span> <span class="o">=</span> <span class="s2">&quot;fine&quot;</span> <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span> <span class="k">else</span> <span class="s2">&quot;coarse&quot;</span>
+                <span class="n">exact</span> <span class="o">=</span> <span class="n">_folder_size_bytes</span><span class="p">(</span><span class="n">_zarr_output_path</span><span class="p">(</span><span class="n">_library_output_path</span><span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="n">gabor_entries</span><span class="p">[</span><span class="s2">&quot;Save Path&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">())))</span>
+                <span class="n">expected_bytes</span> <span class="o">=</span> <span class="n">fine_bytes</span> <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span> <span class="k">else</span> <span class="n">coarse_bytes</span>
+                <span class="n">expected_shape</span> <span class="o">=</span> <span class="n">fine_shape</span> <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span> <span class="k">else</span> <span class="n">coarse_shape</span>
+                <span class="k">if</span> <span class="n">exact</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">gabor_size_label</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span>
+                        <span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_scale_label</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span><span class="si">}</span><span class="s2"> Gabor Zarr current size: </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">exact</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+                    <span class="p">)</span>
                 <span class="k">else</span><span class="p">:</span>
                     <span class="n">gabor_size_label</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span>
                         <span class="n">text</span><span class="o">=</span><span class="p">(</span>
-                            <span class="s2">&quot;Gabor Zarr size: compression-dependent; &quot;</span>
-                            <span class="sa">f</span><span class="s2">&quot;NPY equivalent coarse </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">coarse_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2">, &quot;</span>
-                            <span class="sa">f</span><span class="s2">&quot;fine </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">fine_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+                            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_scale_label</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span><span class="si">}</span><span class="s2"> Gabor Zarr size: compression-dependent; &quot;</span>
+                            <span class="sa">f</span><span class="s2">&quot;NPY equivalent </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">expected_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">expected_shape</span><span class="si">}</span><span class="s2">&quot;</span>
                         <span class="p">)</span>
                     <span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
+                <span class="n">expected_bytes</span> <span class="o">=</span> <span class="n">fine_bytes</span> <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span> <span class="k">else</span> <span class="n">coarse_bytes</span>
+                <span class="n">expected_shape</span> <span class="o">=</span> <span class="n">fine_shape</span> <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span> <span class="k">else</span> <span class="n">coarse_shape</span>
                 <span class="n">gabor_size_label</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span>
                     <span class="n">text</span><span class="o">=</span><span class="p">(</span>
-                        <span class="sa">f</span><span class="s2">&quot;Exact NPY sizes: coarse </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">coarse_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
-                        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">coarse_shape</span><span class="si">}</span><span class="s2">, fine </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">fine_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fine_shape</span><span class="si">}</span><span class="s2">&quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_scale_label</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span><span class="si">}</span><span class="s2"> Gabor NPY size: &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">expected_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">expected_shape</span><span class="si">}</span><span class="s2">&quot;</span>
                     <span class="p">)</span>
                 <span class="p">)</span>
         <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
@@ -62242,8 +62437,15 @@ All nans in arr, stay nans in gauss.</p>
             <span class="n">coarse_phase_bytes</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">n_frames</span> <span class="o">*</span> <span class="n">coarse_nx</span> <span class="o">*</span> <span class="n">coarse_ny</span> <span class="o">*</span> <span class="n">n_thetas</span> <span class="o">*</span> <span class="n">n_sigmas</span> <span class="o">*</span> <span class="n">bytes_per_float</span>
             <span class="n">coarse_cache_bytes</span> <span class="o">=</span> <span class="mi">3</span> <span class="o">*</span> <span class="n">n_frames</span> <span class="o">*</span> <span class="n">coarse_nx</span> <span class="o">*</span> <span class="n">coarse_ny</span> <span class="o">*</span> <span class="n">n_thetas</span> <span class="o">*</span> <span class="n">n_sigmas</span> <span class="o">*</span> <span class="n">bytes_per_float</span>
             <span class="n">full_model_raw_bytes</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">n_frames</span> <span class="o">*</span> <span class="n">nx</span> <span class="o">*</span> <span class="n">ny</span> <span class="o">*</span> <span class="n">n_thetas</span> <span class="o">*</span> <span class="n">n_sigmas_full</span> <span class="o">*</span> <span class="n">n_frequencies</span> <span class="o">*</span> <span class="n">bytes_per_float</span>
-            <span class="n">npy_equivalent</span> <span class="o">=</span> <span class="n">coarse_cache_bytes</span> <span class="o">+</span> <span class="n">full_model_raw_bytes</span>
-            <span class="k">if</span> <span class="n">wavelet_format_var</span><span class="o">.</span><span class="n">get</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;zarr&quot;</span><span class="p">:</span>
+            <span class="n">scale</span> <span class="o">=</span> <span class="n">_selected_analysis_scale</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;coarse&quot;</span><span class="p">:</span>
+                <span class="n">wavelet_size_label</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span>
+                    <span class="n">text</span><span class="o">=</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Coarse RF wavelet NPY size: </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">coarse_cache_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_frames</span><span class="si">}</span><span class="s2"> frames; temp phases +</span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">coarse_phase_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+                    <span class="p">)</span>
+                <span class="p">)</span>
+            <span class="k">elif</span> <span class="n">wavelet_format_var</span><span class="o">.</span><span class="n">get</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;zarr&quot;</span><span class="p">:</span>
                 <span class="n">full_path</span> <span class="o">=</span> <span class="n">param_entries</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;Full Model Wavelet Path&quot;</span><span class="p">)</span>
                 <span class="n">full_dir</span> <span class="o">=</span> <span class="n">full_path</span><span class="o">.</span><span class="n">get</span><span class="p">()</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">if</span> <span class="n">full_path</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
                 <span class="k">if</span> <span class="n">full_dir</span><span class="p">:</span>
@@ -62253,27 +62455,25 @@ All nans in arr, stay nans in gauss.</p>
                     <span class="n">exact_i</span> <span class="o">=</span> <span class="n">exact_r</span> <span class="o">=</span> <span class="kc">None</span>
                 <span class="k">if</span> <span class="n">exact_i</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">exact_r</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
                     <span class="n">full_model_bytes</span> <span class="o">=</span> <span class="n">exact_i</span> <span class="o">+</span> <span class="n">exact_r</span>
-                    <span class="n">total_bytes</span> <span class="o">=</span> <span class="n">coarse_cache_bytes</span> <span class="o">+</span> <span class="n">full_model_bytes</span>
                     <span class="n">wavelet_size_label</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span>
                         <span class="n">text</span><span class="o">=</span><span class="p">(</span>
-                            <span class="sa">f</span><span class="s2">&quot;Current wavelet disk usage: </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">total_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
-                            <span class="sa">f</span><span class="s2">&quot;(Zarr full model + exact coarse cache; temp coarse phases &quot;</span>
-                            <span class="sa">f</span><span class="s2">&quot;+</span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">coarse_phase_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+                            <span class="sa">f</span><span class="s2">&quot;Full-model wavelet current disk usage: </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">full_model_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+                            <span class="s2">&quot;(Zarr real + imaginary phases)&quot;</span>
                         <span class="p">)</span>
                     <span class="p">)</span>
                 <span class="k">else</span><span class="p">:</span>
                     <span class="n">wavelet_size_label</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span>
                         <span class="n">text</span><span class="o">=</span><span class="p">(</span>
-                            <span class="s2">&quot;Wavelet Zarr size: compression-dependent; &quot;</span>
-                            <span class="sa">f</span><span class="s2">&quot;NPY equivalent </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">npy_equivalent</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
-                            <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_frames</span><span class="si">}</span><span class="s2"> frames; temp coarse phases +</span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">coarse_phase_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+                            <span class="s2">&quot;Full-model wavelet Zarr size: compression-dependent; &quot;</span>
+                            <span class="sa">f</span><span class="s2">&quot;NPY equivalent </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">full_model_raw_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+                            <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_frames</span><span class="si">}</span><span class="s2"> frames)&quot;</span>
                         <span class="p">)</span>
                     <span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="n">wavelet_size_label</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span>
                     <span class="n">text</span><span class="o">=</span><span class="p">(</span>
-                        <span class="sa">f</span><span class="s2">&quot;Exact NPY wavelet disk usage: </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">npy_equivalent</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
-                        <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_frames</span><span class="si">}</span><span class="s2"> frames; temp coarse phases +</span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">coarse_phase_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;Full-model wavelet NPY size: </span><span class="si">{</span><span class="n">_format_bytes</span><span class="p">(</span><span class="n">full_model_raw_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_frames</span><span class="si">}</span><span class="s2"> frames)&quot;</span>
                     <span class="p">)</span>
                 <span class="p">)</span>
         <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
@@ -62689,6 +62889,58 @@ All nans in arr, stay nans in gauss.</p>
     <span class="n">workflow_segment</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">fill</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">X</span><span class="p">)</span>
     <span class="n">workflow_segment</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">workflow</span><span class="p">)</span>
 
+    <span class="n">analysis_scale_var</span> <span class="o">=</span> <span class="n">tk</span><span class="o">.</span><span class="n">StringVar</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="s2">&quot;coarse&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">refresh_scale_controls</span><span class="p">():</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Refresh labels and estimates for the selected analysis scale.&quot;&quot;&quot;</span>
+        <span class="n">scale</span> <span class="o">=</span> <span class="n">_selected_analysis_scale</span><span class="p">()</span>
+        <span class="n">label</span> <span class="o">=</span> <span class="n">_scale_label</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">btn_submit_gabor</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Build Gabor Library (</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+            <span class="n">btn_submit_wavelet</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Run Wavelet Decomposition (</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+            <span class="n">btn_run_model_plots</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Run Model Plots (</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">scale</span> <span class="o">==</span> <span class="s2">&quot;full&quot;</span><span class="p">:</span>
+                <span class="n">wavelet_format_segment</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">state</span><span class="o">=</span><span class="s2">&quot;normal&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">wavelet_format_segment</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">state</span><span class="o">=</span><span class="s2">&quot;disabled&quot;</span><span class="p">)</span>
+            <span class="n">refresh_size_estimates</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">NameError</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_analysis_scale_from_panel</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Update the active coarse/full analysis scale.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;coarse&quot;</span><span class="p">,</span> <span class="s2">&quot;full&quot;</span><span class="p">}:</span>
+            <span class="k">return</span>
+        <span class="n">analysis_scale_var</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="n">refresh_scale_controls</span><span class="p">()</span>
+
+    <span class="n">scale_frame</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkFrame</span><span class="p">(</span><span class="n">frame_session</span><span class="p">,</span> <span class="n">fg_color</span><span class="o">=</span><span class="s2">&quot;transparent&quot;</span><span class="p">)</span>
+    <span class="n">scale_frame</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">fill</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">X</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">))</span>
+    <span class="n">ctk</span><span class="o">.</span><span class="n">CTkLabel</span><span class="p">(</span>
+        <span class="n">scale_frame</span><span class="p">,</span>
+        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Analysis scale&quot;</span><span class="p">,</span>
+        <span class="n">text_color</span><span class="o">=</span><span class="n">text_color</span><span class="p">,</span>
+        <span class="n">font</span><span class="o">=</span><span class="n">ctk</span><span class="o">.</span><span class="n">CTkFont</span><span class="p">(</span><span class="n">size</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">weight</span><span class="o">=</span><span class="s2">&quot;bold&quot;</span><span class="p">),</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">anchor</span><span class="o">=</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+    <span class="n">analysis_scale_segment</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkSegmentedButton</span><span class="p">(</span>
+        <span class="n">scale_frame</span><span class="p">,</span>
+        <span class="n">values</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;coarse&quot;</span><span class="p">,</span> <span class="s2">&quot;full&quot;</span><span class="p">],</span>
+        <span class="n">variable</span><span class="o">=</span><span class="n">analysis_scale_var</span><span class="p">,</span>
+        <span class="n">command</span><span class="o">=</span><span class="n">set_analysis_scale_from_panel</span><span class="p">,</span>
+        <span class="n">height</span><span class="o">=</span><span class="mi">28</span><span class="p">,</span>
+        <span class="n">corner_radius</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
+        <span class="n">border_width</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+        <span class="n">fg_color</span><span class="o">=</span><span class="s2">&quot;#E5E7EB&quot;</span><span class="p">,</span>
+        <span class="n">selected_color</span><span class="o">=</span><span class="n">primary_btn</span><span class="p">,</span>
+        <span class="n">selected_hover_color</span><span class="o">=</span><span class="s2">&quot;#1D4ED8&quot;</span><span class="p">,</span>
+        <span class="n">unselected_color</span><span class="o">=</span><span class="s2">&quot;#F3F4F6&quot;</span><span class="p">,</span>
+        <span class="n">unselected_hover_color</span><span class="o">=</span><span class="s2">&quot;#E5E7EB&quot;</span><span class="p">,</span>
+        <span class="n">text_color</span><span class="o">=</span><span class="s2">&quot;#FFFFFF&quot;</span><span class="p">,</span>
+        <span class="n">text_color_disabled</span><span class="o">=</span><span class="s2">&quot;#9CA3AF&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">analysis_scale_segment</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">fill</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">X</span><span class="p">)</span>
+    <span class="n">analysis_scale_segment</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">analysis_scale_var</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>
+
     <span class="n">btn_load_state</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkButton</span><span class="p">(</span>
         <span class="n">frame_session</span><span class="p">,</span>
         <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Load Configuration&quot;</span><span class="p">,</span>
@@ -62716,41 +62968,19 @@ All nans in arr, stay nans in gauss.</p>
         <span class="n">add_config_row</span><span class="p">(</span><span class="n">frame_gabor</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">default</span><span class="p">,</span> <span class="n">gabor_entries</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">frame_color</span><span class="p">,</span> <span class="n">GABOR_LABELS</span><span class="p">)</span>
 
     <span class="n">gabor_format_var</span> <span class="o">=</span> <span class="n">tk</span><span class="o">.</span><span class="n">StringVar</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="s2">&quot;npy&quot;</span><span class="p">)</span>
-    <span class="n">btn_submit_coarse_gabor</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkButton</span><span class="p">(</span>
+    <span class="n">btn_submit_gabor</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkButton</span><span class="p">(</span>
         <span class="n">frame_gabor</span><span class="p">,</span>
-        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Build Coarse Library&quot;</span><span class="p">,</span>
+        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Build Gabor Library (Coarse RF)&quot;</span><span class="p">,</span>
         <span class="n">height</span><span class="o">=</span><span class="mi">34</span><span class="p">,</span>
         <span class="n">corner_radius</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
         <span class="n">fg_color</span><span class="o">=</span><span class="n">primary_btn</span><span class="p">,</span>
         <span class="n">hover_color</span><span class="o">=</span><span class="s2">&quot;#1D4ED8&quot;</span><span class="p">,</span>
-        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">create_gabor</span><span class="p">(</span><span class="s2">&quot;coarse&quot;</span><span class="p">),</span> <span class="s2">&quot;Coarse Gabor library construction&quot;</span><span class="p">),</span>
+        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="n">create_selected_gabor_library</span><span class="p">,</span> <span class="s2">&quot;Gabor library construction&quot;</span><span class="p">),</span>
     <span class="p">)</span>
-    <span class="n">btn_submit_coarse_gabor</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">gabor_param</span><span class="p">),</span> <span class="n">column</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">columnspan</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">sticky</span><span class="o">=</span><span class="s2">&quot;ew&quot;</span><span class="p">)</span>
-
-    <span class="n">btn_submit_fine_gabor</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkButton</span><span class="p">(</span>
-        <span class="n">frame_gabor</span><span class="p">,</span>
-        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Build Fine Library&quot;</span><span class="p">,</span>
-        <span class="n">height</span><span class="o">=</span><span class="mi">34</span><span class="p">,</span>
-        <span class="n">corner_radius</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
-        <span class="n">fg_color</span><span class="o">=</span><span class="s2">&quot;#374151&quot;</span><span class="p">,</span>
-        <span class="n">hover_color</span><span class="o">=</span><span class="s2">&quot;#111827&quot;</span><span class="p">,</span>
-        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">create_gabor</span><span class="p">(</span><span class="s2">&quot;fine&quot;</span><span class="p">),</span> <span class="s2">&quot;Fine Gabor library construction&quot;</span><span class="p">),</span>
-    <span class="p">)</span>
-    <span class="n">btn_submit_fine_gabor</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">gabor_param</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">column</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">columnspan</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">sticky</span><span class="o">=</span><span class="s2">&quot;ew&quot;</span><span class="p">)</span>
-
-    <span class="n">btn_submit_both_gabor</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkButton</span><span class="p">(</span>
-        <span class="n">frame_gabor</span><span class="p">,</span>
-        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Build Coarse + Fine Libraries&quot;</span><span class="p">,</span>
-        <span class="n">height</span><span class="o">=</span><span class="mi">34</span><span class="p">,</span>
-        <span class="n">corner_radius</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
-        <span class="n">fg_color</span><span class="o">=</span><span class="n">success_btn</span><span class="p">,</span>
-        <span class="n">hover_color</span><span class="o">=</span><span class="s2">&quot;#065F46&quot;</span><span class="p">,</span>
-        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="n">create_both_gabor_libraries</span><span class="p">,</span> <span class="s2">&quot;Coarse and fine Gabor library construction&quot;</span><span class="p">),</span>
-    <span class="p">)</span>
-    <span class="n">btn_submit_both_gabor</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">gabor_param</span><span class="p">)</span> <span class="o">+</span> <span class="mi">2</span><span class="p">,</span> <span class="n">column</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">columnspan</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">sticky</span><span class="o">=</span><span class="s2">&quot;ew&quot;</span><span class="p">)</span>
+    <span class="n">btn_submit_gabor</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">gabor_param</span><span class="p">),</span> <span class="n">column</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">columnspan</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">sticky</span><span class="o">=</span><span class="s2">&quot;ew&quot;</span><span class="p">)</span>
 
     <span class="n">format_frame</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkFrame</span><span class="p">(</span><span class="n">frame_gabor</span><span class="p">,</span> <span class="n">fg_color</span><span class="o">=</span><span class="s2">&quot;transparent&quot;</span><span class="p">)</span>
-    <span class="n">format_frame</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">gabor_param</span><span class="p">)</span><span class="o">+</span><span class="mi">3</span><span class="p">,</span> <span class="n">column</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">columnspan</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">sticky</span><span class="o">=</span><span class="s2">&quot;w&quot;</span><span class="p">)</span>
+    <span class="n">format_frame</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">gabor_param</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">column</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">columnspan</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">sticky</span><span class="o">=</span><span class="s2">&quot;w&quot;</span><span class="p">)</span>
     <span class="n">ctk</span><span class="o">.</span><span class="n">CTkLabel</span><span class="p">(</span><span class="n">format_frame</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Library format:&quot;</span><span class="p">,</span> <span class="n">text_color</span><span class="o">=</span><span class="n">muted_text</span><span class="p">)</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">side</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">LEFT</span><span class="p">)</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_set_gabor_format</span><span class="p">(</span><span class="n">val</span><span class="p">):</span>
@@ -62795,7 +63025,7 @@ All nans in arr, stay nans in gauss.</p>
         <span class="n">background</span><span class="o">=</span><span class="n">frame_color</span><span class="p">,</span>
         <span class="n">foreground</span><span class="o">=</span><span class="n">text_color</span><span class="p">,</span>
     <span class="p">)</span>
-    <span class="n">gabor_size_label</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">gabor_param</span><span class="p">)</span><span class="o">+</span><span class="mi">4</span><span class="p">,</span> <span class="n">column</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">columnspan</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">sticky</span><span class="o">=</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+    <span class="n">gabor_size_label</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">gabor_param</span><span class="p">)</span><span class="o">+</span><span class="mi">2</span><span class="p">,</span> <span class="n">column</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">columnspan</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">sticky</span><span class="o">=</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
 
     <span class="c1"># --- 2 · Stimulus wavelet pipeline ---</span>
     <span class="n">frame_processing</span> <span class="o">=</span> <span class="n">ttk</span><span class="o">.</span><span class="n">LabelFrame</span><span class="p">(</span><span class="n">frame_left</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="s2">&quot;2 · Stimulus Wavelet Pipeline&quot;</span><span class="p">,</span> <span class="n">padding</span><span class="o">=</span><span class="mi">15</span><span class="p">)</span>
@@ -62804,12 +63034,12 @@ All nans in arr, stay nans in gauss.</p>
     <span class="n">wavelet_format_var</span> <span class="o">=</span> <span class="n">tk</span><span class="o">.</span><span class="n">StringVar</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="s2">&quot;zarr&quot;</span><span class="p">)</span>
     <span class="n">btn_submit_wavelet</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkButton</span><span class="p">(</span>
         <span class="n">frame_processing</span><span class="p">,</span>
-        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Run Wavelet Decomposition&quot;</span><span class="p">,</span>
+        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Run Wavelet Decomposition (Coarse RF)&quot;</span><span class="p">,</span>
         <span class="n">height</span><span class="o">=</span><span class="mi">34</span><span class="p">,</span>
         <span class="n">corner_radius</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
         <span class="n">fg_color</span><span class="o">=</span><span class="n">primary_btn</span><span class="p">,</span>
         <span class="n">hover_color</span><span class="o">=</span><span class="s2">&quot;#1D4ED8&quot;</span><span class="p">,</span>
-        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="n">run_wavelet</span><span class="p">,</span> <span class="s2">&quot;Stimulus wavelet decomposition&quot;</span><span class="p">),</span>
+        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="n">run_wavelet</span><span class="p">,</span> <span class="s2">&quot;Wavelet decomposition&quot;</span><span class="p">),</span>
     <span class="p">)</span>
     <span class="n">btn_submit_wavelet</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">fill</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">X</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
 
@@ -63017,24 +63247,14 @@ All nans in arr, stay nans in gauss.</p>
 
     <span class="n">btn_run_model_plots</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkButton</span><span class="p">(</span>
         <span class="n">frame_analysis</span><span class="p">,</span>
-        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Run Simple Model Plots&quot;</span><span class="p">,</span>
+        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Run Model Plots (Coarse RF)&quot;</span><span class="p">,</span>
         <span class="n">height</span><span class="o">=</span><span class="mi">34</span><span class="p">,</span>
         <span class="n">corner_radius</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
         <span class="n">fg_color</span><span class="o">=</span><span class="s2">&quot;#374151&quot;</span><span class="p">,</span>
         <span class="n">hover_color</span><span class="o">=</span><span class="s2">&quot;#111827&quot;</span><span class="p">,</span>
-        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="n">plot_run_model_outputs</span><span class="p">,</span> <span class="s2">&quot;run_Model plot capture&quot;</span><span class="p">),</span>
+        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="n">plot_selected_model_outputs</span><span class="p">,</span> <span class="s2">&quot;model plot capture&quot;</span><span class="p">),</span>
     <span class="p">)</span>
     <span class="n">btn_run_model_plots</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">fill</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">X</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
-    <span class="n">btn_run_full_model_plots</span> <span class="o">=</span> <span class="n">ctk</span><span class="o">.</span><span class="n">CTkButton</span><span class="p">(</span>
-        <span class="n">frame_analysis</span><span class="p">,</span>
-        <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Run Full Model Plots&quot;</span><span class="p">,</span>
-        <span class="n">height</span><span class="o">=</span><span class="mi">34</span><span class="p">,</span>
-        <span class="n">corner_radius</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
-        <span class="n">fg_color</span><span class="o">=</span><span class="s2">&quot;#7C3AED&quot;</span><span class="p">,</span>
-        <span class="n">hover_color</span><span class="o">=</span><span class="s2">&quot;#5B21B6&quot;</span><span class="p">,</span>
-        <span class="n">command</span><span class="o">=</span><span class="n">run_in_thread</span><span class="p">(</span><span class="n">plot_run_full_model_outputs</span><span class="p">,</span> <span class="s2">&quot;run_Full_Model plot capture&quot;</span><span class="p">),</span>
-    <span class="p">)</span>
-    <span class="n">btn_run_full_model_plots</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">fill</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">X</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
 
     <span class="c1"># --- 4 · Export ---</span>
     <span class="n">frame_export</span> <span class="o">=</span> <span class="n">ttk</span><span class="o">.</span><span class="n">LabelFrame</span><span class="p">(</span><span class="n">frame_left</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="s2">&quot;4 · Export&quot;</span><span class="p">,</span> <span class="n">padding</span><span class="o">=</span><span class="mi">15</span><span class="p">)</span>
@@ -63070,20 +63290,18 @@ All nans in arr, stay nans in gauss.</p>
     <span class="n">frame_controls</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">side</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">TOP</span><span class="p">,</span> <span class="n">fill</span><span class="o">=</span><span class="n">tk</span><span class="o">.</span><span class="n">X</span><span class="p">,</span> <span class="n">padx</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">pady</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
 
     <span class="n">all_buttons</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="n">btn_submit_coarse_gabor</span><span class="p">,</span>
-        <span class="n">btn_submit_fine_gabor</span><span class="p">,</span>
-        <span class="n">btn_submit_both_gabor</span><span class="p">,</span>
+        <span class="n">btn_submit_gabor</span><span class="p">,</span>
         <span class="n">btn_submit_wavelet</span><span class="p">,</span>
         <span class="n">btn_submit_plot</span><span class="p">,</span>
         <span class="n">btn_runRF</span><span class="p">,</span>
         <span class="n">btn_run_model_plots</span><span class="p">,</span>
-        <span class="n">btn_run_full_model_plots</span><span class="p">,</span>
         <span class="n">btn_export_all_results</span><span class="p">,</span>
         <span class="n">btn_export_all_neurons</span><span class="p">,</span>
         <span class="n">btn_export_individual_neuron</span><span class="p">,</span>
         <span class="n">btn_save_state</span><span class="p">,</span>
         <span class="n">btn_load_state</span><span class="p">,</span>
     <span class="p">]</span>
+    <span class="n">refresh_scale_controls</span><span class="p">()</span>
 
     <span class="k">try</span><span class="p">:</span>
         <span class="n">root</span><span class="o">.</span><span class="n">mainloop</span><span class="p">()</span>

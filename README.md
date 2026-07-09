@@ -76,16 +76,16 @@ Setting up the parameters**
 	    "N_thetas":"8",
 	    "Sigmas": "[2, 3, 4, 5, 6, 8]",
 	    "Frequencies": "[0.015, 0.04, 0.07, 0.1]",
-	    "Phases": "[0, 90]",
+	    "Phases": "[0, 1.57079632679]",
 	    "NX": "135",
 	    "NY": "54",
-	    "Save Path":"/home/sophie/Documents/POSTDOC/TEMP/gabors_library.npy"
+	    "Save Path":"outputs/gabor/gabors_library.npy"
 	}
 
 	# List of default parameters
 	param_defaults = {
-	    "Path Directory": "/media/sophie/Expansion1/UCL/datatest/videos",
-	    "Dirs": "/media/sophie/Seagate Basic/datasets",
+	    "Path Directory": "outputs/wavelets",
+	    "Dirs": "data",
 	    "Experiment Info": "('SS002', '2024-07-23', 3)",
 	    "Number of Planes": "1",
 	    "Block End": "0",
@@ -101,11 +101,11 @@ Setting up the parameters**
 		"Hz": "30",
 	    "Number of Frames": "18000",
 	    "Number of Trials to Keep": "3",
-	    "Movie Path": "/home/sophie/Documents/POSTDOC/TEMP/videos/perlin_stimulus_10min.mp4",
-	    "Library Path": "/home/sophie/Documents/POSTDOC/TEMP/gabors_library.npy",
+	    "Movie Path": "data/stimuli/perlin_stimulus_10min.mp4",
+	    "Library Path": "outputs/gabor/gabors_library.npy",
 	    "Spks Path": "None"
-		"Full Model Wavelet Path": "/home/sophie/Documents/POSTDOC/TEMP",
-		"Full Model Save Path": "/home/sophie/Projects/ZebrAnalysis/zebranalysis/tests"
+		"Full Model Wavelet Path": "outputs/full-wavelets",
+		"Full Model Save Path": "outputs/models"
 	}
 ```
 

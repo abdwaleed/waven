@@ -26,6 +26,19 @@ files. The most important paths are:
 - `Full Model Wavelet Path`: folder containing or receiving full-model wavelets.
 - `Full Model Save Path`: folder for model outputs, plot cache, and exports.
 
+Before launching the GUI, sanity-check the largest dimensions:
+
+| Quantity | Where to check | Why it matters |
+| --- | --- | --- |
+| `Number of Frames` | movie/config | Multiplies every wavelet output. |
+| `NX`, `NY` | config | Full-model arrays grow with `NX * NY`; libraries grow roughly with `(NX * NY)^2`. |
+| `N_thetas` | config | Adds orientation bins to libraries, wavelets, RF tensors, and OSI/gOSI curves. |
+| `Sigmas Full Model` | config | Adds size bins to full-model wavelets. |
+| `Frequencies` | config | Adds frequency bins to fine libraries and full-model wavelets. |
+
+For a first run, it is reasonable to start with the coarse path and inspect RFs
+before committing disk space to a large full-model wavelet set.
+
 ## 3. Launch the GUI
 
 ```python
@@ -43,14 +56,21 @@ waven.gui.run(
 
 ## 4. Build libraries
 
-Run these buttons in order:
+Choose **Analysis scale** in the session configuration before pressing the large
+action buttons. The same buttons change their target:
 
-1. **Build Coarse Library**
-2. **Build Fine Library**
-3. **Run Wavelet Decomposition**
+| Scale | Button sequence | Result |
+| --- | --- | --- |
+| `coarse` | **Build Gabor Library (Coarse RF)**, then **Run Wavelet Decomposition (Coarse RF)** | coarse library, coarse phases, durable RF cache |
+| `full` | **Build Gabor Library (Full model)**, then **Run Wavelet Decomposition (Full model)** | fine library and full-model real/imaginary wavelets |
 
 Long tasks are resumable. If the application stops after a completed stage, run
 the same button again; existing outputs are shape-checked and reused.
+
+The status text beside the button reports the current stage, such as
+downsampling, real phase, imaginary phase, or durable cache creation. If a task
+fails, rerunning the button should skip completed compatible files and continue
+from the next missing or invalid artifact.
 
 ## 5. Run coarse RF analysis
 
@@ -63,3 +83,17 @@ Click **Run Coarse RF Analysis**. The **All neurons** tab will show:
 
 The **Individual neuron** tab shows the selected neuron's spike train, receptive
 field, feature tuning curves, and OSI/gOSI in the orientation panel title.
+
+When judging the first plots, read them in this order:
+
+1. Use repeatability and skewness to identify neurons worth trusting.
+2. Check whether population retinotopy changes smoothly across anatomy.
+3. Inspect individual RFs before trusting a population histogram.
+4. Compare OSI/gOSI with the raw orientation tuning curve.
+
+This order helps separate a real orientation preference from a noisy neuron that
+happened to produce a sharp correlation peak.
+
+After RF analysis, **Run Model Plots** also follows the selected scale:
+`coarse` runs the simple coarse model, while `full` runs the full model using
+the full wavelets and the coarse RF feature seeds.

@@ -25,3 +25,35 @@ numeric arrays and metadata.
 
 OSI compares the preferred and orthogonal orientation responses. gOSI summarizes
 the whole orientation tuning curve with a vector sum.
+
+## Why does a movie shape look like `(frames, NY, NX)` but wavelets use `(frames, NX, NY, ...)`?
+
+Downsampled movies are image arrays, so their spatial axes are row then column:
+`(y, x)`. Gabor libraries and RF tensors use feature coordinates: `(x, y)`.
+Both are expected. The safest check is to compare the file with the documented
+stage that produced it.
+
+## Why are `.npy` wavelets so large?
+
+Wavelet arrays are dense `float32` tensors. Every extra frame, grid point,
+orientation, sigma, and frequency multiplies the total size. One full-model
+phase is:
+
+```text
+n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies * 4 bytes
+```
+
+Real and imaginary phases are separate files.
+
+## When should I use Zarr?
+
+Use Zarr for full-model wavelets when the logical array is too large to handle
+comfortably as one `.npy` file, when you want chunked access, or when compression
+is useful. Zarr does not change the scientific shape or dtype; it changes how
+the same array is stored on disk.
+
+## Can a high OSI be misleading?
+
+Yes. OSI and gOSI summarize the orientation tuning curve, but they do not prove
+that the neuron is reliable. Inspect repeatability, skewness, the RF map, and
+the raw tuning curve before treating a selectivity value as biologically strong.

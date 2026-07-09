@@ -1,7 +1,7 @@
 """
 Created on Wed Mar 25 19:31:32 2025
 
-@author: Sophie Skriabine
+Legacy compatibility module.
 """
 import os
 
@@ -422,7 +422,7 @@ def downsample_video_uint(path, shape=(54, 135), chunk_size=1000):
     video_downsampled = np.concatenate(frames, axis=0)
     np.save(path[:-4]+'_downsampled.npy', video_downsampled)
 
-def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path='/media/sophie/Expansion1/UCL/datatest/gabors_library.npy'):
+def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path='outputs/gabor/gabors_library.npy'):
     """
     Runs the wavelet decomposition
 

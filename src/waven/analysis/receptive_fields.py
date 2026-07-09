@@ -634,7 +634,7 @@ def predictSparseNoise(resp, stim, rfs, tp, save=False):
     for i in range(1, 8):
         ax[i].imshow(stim[tp - i + 1])
     if save:
-        tifffile.imwrite('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3000reconstructed.tif', img.reshape(54, 135))
+        tifffile.imwrite('tp3000reconstructed.tif', img.reshape(54, 135))
 
 
 def predictPinkNoise(maxes, vis_n, spks, rfs, tp, L, videodata, dt=50, save=False,
@@ -711,12 +711,12 @@ def predictPinkNoise(maxes, vis_n, spks, rfs, tp, L, videodata, dt=50, save=Fals
     print(np.corrcoef(vs, np.mean(videodata[tp - 2 * dt:tp - dt], axis=0).flatten()))
 
     if save:
-        tifffile.imwrite('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520videodata.tif',
+        tifffile.imwrite('tp3520videodata.tif',
                          np.mean(videodata[tp - dt:tp], axis=0))
 
     vc = vis_t.reshape(1, -1) @ L[:, :, :, :, 0].reshape(-1, pixel_count)
     if save:
-        tifffile.imwrite('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520reconstructed_1wavelet.tif',
+        tifffile.imwrite('tp3520reconstructed_1wavelet.tif',
                          (vs + vc).reshape(ny_full, nx_full))
 
     return (vs + vc).reshape(ny_full, nx_full)

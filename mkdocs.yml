@@ -69,6 +69,7 @@ nav:
   - Explanation:
       - explanation/index.md
       - Pipeline Intuition: explanation/pipeline-intuition.md
+      - Code Mindmap: explanation/code-mindmap.md
       - Methods Transparency: explanation/methods-transparency.md
       - Orientation Selectivity: explanation/orientation-selectivity.md
       - File Lifecycle: explanation/file-lifecycle.md

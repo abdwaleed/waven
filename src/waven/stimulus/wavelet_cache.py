@@ -179,7 +179,7 @@ def load_stimulus_simple_cell(
 
 
 def load_stimulus_simple_cell2_i(
-    path="/media/sophie/Expansion1/UCL/datatest/",
+    path=".",
     tt=None,
     downsampling=False,
     nx0=None,
@@ -209,7 +209,7 @@ def load_stimulus_simple_cell2_i(
 
 
 def load_stimulus_simple_cell2_r(
-    path="/media/sophie/Expansion1/UCL/datatest/",
+    path=".",
     tt=None,
     downsampling=False,
     nx0=None,
@@ -239,7 +239,7 @@ def load_stimulus_simple_cell2_r(
 
 
 def load_stimulus_simple_cell2(
-    path="/media/sophie/Expansion1/UCL/datatest/",
+    path=".",
     tt=None,
     downsampling=False,
     nx0=None,

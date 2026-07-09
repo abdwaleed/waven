@@ -4,7 +4,7 @@
     "N_thetas": "18",
     "Sigmas": "[2, 4, 8, 12]",
     "Frequencies": "[0.02, 0.06, 0.1]",
-    "Phases": "[0, 90]",
+    "Phases": "[0, 1.57079632679]",
     "NX": "138",
     "NY": "112",
     "Save Path": "{PROJECT_ROOT}/your_experiment/gabor-lib/gabors_library.npy"

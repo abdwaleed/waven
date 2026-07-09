@@ -1071,6 +1071,7 @@ def run(param_defaults, gabor_param, workflow=None):
         """
         fields = {
             "workflow": workflow,
+            "analysis_scale": _selected_analysis_scale(),
             "gabor": {key: _field_value(gabor_entries, key) for key in sorted(gabor_entries)},
             "analysis": {
                 key: _field_value(param_entries, key)
@@ -2024,6 +2025,27 @@ def run(param_defaults, gabor_param, workflow=None):
             return os.path.splitext(path_save)[0] + ".zarr"
         return path_save
 
+    def _selected_analysis_scale():
+        """Return the currently selected analysis scale."""
+        try:
+            value = analysis_scale_var.get()
+        except NameError:
+            return "coarse"
+        return value if value in {"coarse", "full"} else "coarse"
+
+    def _scale_label(scale=None):
+        """Return a short user-facing label for an analysis scale."""
+        scale = scale or _selected_analysis_scale()
+        return "Full model" if scale == "full" else "Coarse RF"
+
+    def _selected_gabor_kind():
+        """Return the library kind required by the current analysis scale."""
+        return "fine" if _selected_analysis_scale() == "full" else "coarse"
+
+    def create_selected_gabor_library():
+        """Build the Gabor library required by the selected analysis scale."""
+        create_gabor(_selected_gabor_kind())
+
     def create_gabor(kind="fine"):
         """Function for create gabor.
 
@@ -2124,7 +2146,7 @@ def run(param_defaults, gabor_param, workflow=None):
         create_gabor("coarse")
         create_gabor("fine")
 
-    def run_wavelet():
+    def run_wavelet(scale=None):
         """Function for run wavelet.
 
         Returns:
@@ -2132,6 +2154,9 @@ def run(param_defaults, gabor_param, workflow=None):
         """
         _ensure_wavelet_imports("stimulus wavelet generation")
         _raise_if_cancelled()
+        scale = scale or _selected_analysis_scale()
+        if scale not in {"coarse", "full"}:
+            raise ValueError(f"Unknown wavelet decomposition scale: {scale}")
         movpath = param_entries["Movie Path"].get().strip()
         if not movpath:
             print("Error: Movie Path is required.")
@@ -2159,10 +2184,10 @@ def run(param_defaults, gabor_param, workflow=None):
             coarse_lib_path = legacy_lib_path
         if not fine_lib_path:
             fine_lib_path = legacy_lib_path
-        if not coarse_lib_path:
-            raise ValueError("Coarse Library Path is required. Click Build Coarse Library first.")
-        if not fine_lib_path:
-            raise ValueError("Fine Library Path is required. Click Build Fine Library first.")
+        if scale == "coarse" and not coarse_lib_path:
+            raise ValueError("Coarse Library Path is required. Select Coarse RF and click Build Gabor Library first.")
+        if scale == "full" and not fine_lib_path:
+            raise ValueError("Fine Library Path is required. Select Full model and click Build Gabor Library first.")
         nx = int(param_entries["NX"].get())
         ny = int(param_entries["NY"].get())
         n_thetas = int(gabor_entries["N_thetas"].get())
@@ -2201,75 +2226,125 @@ def run(param_defaults, gabor_param, workflow=None):
             len(sigmas),
         )
         coarse_cache_shape = (3,) + coarse_phase_shape
-        coarse_cache_ready = _artifact_matches(coarse_cache_path, coarse_cache_shape)
+        if scale == "coarse":
+            current_wavelet_dir[0] = wavelet_folder
+            coarse_cache_ready = _artifact_matches(coarse_cache_path, coarse_cache_shape)
 
-        if coarse_cache_ready:
-            update_progress(45, "Stimulus wavelet decomposition", "Reusing coarse RF cache")
-            print(f"Resume: found completed coarse RF wavelet cache, reusing {coarse_cache_path}")
-            _write_recovery_step("coarse_cache_reused", path=coarse_cache_path, shape=coarse_cache_shape)
-        else:
-            update_progress(8, "Stimulus wavelet decomposition", "Preparing coarse stimulus movie")
-            print("Step 1/5: Preparing coarse stimulus movie...")
-            if not os.path.exists(coarse_downsample_path):
-                _register_cancel_cleanup_path(coarse_downsample_path)
-            if _artifact_matches(coarse_downsample_path, (expected_frames, coarse_ny, coarse_nx)):
-                print(f"Resume: found completed coarse downsampled movie, reusing {coarse_downsample_path}")
-                _write_recovery_step("coarse_downsampling_reused", path=coarse_downsample_path)
+            if coarse_cache_ready:
+                update_progress(80, "Coarse wavelet decomposition", "Reusing coarse RF cache")
+                print(f"Resume: found completed coarse RF wavelet cache, reusing {coarse_cache_path}")
+                _write_recovery_step("coarse_cache_reused", path=coarse_cache_path, shape=coarse_cache_shape)
             else:
-                _write_recovery_step("wavelet_downsampling_started", wavelet_folder=wavelet_folder)
-                ratio_x, ratio_y = _coverage_ratios()
-                downsample_video_binary(
-                    movpath,
-                    visual_coverage,
-                    analysis_coverage,
-                    shape=(coarse_ny, coarse_nx),
-                    chunk_size=video_downsample_chunk_size(),
-                    ratios=(ratio_x, ratio_y),
-                    save_path=coarse_downsample_path,
-                    cancel_event=_current_cancel_event(),
-                )
-            _raise_if_cancelled()
-            videodata = np.load(coarse_downsample_path, mmap_mode="r")
-            videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
+                update_progress(8, "Coarse wavelet decomposition", "Preparing coarse stimulus movie")
+                print("Step 1/4: Preparing coarse stimulus movie...")
+                if not os.path.exists(coarse_downsample_path):
+                    _register_cancel_cleanup_path(coarse_downsample_path)
+                if _artifact_matches(coarse_downsample_path, (expected_frames, coarse_ny, coarse_nx)):
+                    print(f"Resume: found completed coarse downsampled movie, reusing {coarse_downsample_path}")
+                    _write_recovery_step("coarse_downsampling_reused", path=coarse_downsample_path)
+                else:
+                    _write_recovery_step("wavelet_downsampling_started", wavelet_folder=wavelet_folder)
+                    ratio_x, ratio_y = _coverage_ratios()
+                    downsample_video_binary(
+                        movpath,
+                        visual_coverage,
+                        analysis_coverage,
+                        shape=(coarse_ny, coarse_nx),
+                        chunk_size=video_downsample_chunk_size(),
+                        ratios=(ratio_x, ratio_y),
+                        save_path=coarse_downsample_path,
+                        cancel_event=_current_cancel_event(),
+                    )
+                _raise_if_cancelled()
+                videodata = np.load(coarse_downsample_path, mmap_mode="r")
+                videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
 
-            update_progress(20, "Stimulus wavelet decomposition", "Preparing coarse real phase")
-            print("Step 2/5: Preparing coarse real phase wavelets...")
-            if _artifact_matches(real_phase_path, coarse_phase_shape):
-                print(f"Resume: found completed coarse real phase, reusing {real_phase_path}")
-                _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
-            else:
-                _register_cancel_cleanup_path(real_phase_path)
-                waveletDecomposition(
-                    videodata,
-                    0,
-                    sigmas,
+                update_progress(25, "Coarse wavelet decomposition", "Preparing coarse real phase")
+                print("Step 2/4: Preparing coarse real phase wavelets...")
+                if _artifact_matches(real_phase_path, coarse_phase_shape):
+                    print(f"Resume: found completed coarse real phase, reusing {real_phase_path}")
+                    _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
+                else:
+                    _register_cancel_cleanup_path(real_phase_path)
+                    waveletDecomposition(
+                        videodata,
+                        0,
+                        sigmas,
+                        wavelet_folder,
+                        coarse_lib_path,
+                        cancel_event=_current_cancel_event(),
+                    )
+                    _write_recovery_step("coarse_phase_real_complete", path=real_phase_path)
+
+                update_progress(45, "Coarse wavelet decomposition", "Preparing coarse imaginary phase")
+                print("Step 3/4: Preparing coarse imaginary phase wavelets...")
+                if _artifact_matches(imag_phase_path, coarse_phase_shape):
+                    print(f"Resume: found completed coarse imaginary phase, reusing {imag_phase_path}")
+                    _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
+                else:
+                    _register_cancel_cleanup_path(imag_phase_path)
+                    waveletDecomposition(
+                        videodata,
+                        1,
+                        sigmas,
+                        wavelet_folder,
+                        coarse_lib_path,
+                        cancel_event=_current_cancel_event(),
+                    )
+                    _write_recovery_step("coarse_phase_imaginary_complete", path=imag_phase_path)
+
+                update_progress(68, "Coarse wavelet decomposition", "Generating coarse RF cache")
+                print("Step 4/4: Generating coarse wavelet cache for RF analysis...")
+                if not os.path.exists(coarse_cache_path):
+                    _register_cancel_cleanup_path(coarse_cache_path)
+                for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
+                    scratch_path = os.path.join(wavelet_folder, scratch_name)
+                    if not os.path.exists(scratch_path):
+                        _register_cancel_cleanup_path(scratch_path)
+                coarseWavelet(
                     wavelet_folder,
-                    coarse_lib_path,
+                    False,
+                    nx0=coarse_nx,
+                    ny0=coarse_ny,
+                    no=n_thetas,
+                    ns=len(sigmas),
+                    nf=1,
+                    nx=coarse_nx,
+                    ny=coarse_ny,
+                    chunk_size=None,
                     cancel_event=_current_cancel_event(),
                 )
-                _write_recovery_step("coarse_phase_real_complete", path=real_phase_path)
+                _raise_if_cancelled()
+                if not _artifact_matches(coarse_cache_path, coarse_cache_shape):
+                    raise ValueError(f"Coarse cache was written with an unexpected shape: {coarse_cache_path}")
+                _write_recovery_step("coarse_cache_complete", path=coarse_cache_path)
+                for intermediate_path in (real_phase_path, imag_phase_path):
+                    try:
+                        if os.path.exists(intermediate_path):
+                            os.remove(intermediate_path)
+                            print(f"Removed intermediate coarse phase file: {intermediate_path}")
+                    except Exception as exc:
+                        print(f"Could not remove intermediate file {intermediate_path}: {exc}")
 
-            update_progress(32, "Stimulus wavelet decomposition", "Preparing coarse imaginary phase")
-            print("Step 3/5: Preparing coarse imaginary phase wavelets...")
-            if _artifact_matches(imag_phase_path, coarse_phase_shape):
-                print(f"Resume: found completed coarse imaginary phase, reusing {imag_phase_path}")
-                _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
-            else:
-                _register_cancel_cleanup_path(imag_phase_path)
-                waveletDecomposition(
-                    videodata,
-                    1,
-                    sigmas,
-                    wavelet_folder,
-                    coarse_lib_path,
-                    cancel_event=_current_cancel_event(),
-                )
-                _write_recovery_step("coarse_phase_imaginary_complete", path=imag_phase_path)
+                for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
+                    scratch_path = os.path.join(wavelet_folder, scratch_name)
+                    try:
+                        if os.path.exists(scratch_path):
+                            os.remove(scratch_path)
+                            print(f"Removed temporary coarse cache scratch file: {scratch_path}")
+                    except Exception as exc:
+                        print(f"Could not remove temporary scratch file {scratch_path}: {exc}")
 
-        print(
-            f"Coarse RF grid derived from config: {coarse_nx} x {coarse_ny} "
-            f"(20% of {nx} x {ny})"
-        )
+            print(
+                f"Coarse RF grid derived from config: {coarse_nx} x {coarse_ny} "
+                f"(20% of {nx} x {ny})"
+            )
+            print(f"Coarse wavelet files are ready: {wavelet_folder}")
+            update_progress(100, "Coarse wavelet decomposition", "Coarse RF cache ready")
+            return True
+
+        if scale == "full":
+            update_progress(5, "Full wavelet decomposition", "Preparing full-model outputs")
 
         full_output_target = param_entries["Full Model Wavelet Path"].get().strip()
         if not full_output_target:
@@ -2282,55 +2357,12 @@ def run(param_defaults, gabor_param, workflow=None):
             full_output = full_output_target
             os.makedirs(full_output, exist_ok=True)
 
-        if not coarse_cache_ready:
-            update_progress(48, "Stimulus wavelet decomposition", "Generating coarse RF cache")
-            print("Step 4/5: Generating coarse wavelet cache for RF analysis...")
-            if not os.path.exists(coarse_cache_path):
-                _register_cancel_cleanup_path(coarse_cache_path)
-            for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
-                scratch_path = os.path.join(wavelet_folder, scratch_name)
-                if not os.path.exists(scratch_path):
-                    _register_cancel_cleanup_path(scratch_path)
-            coarseWavelet(
-                wavelet_folder,
-                False,
-                nx0=coarse_nx,
-                ny0=coarse_ny,
-                no=n_thetas,
-                ns=len(sigmas),
-                nf=1,
-                nx=coarse_nx,
-                ny=coarse_ny,
-                chunk_size=None,
-                cancel_event=_current_cancel_event(),
-            )
-            _raise_if_cancelled()
-            if not _artifact_matches(coarse_cache_path, coarse_cache_shape):
-                raise ValueError(f"Coarse cache was written with an unexpected shape: {coarse_cache_path}")
-            _write_recovery_step("coarse_cache_complete", path=coarse_cache_path)
-            for intermediate_path in (real_phase_path, imag_phase_path):
-                try:
-                    if os.path.exists(intermediate_path):
-                        os.remove(intermediate_path)
-                        print(f"Removed intermediate coarse phase file: {intermediate_path}")
-                except Exception as exc:
-                    print(f"Could not remove intermediate file {intermediate_path}: {exc}")
-
-            for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
-                scratch_path = os.path.join(wavelet_folder, scratch_name)
-                try:
-                    if os.path.exists(scratch_path):
-                        os.remove(scratch_path)
-                        print(f"Removed temporary coarse cache scratch file: {scratch_path}")
-                except Exception as exc:
-                    print(f"Could not remove temporary scratch file {scratch_path}: {exc}")
-
         sigmas_full = parse_literal(
             param_entries["Sigmas Full Model"].get(),
             "Sigmas Full Model",
         )
-        update_progress(65, "Stimulus wavelet decomposition", "Preparing full-resolution wavelets")
-        print("Step 5/5: Generating full-resolution wavelets for run_Full_Model...")
+        update_progress(15, "Full wavelet decomposition", "Preparing full-resolution stimulus movie")
+        print("Step 1/3: Preparing full-resolution stimulus movie...")
         if _artifact_matches(full_downsample_path, (expected_frames, ny, nx)):
             print(f"Resume: found completed full-resolution downsampled movie, reusing {full_downsample_path}")
             _write_recovery_step("full_downsampling_reused", path=full_downsample_path)
@@ -2374,7 +2406,7 @@ def run(param_defaults, gabor_param, workflow=None):
                 print(f"Resume: found completed full-model wavelets, reusing {target}")
                 _write_recovery_step(f"full_model_phase_{phase}_reused", path=target, shape=full_model_shape)
                 continue
-            update_progress(75 + phase * 10, "Stimulus wavelet decomposition", f"Writing full-model phase {phase}")
+            update_progress(45 + phase * 25, "Full wavelet decomposition", f"Writing full-model phase {phase}")
             _register_cancel_cleanup_path(target)
             waveletDecompositionFull(
                 videodata,
@@ -2395,12 +2427,12 @@ def run(param_defaults, gabor_param, workflow=None):
         if is_zarr_wavelet:
             _write_recovery_step("full_model_zarr_complete", path=full_output_target)
             print(
-                f"All wavelet files are ready. Coarse NPY cache: {wavelet_folder} | "
-                f"Full-model Zarr: {full_output_target}"
+                f"Full-model wavelet files are ready. Zarr output: {full_output_target}"
             )
         else:
-            print(f"All wavelet files are ready. Coarse: {wavelet_folder} | Full-model NPY: {full_output}")
-        update_progress(100, "Stimulus wavelet decomposition", "Wavelet files ready")
+            print(f"Full-model wavelet files are ready. NPY output: {full_output}")
+        update_progress(100, "Full wavelet decomposition", "Full-model wavelets ready")
+        return True
     
     def embed_interactive_figure(fig, parent_container, title=None):
         """Embed a matplotlib figure with navigation toolbar in ``parent_container``."""
@@ -3283,6 +3315,12 @@ def run(param_defaults, gabor_param, workflow=None):
         )
         _append_model_figures(figures, f"run_Full_Model neuron {neuron_id}")
 
+    def plot_selected_model_outputs():
+        """Run the model plotter that matches the selected analysis scale."""
+        if _selected_analysis_scale() == "full":
+            return plot_run_full_model_outputs()
+        return plot_run_model_outputs()
+
     def click_save():
         """Function for click save."""
         try:
@@ -3348,6 +3386,7 @@ def run(param_defaults, gabor_param, workflow=None):
         """Function for save app state."""
         state = {
             "workflow": workflow,
+            "analysis_scale": _selected_analysis_scale(),
             "gabor": {key: entry.get() for key, entry in gabor_entries.items()},
             "analysis": {key: entry.get() for key, entry in param_entries.items()},
             "save_options": {
@@ -3387,6 +3426,10 @@ def run(param_defaults, gabor_param, workflow=None):
             if loaded_workflow in (WORKFLOW_2P, WORKFLOW_EPHYS) and loaded_workflow != workflow:
                 workflow_var.set(loaded_workflow)
                 set_workflow_from_panel(loaded_workflow)
+            loaded_scale = state.get("analysis_scale")
+            if loaded_scale in {"coarse", "full"}:
+                analysis_scale_var.set(loaded_scale)
+                set_analysis_scale_from_panel(loaded_scale)
             for key, value in state.get("gabor", {}).items():
                 if key in gabor_entries:
                     gabor_entries[key].delete(0, tk.END)
@@ -3507,29 +3550,30 @@ def run(param_defaults, gabor_param, workflow=None):
                 offsets,
                 frequencies,
             )
+            scale = _selected_analysis_scale()
             if gabor_format_var.get() == "zarr":
-                coarse_exact = _folder_size_bytes(_zarr_output_path(_library_output_path("coarse", gabor_entries["Save Path"].get())))
-                fine_exact = _folder_size_bytes(_zarr_output_path(_library_output_path("fine", gabor_entries["Save Path"].get())))
-                if coarse_exact is not None or fine_exact is not None:
-                    parts = []
-                    if coarse_exact is not None:
-                        parts.append(f"coarse current {_format_bytes(coarse_exact)}")
-                    if fine_exact is not None:
-                        parts.append(f"fine current {_format_bytes(fine_exact)}")
-                    gabor_size_label.configure(text="Gabor Zarr size: " + ", ".join(parts))
+                kind = "fine" if scale == "full" else "coarse"
+                exact = _folder_size_bytes(_zarr_output_path(_library_output_path(kind, gabor_entries["Save Path"].get())))
+                expected_bytes = fine_bytes if scale == "full" else coarse_bytes
+                expected_shape = fine_shape if scale == "full" else coarse_shape
+                if exact is not None:
+                    gabor_size_label.configure(
+                        text=f"{_scale_label(scale)} Gabor Zarr current size: {_format_bytes(exact)}"
+                    )
                 else:
                     gabor_size_label.configure(
                         text=(
-                            "Gabor Zarr size: compression-dependent; "
-                            f"NPY equivalent coarse {_format_bytes(coarse_bytes)}, "
-                            f"fine {_format_bytes(fine_bytes)}"
+                            f"{_scale_label(scale)} Gabor Zarr size: compression-dependent; "
+                            f"NPY equivalent {_format_bytes(expected_bytes)} {expected_shape}"
                         )
                     )
             else:
+                expected_bytes = fine_bytes if scale == "full" else coarse_bytes
+                expected_shape = fine_shape if scale == "full" else coarse_shape
                 gabor_size_label.configure(
                     text=(
-                        f"Exact NPY sizes: coarse {_format_bytes(coarse_bytes)} "
-                        f"{coarse_shape}, fine {_format_bytes(fine_bytes)} {fine_shape}"
+                        f"{_scale_label(scale)} Gabor NPY size: "
+                        f"{_format_bytes(expected_bytes)} {expected_shape}"
                     )
                 )
         except Exception:
@@ -3561,8 +3605,15 @@ def run(param_defaults, gabor_param, workflow=None):
             coarse_phase_bytes = 2 * n_frames * coarse_nx * coarse_ny * n_thetas * n_sigmas * bytes_per_float
             coarse_cache_bytes = 3 * n_frames * coarse_nx * coarse_ny * n_thetas * n_sigmas * bytes_per_float
             full_model_raw_bytes = 2 * n_frames * nx * ny * n_thetas * n_sigmas_full * n_frequencies * bytes_per_float
-            npy_equivalent = coarse_cache_bytes + full_model_raw_bytes
-            if wavelet_format_var.get() == "zarr":
+            scale = _selected_analysis_scale()
+            if scale == "coarse":
+                wavelet_size_label.configure(
+                    text=(
+                        f"Coarse RF wavelet NPY size: {_format_bytes(coarse_cache_bytes)} "
+                        f"({n_frames} frames; temp phases +{_format_bytes(coarse_phase_bytes)})"
+                    )
+                )
+            elif wavelet_format_var.get() == "zarr":
                 full_path = param_entries.get("Full Model Wavelet Path")
                 full_dir = full_path.get().strip() if full_path is not None else ""
                 if full_dir:
@@ -3572,27 +3623,25 @@ def run(param_defaults, gabor_param, workflow=None):
                     exact_i = exact_r = None
                 if exact_i is not None and exact_r is not None:
                     full_model_bytes = exact_i + exact_r
-                    total_bytes = coarse_cache_bytes + full_model_bytes
                     wavelet_size_label.configure(
                         text=(
-                            f"Current wavelet disk usage: {_format_bytes(total_bytes)} "
-                            f"(Zarr full model + exact coarse cache; temp coarse phases "
-                            f"+{_format_bytes(coarse_phase_bytes)})"
+                            f"Full-model wavelet current disk usage: {_format_bytes(full_model_bytes)} "
+                            "(Zarr real + imaginary phases)"
                         )
                     )
                 else:
                     wavelet_size_label.configure(
                         text=(
-                            "Wavelet Zarr size: compression-dependent; "
-                            f"NPY equivalent {_format_bytes(npy_equivalent)} "
-                            f"({n_frames} frames; temp coarse phases +{_format_bytes(coarse_phase_bytes)})"
+                            "Full-model wavelet Zarr size: compression-dependent; "
+                            f"NPY equivalent {_format_bytes(full_model_raw_bytes)} "
+                            f"({n_frames} frames)"
                         )
                     )
             else:
                 wavelet_size_label.configure(
                     text=(
-                        f"Exact NPY wavelet disk usage: {_format_bytes(npy_equivalent)} "
-                        f"({n_frames} frames; temp coarse phases +{_format_bytes(coarse_phase_bytes)})"
+                        f"Full-model wavelet NPY size: {_format_bytes(full_model_raw_bytes)} "
+                        f"({n_frames} frames)"
                     )
                 )
         except Exception:
@@ -4008,6 +4057,58 @@ def run(param_defaults, gabor_param, workflow=None):
     workflow_segment.pack(fill=tk.X)
     workflow_segment.set(workflow)
 
+    analysis_scale_var = tk.StringVar(value="coarse")
+
+    def refresh_scale_controls():
+        """Refresh labels and estimates for the selected analysis scale."""
+        scale = _selected_analysis_scale()
+        label = _scale_label(scale)
+        try:
+            btn_submit_gabor.configure(text=f"Build Gabor Library ({label})")
+            btn_submit_wavelet.configure(text=f"Run Wavelet Decomposition ({label})")
+            btn_run_model_plots.configure(text=f"Run Model Plots ({label})")
+            if scale == "full":
+                wavelet_format_segment.configure(state="normal")
+            else:
+                wavelet_format_segment.configure(state="disabled")
+            refresh_size_estimates()
+        except NameError:
+            pass
+
+    def set_analysis_scale_from_panel(value):
+        """Update the active coarse/full analysis scale."""
+        if value not in {"coarse", "full"}:
+            return
+        analysis_scale_var.set(value)
+        refresh_scale_controls()
+
+    scale_frame = ctk.CTkFrame(frame_session, fg_color="transparent")
+    scale_frame.pack(fill=tk.X, pady=(8, 8))
+    ctk.CTkLabel(
+        scale_frame,
+        text="Analysis scale",
+        text_color=text_color,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).pack(anchor="w", pady=(0, 4))
+    analysis_scale_segment = ctk.CTkSegmentedButton(
+        scale_frame,
+        values=["coarse", "full"],
+        variable=analysis_scale_var,
+        command=set_analysis_scale_from_panel,
+        height=28,
+        corner_radius=6,
+        border_width=1,
+        fg_color="#E5E7EB",
+        selected_color=primary_btn,
+        selected_hover_color="#1D4ED8",
+        unselected_color="#F3F4F6",
+        unselected_hover_color="#E5E7EB",
+        text_color="#FFFFFF",
+        text_color_disabled="#9CA3AF",
+    )
+    analysis_scale_segment.pack(fill=tk.X)
+    analysis_scale_segment.set(analysis_scale_var.get())
+
     btn_load_state = ctk.CTkButton(
         frame_session,
         text="Load Configuration",
@@ -4035,41 +4136,19 @@ def run(param_defaults, gabor_param, workflow=None):
         add_config_row(frame_gabor, label, default, gabor_entries, i, frame_color, GABOR_LABELS)
 
     gabor_format_var = tk.StringVar(value="npy")
-    btn_submit_coarse_gabor = ctk.CTkButton(
+    btn_submit_gabor = ctk.CTkButton(
         frame_gabor,
-        text="Build Coarse Library",
+        text="Build Gabor Library (Coarse RF)",
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
         hover_color="#1D4ED8",
-        command=run_in_thread(lambda: create_gabor("coarse"), "Coarse Gabor library construction"),
+        command=run_in_thread(create_selected_gabor_library, "Gabor library construction"),
     )
-    btn_submit_coarse_gabor.grid(row=len(gabor_param), column=0, columnspan=2, pady=(15, 0), sticky="ew")
-
-    btn_submit_fine_gabor = ctk.CTkButton(
-        frame_gabor,
-        text="Build Fine Library",
-        height=34,
-        corner_radius=6,
-        fg_color="#374151",
-        hover_color="#111827",
-        command=run_in_thread(lambda: create_gabor("fine"), "Fine Gabor library construction"),
-    )
-    btn_submit_fine_gabor.grid(row=len(gabor_param) + 1, column=0, columnspan=2, pady=(6, 0), sticky="ew")
-
-    btn_submit_both_gabor = ctk.CTkButton(
-        frame_gabor,
-        text="Build Coarse + Fine Libraries",
-        height=34,
-        corner_radius=6,
-        fg_color=success_btn,
-        hover_color="#065F46",
-        command=run_in_thread(create_both_gabor_libraries, "Coarse and fine Gabor library construction"),
-    )
-    btn_submit_both_gabor.grid(row=len(gabor_param) + 2, column=0, columnspan=2, pady=(6, 0), sticky="ew")
+    btn_submit_gabor.grid(row=len(gabor_param), column=0, columnspan=2, pady=(15, 0), sticky="ew")
 
     format_frame = ctk.CTkFrame(frame_gabor, fg_color="transparent")
-    format_frame.grid(row=len(gabor_param)+3, column=0, columnspan=2, pady=(10, 0), sticky="w")
+    format_frame.grid(row=len(gabor_param)+1, column=0, columnspan=2, pady=(10, 0), sticky="w")
     ctk.CTkLabel(format_frame, text="Library format:", text_color=muted_text).pack(side=tk.LEFT)
 
     def _set_gabor_format(val):
@@ -4114,7 +4193,7 @@ def run(param_defaults, gabor_param, workflow=None):
         background=frame_color,
         foreground=text_color,
     )
-    gabor_size_label.grid(row=len(gabor_param)+4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    gabor_size_label.grid(row=len(gabor_param)+2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     # --- 2 · Stimulus wavelet pipeline ---
     frame_processing = ttk.LabelFrame(frame_left, text="2 · Stimulus Wavelet Pipeline", padding=15)
@@ -4123,12 +4202,12 @@ def run(param_defaults, gabor_param, workflow=None):
     wavelet_format_var = tk.StringVar(value="zarr")
     btn_submit_wavelet = ctk.CTkButton(
         frame_processing,
-        text="Run Wavelet Decomposition",
+        text="Run Wavelet Decomposition (Coarse RF)",
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
         hover_color="#1D4ED8",
-        command=run_in_thread(run_wavelet, "Stimulus wavelet decomposition"),
+        command=run_in_thread(run_wavelet, "Wavelet decomposition"),
     )
     btn_submit_wavelet.pack(fill=tk.X, pady=3)
 
@@ -4336,24 +4415,14 @@ def run(param_defaults, gabor_param, workflow=None):
 
     btn_run_model_plots = ctk.CTkButton(
         frame_analysis,
-        text="Run Simple Model Plots",
+        text="Run Model Plots (Coarse RF)",
         height=34,
         corner_radius=6,
         fg_color="#374151",
         hover_color="#111827",
-        command=run_in_thread(plot_run_model_outputs, "run_Model plot capture"),
+        command=run_in_thread(plot_selected_model_outputs, "model plot capture"),
     )
     btn_run_model_plots.pack(fill=tk.X, pady=(8, 0))
-    btn_run_full_model_plots = ctk.CTkButton(
-        frame_analysis,
-        text="Run Full Model Plots",
-        height=34,
-        corner_radius=6,
-        fg_color="#7C3AED",
-        hover_color="#5B21B6",
-        command=run_in_thread(plot_run_full_model_outputs, "run_Full_Model plot capture"),
-    )
-    btn_run_full_model_plots.pack(fill=tk.X, pady=(6, 0))
 
     # --- 4 · Export ---
     frame_export = ttk.LabelFrame(frame_left, text="4 · Export", padding=15)
@@ -4389,20 +4458,18 @@ def run(param_defaults, gabor_param, workflow=None):
     frame_controls.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 5))
 
     all_buttons = [
-        btn_submit_coarse_gabor,
-        btn_submit_fine_gabor,
-        btn_submit_both_gabor,
+        btn_submit_gabor,
         btn_submit_wavelet,
         btn_submit_plot,
         btn_runRF,
         btn_run_model_plots,
-        btn_run_full_model_plots,
         btn_export_all_results,
         btn_export_all_neurons,
         btn_export_individual_neuron,
         btn_save_state,
         btn_load_state,
     ]
+    refresh_scale_controls()
 
     try:
         root.mainloop()

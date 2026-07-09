@@ -178,7 +178,7 @@
     
     
       <div class="md-header__source">
-        <a href="https://github.com/skriabineSop/waven" title="Go to repository" class="md-source" data-md-component="source">
+        <a href="https://github.com/abdwaleed/waven" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
@@ -224,7 +224,7 @@
   </label>
   
     <div class="md-nav__source">
-      <a href="https://github.com/skriabineSop/waven" title="Go to repository" class="md-source" data-md-component="source">
+      <a href="https://github.com/abdwaleed/waven" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
@@ -772,6 +772,8 @@
       
         
       
+        
+      
     
     
     
@@ -841,6 +843,34 @@
     
   
     Pipeline Intuition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="explanation/code-mindmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Mindmap
   
 
     
@@ -1564,6 +1594,7 @@ pipeline for reproducible runs.</p>
 <tr>
 <th>Object</th>
 <th>Shape</th>
+<th>dtype</th>
 <th>Meaning</th>
 </tr>
 </thead>
@@ -1571,25 +1602,67 @@ pipeline for reproducible runs.</p>
 <tr>
 <td><code>spikes</code></td>
 <td><code>(n_trials, n_frames, n_neurons)</code></td>
-<td>Neural activity aligned to stimulus frames.</td>
+<td>floating numeric</td>
+<td>Neural activity aligned to stimulus frames. Axis 1 is always the stimulus-frame axis used for correlations and models.</td>
 </tr>
 <tr>
 <td><code>neuron_pos</code></td>
 <td><code>(n_neurons, 2)</code> or <code>(n_neurons, 3)</code></td>
-<td>Anatomical neuron positions.</td>
+<td>floating numeric</td>
+<td>Anatomical positions. Two-photon data usually stores imaging-plane coordinates; electrophysiology data can include shank/depth metadata.</td>
 </tr>
 <tr>
-<td>coarse wavelets</td>
+<td>downsampled movie</td>
+<td><code>(n_frames, ny, nx)</code></td>
+<td><code>bool</code></td>
+<td>Binary stimulus after cropping to <code>Analysis Coverage</code> and resizing to the analysis grid. Movie files keep image order as row, column.</td>
+</tr>
+<tr>
+<td>Gabor library</td>
+<td>coarse: <code>(nx, ny, n_orientations, n_sigmas, n_phases, nx * ny)</code></td>
+<td><code>float16</code></td>
+<td>Spatial filters flattened over pixels. Libraries are large but reusable when the grid and feature axes match.</td>
+</tr>
+<tr>
+<td>fine Gabor library</td>
+<td><code>(NX, NY, n_orientations, n_sigmas, n_frequencies, n_phases, NX * NY)</code></td>
+<td><code>float16</code></td>
+<td>Full-model filter bank when frequencies are independent from size.</td>
+</tr>
+<tr>
+<td>coarse wavelet cache</td>
 <td><code>(3, n_frames, nx, ny, n_orientations, n_sigmas)</code></td>
-<td>Real, imaginary, and magnitude-like wavelet cache.</td>
+<td><code>float32</code></td>
+<td>Durable cache containing real phase, imaginary phase, and combined energy-like coefficients.</td>
 </tr>
 <tr>
 <td>full wavelets</td>
-<td><code>(n_frames, nx, ny, n_orientations, n_sigmas, n_frequencies)</code></td>
-<td>Full-resolution wavelet arrays for model fitting.</td>
+<td><code>(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)</code></td>
+<td><code>float32</code></td>
+<td>Full-resolution wavelet arrays for nonlinear model fitting; written separately for real and imaginary phases.</td>
+</tr>
+<tr>
+<td>RF tensor</td>
+<td><code>(n_neurons, nx, ny, n_orientations, n_sigmas, n_frequencies)</code></td>
+<td><code>float32</code> or <code>float64</code></td>
+<td>Pearson-correlation receptive fields. Tuning curves are slices through this tensor around each neuron's preferred feature.</td>
 </tr>
 </tbody>
 </table>
+<p>The docs use uppercase <code>NX</code>/<code>NY</code> for the full analysis grid from the
+configuration and lowercase <code>nx</code>/<code>ny</code> for a concrete array after any coarse
+downsampling. Movie arrays use image order <code>(y, x)</code>, while Gabor and RF tensors
+use feature order <code>(x, y)</code>. When a shape looks transposed, check which family the
+array belongs to before assuming it is wrong.</p>
+<p>For uncompressed arrays, size is approximately:</p>
+<div class="highlight"><pre><span></span><code>number_of_values * dtype_bytes
+</code></pre></div>
+<p>For example, a full wavelet phase with
+<code>n_frames=54000</code>, <code>NX=135</code>, <code>NY=54</code>, <code>n_orientations=8</code>, <code>n_sigmas=6</code>, and
+<code>n_frequencies=4</code> contains about 75.6 billion <code>float32</code> values, or roughly
+302 GB before filesystem and compression effects. This is why <code>waven</code> reuses
+existing files, shape-validates caches, and supports Zarr for full-model
+wavelets.</p>
 <h2 id="recommended-first-path">Recommended first path<a class="headerlink" href="#recommended-first-path" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Read <a href="how-to/install/">Install waven</a>.</li>
@@ -1599,9 +1672,9 @@ pipeline for reproducible runs.</p>
 </ol>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>The older Sphinx <code>source/</code> folder is kept as historical source material.
-New authored documentation lives in <code>docs/</code>; the built site is written to
-<code>site/</code>.</p>
+<p>Authored documentation lives in <code>docs/</code>. The rendered static site is written
+to <code>site/</code>, and the previous Sphinx <code>source/</code> tree has been retired in favor
+of MkDocs plus <code>mkdocstrings</code>.</p>
 </div>
 
 

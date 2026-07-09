@@ -20,18 +20,18 @@ DEFAULT_GABOR_PARAMS: Dict[str, str] = {
     "N_thetas": "8",
     "Sigmas": "[2, 3, 4, 5, 6, 8]",
     "Frequencies": "[0.015, 0.04, 0.07, 0.1]",
-    "Phases": "[0, 90]",
+    "Phases": "[0, 1.57079632679]",
     "NX": "135",
     "NY": "54",
-    "Save Path": "/home/sophie/Documents/POSTDOC/TEMP/gabors_library.npy",
+    "Save Path": "outputs/gabor/gabors_library.npy",
 }
 
 WORKFLOW_2P = "2p"
 WORKFLOW_EPHYS = "ephys"
 
 DEFAULT_COMMON_PARAMS: Dict[str, str] = {
-    "Dir": "/media/sophie/Seagate Basic/datasets",
-    "Path Directory": "/media/sophie/Expansion1/UCL/datatest/videos",
+    "Dir": "data",
+    "Path Directory": "outputs/wavelets",
     "Experiment Info": "('SS002', '2024-07-23', 3)",
     "Block End": "0",
     "screen_x": "4096",
@@ -47,10 +47,10 @@ DEFAULT_COMMON_PARAMS: Dict[str, str] = {
     "Number of Frames": "18000",
     "Number of Trials to Keep": "3",
     "Movie Path": (
-        "/home/sophie/Documents/POSTDOC/TEMP/videos/"
+        "data/stimuli/"
         "perlin_stimulus_10min.mp4"
     ),
-    "Library Path": "/home/sophie/Documents/POSTDOC/TEMP/gabors_library.npy",
+    "Library Path": "outputs/gabor/gabors_library.npy",
     "Spks Path": "None",
     "Full Model Wavelet Path": "",
     "Full Model Save Path": "",

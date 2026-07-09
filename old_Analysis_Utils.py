@@ -1,7 +1,7 @@
 """
 Created on Wed Mar 25 19:31:32 2025
 
-@author: Sophie Skriabine
+Legacy compatibility module.
 """
 
 import os
@@ -705,7 +705,7 @@ def predictSparseNoise(resp, stim, rfs, tp, save=False):
     for i in range(1,8):
         ax[i].imshow(stim[tp-i+1])
     if save:
-        tifffile.imwrite('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3000reconstructed.tif', img.reshape(54, 135))
+        tifffile.imwrite('tp3000reconstructed.tif', img.reshape(54, 135))
 
 
 def predictPinkNoise(maxes, vis_n, spks,rfs, tp, L, videodata, dt=50, save=False):
@@ -753,12 +753,12 @@ def predictPinkNoise(maxes, vis_n, spks,rfs, tp, L, videodata, dt=50, save=False
 
     if save:
 
-        tifffile.imwrite('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520videodata.tif',
+        tifffile.imwrite('tp3520videodata.tif',
                          np.mean(videodata[tp-dt:tp], axis=0))
 
     vc = vis_t.reshape(1, -1) @ L[:, :, :, :, 0].reshape(-1, 135 * 54)
     if save:
-        tifffile.imwrite('/media/sophie/Expansion1/UCL/datatest/SP045/2023-10-04/3/tp3520reconstructed_1wavelet.tif',
+        tifffile.imwrite('tp3520reconstructed_1wavelet.tif',
                          (vs+vc).reshape(54, 135))
 
     return (vs+vc).reshape(54, 135)
@@ -3474,8 +3474,8 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
     return Predictions, nonlinParams,RhoPhiParams,Metrics,interpolators
 
 def run_Full_Model( maxes1, maxes0, spks,idxs,thetas,sigmas, frequencies,visual_coverage, neuron_pos,
-                    wavelet_path='/media/sophie/Expansion1/UCL/utils/2screens/10/',
-                    savepath = '/home/sophie/Pictures/img zebra/supp/supp/', n_min=5, tt=[10, 18000],
+                    wavelet_path='.',
+                    savepath = 'outputs', n_min=5, tt=[10, 18000],
                     memmapping=True, train_idx=[0, 2],test_idx=[1, 3],double_wavelet_model=False, lastmin=False,
                     plotting=False, frames_per_minute=None,
                     hz=DEFAULT_MOVIE_FRAME_RATE_HZ ):
