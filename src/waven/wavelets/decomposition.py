@@ -45,7 +45,7 @@ def _maybe_load_into_ram(array, label):
     required = _array_bytes(shape, dtype)
     if has_enough_ram(required, safety_margin=1.35):
         print(f"Loading {label} into RAM for faster repeated access ({required / (1024**3):.2f} GB).")
-        return np.asarray(array)
+        return np.array(array)
     print(f"Keeping {label} disk-backed to avoid memory pressure ({required / (1024**3):.2f} GB).")
     return array
 
@@ -63,6 +63,81 @@ def _open_zarr_array(zarr_module, path, **kwargs):
             except Exception:
                 kwargs.pop("compressors", None)
         return zarr_module.open(path, **kwargs)
+
+
+def _prepare_video_flat(videodata, device):
+    """Move the movie to the compute device once and return pixel-by-time data."""
+    if not isinstance(videodata, torch.Tensor):
+        video_tensor = torch.as_tensor(videodata, dtype=torch.float32, device=device)
+    else:
+        video_tensor = videodata.to(device=device, dtype=torch.float32)
+
+    num_frames = video_tensor.shape[0]
+    video_flat = video_tensor.reshape(num_frames, -1).t()
+    spatial_pixels = video_flat.shape[0]
+    return video_tensor, video_flat, num_frames, spatial_pixels
+
+
+def _select_library_phase(waveletLibrary, phase, frequency_index, spatial_pixels):
+    """Return one phase plane from a Gabor library and validate pixel count."""
+    if waveletLibrary.ndim == 6:
+        if frequency_index is None:
+            raise ValueError(
+                "This Gabor slice still has an independent frequency axis. "
+                "Pass frequency_index explicitly, or use the coupled coarse "
+                "library for coarse RF decomposition. Refusing to silently "
+                "use frequency index 0."
+            )
+        lib_phase = waveletLibrary[:, :, :, int(frequency_index), phase, :]
+    else:
+        lib_phase = waveletLibrary[:, :, :, phase, :]
+
+    if lib_phase.shape[-1] != spatial_pixels:
+        raise ValueError(
+            "Gabor library pixel axis does not match video frames: "
+            f"library has {lib_phase.shape[-1]} pixels, video has {spatial_pixels}. "
+            "Check NX/NY and the downsampled movie shape in config.json."
+        )
+    return lib_phase
+
+
+@torch.no_grad()
+def _project_library_phase(
+    video_flat,
+    waveletLibrary,
+    phase,
+    WT_flat,
+    s_idx,
+    device,
+    spatial_pixels,
+    filter_chunk_size=None,
+    frequency_index=None,
+    cancel_event=None,
+):
+    """Project one phase of a Gabor slice onto a prepared flattened movie."""
+    if filter_chunk_size is None:
+        filter_chunk_size = wavelet_filter_chunk_size()
+
+    lib_phase = _select_library_phase(
+        waveletLibrary,
+        phase,
+        frequency_index,
+        spatial_pixels,
+    )
+    lib_flat = lib_phase.reshape(-1, spatial_pixels)
+    num_filters = lib_flat.shape[0]
+
+    for start in range(0, num_filters, filter_chunk_size):
+        check_cancelled(cancel_event)
+        end = min(start + filter_chunk_size, num_filters)
+        lib_chunk = torch.tensor(
+            lib_flat[start:end, :],
+            dtype=torch.float32,
+            device=device,
+        )
+        product = torch.matmul(lib_chunk, video_flat)
+        WT_flat[start:end, :, s_idx] = product.cpu().numpy()
+        del lib_chunk, product
 
 
 def _process_binary_chunk(frames_buffer, xi, xe, yi, ye, shape, actual_len):
@@ -245,48 +320,19 @@ def getWTfromNPY(
     if filter_chunk_size is None:
         filter_chunk_size = wavelet_filter_chunk_size()
 
-    if not isinstance(videodata, torch.Tensor):
-        video_tensor = torch.as_tensor(videodata, dtype=torch.float32, device=device)
-    else:
-        video_tensor = videodata.to(device=device, dtype=torch.float32)
-
-    num_frames = video_tensor.shape[0]
-    video_flat = video_tensor.reshape(num_frames, -1).t()
-    spatial_pixels = video_flat.shape[0]
-
-    if waveletLibrary.ndim == 6:
-        if frequency_index is None:
-            raise ValueError(
-                "This Gabor slice still has an independent frequency axis. "
-                "Pass frequency_index explicitly, or use the coupled coarse "
-                "library for coarse RF decomposition. Refusing to silently "
-                "use frequency index 0."
-            )
-        lib_phase = waveletLibrary[:, :, :, int(frequency_index), phase, :]
-    else:
-        lib_phase = waveletLibrary[:, :, :, phase, :]
-
-    if lib_phase.shape[-1] != spatial_pixels:
-        raise ValueError(
-            "Gabor library pixel axis does not match video frames: "
-            f"library has {lib_phase.shape[-1]} pixels, video has {spatial_pixels}. "
-            "Check NX/NY and the downsampled movie shape in config.json."
-        )
-
-    lib_flat = lib_phase.reshape(-1, spatial_pixels)
-    num_filters = lib_flat.shape[0]
-
-    for start in range(0, num_filters, filter_chunk_size):
-        check_cancelled(cancel_event)
-        end = min(start + filter_chunk_size, num_filters)
-        lib_chunk = torch.as_tensor(
-            lib_flat[start:end, :],
-            dtype=torch.float32,
-            device=device,
-        )
-        product = torch.matmul(lib_chunk, video_flat)
-        WT_flat[start:end, :, s_idx] = product.cpu().numpy()
-        del lib_chunk, product
+    _, video_flat, _, spatial_pixels = _prepare_video_flat(videodata, device)
+    _project_library_phase(
+        video_flat,
+        waveletLibrary,
+        phase,
+        WT_flat,
+        s_idx,
+        device,
+        spatial_pixels,
+        filter_chunk_size=filter_chunk_size,
+        frequency_index=frequency_index,
+        cancel_event=cancel_event,
+    )
 
     if device == "cuda":
         torch.cuda.empty_cache()
@@ -371,19 +417,33 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path, ca
         print(f"Using disk-backed output for coarse phase {phase}; RAM is below safe working set.")
 
     temp_flat = np.empty((num_filters, T, 1), dtype=np.float32)
+    device = resolve_compute_device(prefer_gpu=True)
+    video_tensor, video_flat, _, spatial_pixels = _prepare_video_flat(videodata, device)
 
     start_time = time.time()
     for s, ss in enumerate(sigmas):
         check_cancelled(cancel_event)
         print(f"Processing sigma {s + 1}/{len(sigmas)}...", end="\n\n")
         temp_flat.fill(0)
-        getWTfromNPY(videodata, L[:, :, :, s], phase, WT_flat=temp_flat, s_idx=0, cancel_event=cancel_event)
+        _project_library_phase(
+            video_flat,
+            L[:, :, :, s],
+            phase,
+            temp_flat,
+            0,
+            device,
+            spatial_pixels,
+            cancel_event=cancel_event,
+        )
         spatial = temp_flat[:, :, 0].reshape(prefix_shape + (T,))
         WT_final[..., s] = np.transpose(spatial, (3, 0, 1, 2))
         print(progress_message(f"Coarse phase {phase}", s + 1, len(sigmas), start_time))
         
         gc.collect() 
-        torch.cuda.empty_cache() 
+
+    del video_flat, video_tensor
+    if device == "cuda":
+        torch.cuda.empty_cache()
         
     if use_mmap:
         WT_final.flush()
@@ -505,6 +565,8 @@ def waveletDecompositionFull(
         print(f"Using disk-backed output for full-model phase {phase}; RAM is below safe working set.")
 
     temp_flat = np.zeros((num_filters, num_frames, 1), dtype=np.float32)
+    device = resolve_compute_device(prefer_gpu=True)
+    video_tensor, video_flat, _, spatial_pixels = _prepare_video_flat(videodata, device)
 
     total_steps = max(1, len(sigma_indices) * nf)
     completed_steps = 0
@@ -519,12 +581,14 @@ def waveletDecompositionFull(
             else:
                 lib_slice = library[:, :, :, lib_s]
 
-            getWTfromNPY(
-                videodata,
+            _project_library_phase(
+                video_flat,
                 lib_slice,
                 phase,
-                WT_flat=temp_flat,
-                s_idx=0,
+                temp_flat,
+                0,
+                device,
+                spatial_pixels,
                 cancel_event=cancel_event,
             )
             spatial = temp_flat[:, :, 0].reshape(lx, ly, num_t, num_frames)
@@ -535,8 +599,10 @@ def waveletDecompositionFull(
             completed_steps += 1
             print(progress_message(f"Full-model phase {phase}", completed_steps, total_steps, start_time))
             gc.collect()
-            if resolve_compute_device(prefer_gpu=True) == "cuda":
-                torch.cuda.empty_cache()
+
+    del video_flat, video_tensor
+    if device == "cuda":
+        torch.cuda.empty_cache()
 
     if output_format == "zarr":
         print(f"Success! Saved full-model Zarr array to {save_path}", end="\n\n")

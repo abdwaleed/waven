@@ -164,16 +164,19 @@ def load_stimulus_simple_cell(
         target = (wavelets_r.shape[0], nx, ny, no, ns)
         if wavelets_r.ndim == 6:
             target = (wavelets_r.shape[0], nx, ny, no, ns, nf)
-        wavelets_r = transform.resize(
-            wavelets_r,
-            target,
-            anti_aliasing=True,
-        )
-        wavelets_i = transform.resize(
-            wavelets_i,
-            target,
-            anti_aliasing=True,
-        )
+        if tuple(wavelets_r.shape) == tuple(target):
+            print("Requested downsampling target already matches source wavelets; skipping resize.")
+        else:
+            wavelets_r = transform.resize(
+                wavelets_r,
+                target,
+                anti_aliasing=True,
+            )
+            wavelets_i = transform.resize(
+                wavelets_i,
+                target,
+                anti_aliasing=True,
+            )
 
     return wavelets_r, wavelets_i
 
@@ -350,6 +353,36 @@ def coarseWavelet(
     bytes_per_array = math.prod(target_shape_full) * 4
     total_required = bytes_per_array * 3
     use_memmap = not has_enough_ram(total_required, safety_margin=1.20)
+
+    if (source_nx, source_ny) == (nx, ny):
+        print("Source wavelets already match target coarse grid; caching without interpolation.")
+        _validate_legacy_coarse_shape(wavelets_r, nx, ny, no, ns, "Real coarse wavelets")
+        _validate_legacy_coarse_shape(wavelets_i, nx, ny, no, ns, "Imaginary coarse wavelets")
+        cache = np.lib.format.open_memmap(
+            cache_path,
+            mode="w+",
+            dtype=np.float32,
+            shape=(3,) + target_shape_full,
+        )
+        progress_start = time.time()
+        for chunk_index in range(n_chunks):
+            check_cancelled(cancel_event)
+            start = chunk_index * chunk_size
+            end = min((chunk_index + 1) * chunk_size, n_frames)
+            r_chunk = np.asarray(wavelets_r[start:end], dtype=np.float32)
+            i_chunk = np.asarray(wavelets_i[start:end], dtype=np.float32)
+            cache[0, start:end] = r_chunk
+            cache[1, start:end] = i_chunk
+            cache[2, start:end] = np.square(r_chunk) + np.square(i_chunk)
+            print(progress_message("Coarse wavelet cache", chunk_index + 1, n_chunks, progress_start, unit="chunks"))
+        cache.flush()
+        del cache
+        wavelets_downsampled = np.load(cache_path, mmap_mode="r")
+        w_r_cached = _coerce_legacy_coarse_wavelets(wavelets_downsampled[0])
+        w_i_cached = _coerce_legacy_coarse_wavelets(wavelets_downsampled[1])
+        w_c_cached = _coerce_legacy_coarse_wavelets(wavelets_downsampled[2])
+        _validate_legacy_coarse_shape(w_c_cached, nx, ny, no, ns, "Complex coarse wavelets")
+        return w_r_cached, w_i_cached, w_c_cached
 
     if use_memmap:
         print("Low RAM detected: using disk-backed arrays for coarse wavelet cache.")
