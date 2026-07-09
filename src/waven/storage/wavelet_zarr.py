@@ -1,3 +1,4 @@
+"""Wavelet Zarr module."""
 import os
 import time
 

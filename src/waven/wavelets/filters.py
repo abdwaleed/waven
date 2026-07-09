@@ -45,6 +45,23 @@ def has_enough_ram(required_bytes: int, safety_margin: float = 1.20) -> bool:
 
 
 def makeGaborFilter(i, j, angle, sigma, phase, f=0.4, lx=54, ly=135, plot=False, freq=True):
+    """Function for makeGaborFilter.
+
+    Args:
+        i: Input value for this operation.
+        j: Input value for this operation.
+        angle: Input value for this operation.
+        sigma: Input value for this operation.
+        phase: Input value for this operation.
+        f: Input value for this operation.
+        lx: Input value for this operation.
+        ly: Input value for this operation.
+        plot: Input value for this operation.
+        freq: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     backgrd=np.zeros((lx, ly))
     if freq:
         gk = gabor_kernel(frequency=f, theta=angle, sigma_x=sigma, sigma_y=sigma, offset=phase)

@@ -92,6 +92,18 @@ def align_ephys_data(
     **kwargs: Any,
 ) -> AlignedNeuralData:
     
+    """Function for align ephys data.
+
+    Args:
+        data_dir: Input value for this operation.
+        nb_frames: Input value for this operation.
+        sampling_rate: Input value for this operation.
+        save_dir: Input value for this operation.
+        kwargs: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     import suite_ephys.DIO as DIO
     import numpy as np
     import os
@@ -101,6 +113,14 @@ def align_ephys_data(
     # PKL-SPECIFIC FUNCTIONS
     #======================================
     def get_pkl_path(directory):
+        """Function for get pkl path.
+
+        Args:
+            directory: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         file_pattern = re.compile(r"\.pkl$")
         for filename in os.listdir(directory):
             if file_pattern.search(filename):
@@ -108,6 +128,19 @@ def align_ephys_data(
         raise FileNotFoundError("No .pkl file found in data directory.")
 
     def extract_pos_and_spikes(units, start_times, end_times, pd_time, pd_state, nb_frames):
+        """Function for extract pos and spikes.
+
+        Args:
+            units: Input value for this operation.
+            start_times: Input value for this operation.
+            end_times: Input value for this operation.
+            pd_time: Input value for this operation.
+            pd_state: Input value for this operation.
+            nb_frames: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         n_trials = len(start_times)
         n_neurons = len(units)
 
@@ -200,20 +233,55 @@ def align_ephys_data(
     # DIN-SPECIFIC FUNCTIONS
     #======================================
     def get_dio_files(dio_dir):
+        """Function for get dio files.
+
+        Args:
+            dio_dir: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         dio_folders = DIO.get_dio_folders(dio_dir)
         return sorted(dio_folders, key=lambda x:x.name)
 
     def choose_correct_din_file(dio_files, port):
+        """Function for choose correct din file.
+
+        Args:
+            dio_files: Input value for this operation.
+            port: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         temp_time, pd_state = DIO.concatenate_din_data(dio_files, port)
         return (temp_time - temp_time[0]), pd_state # aligns timestamps relative to start time, making it index 0
     
     def get_frequency(pd_time, fs):
+        """Function for get frequency.
+
+        Args:
+            pd_time: Input value for this operation.
+            fs: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         time_diff = np.diff(pd_time) / fs 
         freq = 1. / time_diff # in Hz
         return np.insert(freq, 0, 0) 
     
     # BINARIZATION code: Trial ON or OFF
     def get_possible_trial_edges(freq, time_array):
+        """Function for get possible trial edges.
+
+        Args:
+            freq: Input value for this operation.
+            time_array: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         bin_freq = (freq >= 10).astype(int) # in Hz, HARDCODED 10 VALUE
         chng_freq = np.diff(bin_freq)
         chng_freq = np.insert(chng_freq, 0, 0)
@@ -224,6 +292,18 @@ def align_ephys_data(
         return time_array[start_times_idx], time_array[end_times_idx]
     
     def validate_edges(starts, ends, stim_dur, fs, tolerance=0.01): 
+        """Function for validate edges.
+
+        Args:
+            starts: Input value for this operation.
+            ends: Input value for this operation.
+            stim_dur: Input value for this operation.
+            fs: Input value for this operation.
+            tolerance: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         if starts.shape != ends.shape:
             raise Exception("Start timestamps array and End timestamps array are not of same size.")
 

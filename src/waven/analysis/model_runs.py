@@ -9,6 +9,16 @@ from .nonlinear_models import *
 from .trial_stats import *
 
 def signaltonoiseScipy(a, axis=0, ddof=0):
+    """Function for signaltonoiseScipy.
+
+    Args:
+        a: Input value for this operation.
+        axis: Input value for this operation.
+        ddof: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     a = np.asanyarray(a)
     m = a.mean(axis)
     sd = a.std(axis=axis, ddof=ddof)
@@ -16,6 +26,14 @@ def signaltonoiseScipy(a, axis=0, ddof=0):
 
 
 def _sem_over_trials(trials):
+    """Function for sem over trials.
+
+    Args:
+        trials: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     trials = np.asarray(trials, dtype=float)
     if trials.ndim < 2 or trials.shape[0] <= 1:
         return None
@@ -23,6 +41,19 @@ def _sem_over_trials(trials):
 
 
 def _plot_trace_with_optional_sem(ax, trials, x=None, color='k', label=None, show_sem_errorbars=False):
+    """Function for plot trace with optional sem.
+
+    Args:
+        ax: Input value for this operation.
+        trials: Input value for this operation.
+        x: Input value for this operation.
+        color: Input value for this operation.
+        label: Input value for this operation.
+        show_sem_errorbars: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     trials = np.asarray(trials, dtype=float)
     if trials.ndim == 1:
         mean = trials
@@ -52,11 +83,39 @@ def _plot_trace_with_optional_sem(ax, trials, x=None, color='k', label=None, sho
 
 
 def _set_sem_caption(fig, n_trials):
+    """Function for set sem caption.
+
+    Args:
+        fig: Input value for this operation.
+        n_trials: Input value for this operation.
+    """
     if n_trials and n_trials > 1:
         fig._waven_caption = f"Error bars represent SEM over {n_trials} trials."
 
 
 def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, lastmin=False, show_sem_errorbars=False):
+    """Function for process single neuron.
+
+    Args:
+        idx: Input value for this operation.
+        maxes0: Input value for this operation.
+        maxes1: Input value for this operation.
+        spks: Input value for this operation.
+        wavelets_i: Input value for this operation.
+        wavelets_r: Input value for this operation.
+        dt1: Input value for this operation.
+        n_min: Input value for this operation.
+        double_wavelet_model: Input value for this operation.
+        train_idx: Input value for this operation.
+        test_idx: Input value for this operation.
+        plotting: Input value for this operation.
+        frames_per_minute: Input value for this operation.
+        lastmin: Input value for this operation.
+        show_sem_errorbars: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     x = int(np.round(maxes0[0, idx]))
     y = int(np.round(maxes0[1, idx]))
     o = int(np.round(maxes0[2, idx]))
@@ -218,6 +277,35 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                    memmapping=True, train_idx=[0, 2], test_idx=[1, 3], double_wavelet_model=False, lastmin=False,
                    plotting=False, frames_per_minute=None,
                    hz=DEFAULT_MOVIE_FRAME_RATE_HZ, show_sem_errorbars=False):
+    """Function for run Full Model.
+
+    Args:
+        maxes0: Input value for this operation.
+        maxes1: Input value for this operation.
+        spks: Input value for this operation.
+        idxs: Input value for this operation.
+        thetas: Input value for this operation.
+        sigmas: Input value for this operation.
+        frequencies: Input value for this operation.
+        visual_coverage: Input value for this operation.
+        neuron_pos: Input value for this operation.
+        wavelet_path: Input value for this operation.
+        savepath: Input value for this operation.
+        n_min: Input value for this operation.
+        tt: Input value for this operation.
+        memmapping: Input value for this operation.
+        train_idx: Input value for this operation.
+        test_idx: Input value for this operation.
+        double_wavelet_model: Input value for this operation.
+        lastmin: Input value for this operation.
+        plotting: Input value for this operation.
+        frames_per_minute: Input value for this operation.
+        hz: Input value for this operation.
+        show_sem_errorbars: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if frames_per_minute is None:
         frames_per_minute = int(hz) * SECONDS_PER_MINUTE
     frames_per_minute = int(frames_per_minute)
@@ -295,6 +383,15 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     compute_device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def _corr_features(features, response):
+        """Function for corr features.
+
+        Args:
+            features: Input value for this operation.
+            response: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         features = np.asarray(features, dtype=np.float32)
         response = np.asarray(response, dtype=np.float32).reshape(-1)
         if features.shape[0] != response.shape[0]:
@@ -313,6 +410,17 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         return corr
 
     def _best_phase_correlation(real_features, imag_features, response, output_shape):
+        """Function for best phase correlation.
+
+        Args:
+            real_features: Input value for this operation.
+            imag_features: Input value for this operation.
+            response: Input value for this operation.
+            output_shape: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         corr_real = _corr_features(real_features, response).reshape(output_shape)
         corr_imag = _corr_features(imag_features, response).reshape(output_shape)
         real_score = np.nanmax(np.abs(corr_real))
@@ -327,6 +435,16 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         return phase, corr, tuple(int(i) for i in best)
 
     def _window_bounds(x0, y0, radius):
+        """Function for window bounds.
+
+        Args:
+            x0: Input value for this operation.
+            y0: Input value for this operation.
+            radius: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         x_start = max(0, x0 - radius)
         x_end = min(nx_full, x0 + radius + 1)
         y_start = max(0, y0 - radius)
@@ -334,6 +452,19 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         return x_start, x_end, y_start, y_end
 
     def _findBestPos_phase_specific(x, y, o, s, nmin=5, plotting=False):
+        """Function for findBestPos phase specific.
+
+        Args:
+            x: Input value for this operation.
+            y: Input value for this operation.
+            o: Input value for this operation.
+            s: Input value for this operation.
+            nmin: Input value for this operation.
+            plotting: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         x0 = int(np.round(np.minimum(np.maximum(x * scale_x, margin), nx_full - margin)))
         y0 = int(np.round(np.minimum(np.maximum(y * scale_y, margin), ny_full - margin)))
         w = 10
@@ -410,10 +541,36 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     
     
     def findBestPos_profiled(x, y, o, s, nmin=5, plotting=False):
+        """Function for findBestPos profiled.
+
+        Args:
+            x: Input value for this operation.
+            y: Input value for this operation.
+            o: Input value for this operation.
+            s: Input value for this operation.
+            nmin: Input value for this operation.
+            plotting: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         return _findBestPos_phase_specific(x, y, o, s, nmin=nmin, plotting=plotting)
 
 
     def findBestPos(x, y, o, s, nmin=5, plotting=False):
+        """Function for findBestPos.
+
+        Args:
+            x: Input value for this operation.
+            y: Input value for this operation.
+            o: Input value for this operation.
+            s: Input value for this operation.
+            nmin: Input value for this operation.
+            plotting: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         return _findBestPos_phase_specific(x, y, o, s, nmin=nmin, plotting=plotting)
     
     

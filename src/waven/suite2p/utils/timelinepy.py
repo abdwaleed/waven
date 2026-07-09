@@ -237,6 +237,14 @@ def get_udp(timeline):
     return udp, udp_times
 
 def get_ball(tl):
+    """Function for get ball.
+
+    Args:
+        tl: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     n_ball_udp = tl[9]
     ball_udp_times = tl[8][:n_ball_udp]
     ball_udps = tl[10][:n_ball_udp]

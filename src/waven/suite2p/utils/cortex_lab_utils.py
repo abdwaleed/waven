@@ -28,15 +28,37 @@ dirs = [
 
 def expt_dirs():
     
+    """Function for expt dirs.
+
+    Returns:
+        Result produced by the operation.
+    """
     return dirs
 
 def get_subject_log(subject):
+    """Function for get subject log.
+
+    Args:
+        subject: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     exp_path = find_expt_file((subject, '', ''),'subject' )
     mpep_logpath = os.path.join(exp_path, subject + '.txt')
     log = open(mpep_logpath).read()
     return log
 
 def parse_log(log, subject): 
+    """Function for parse log.
+
+    Args:
+        log: Input value for this operation.
+        subject: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     series = []
     in_series = False
     line_num = 0
@@ -78,6 +100,17 @@ def parse_log(log, subject):
 
 def find_expt_file(expt_info,file, dirs = None, verbose = False):
     
+    """Function for find expt file.
+
+    Args:
+        expt_info: Input value for this operation.
+        file: Input value for this operation.
+        dirs: Input value for this operation.
+        verbose: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     subject, expt_date, expt_num = expt_info
        
     file_names = {'timeline' : join(subject, expt_date, str(expt_num),
@@ -134,6 +167,15 @@ def find_expt_file(expt_info,file, dirs = None, verbose = False):
 
 
 def get_expt_tuple_from_df(exps_df, overall_id):
+    """Function for get expt tuple from df.
+
+    Args:
+        exps_df: Input value for this operation.
+        overall_id: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     row = exps_df[exps_df['overall_id'] == overall_id]
     subject = row['subject'].values[0]
     date = row['date'].values[0]

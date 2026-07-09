@@ -64,6 +64,16 @@ def _coerce_legacy_coarse_wavelets(wavelets):
 
 
 def _validate_legacy_coarse_shape(wavelets, nx, ny, no, ns, label):
+    """Function for validate legacy coarse shape.
+
+    Args:
+        wavelets: Input value for this operation.
+        nx: Input value for this operation.
+        ny: Input value for this operation.
+        no: Input value for this operation.
+        ns: Input value for this operation.
+        label: Input value for this operation.
+    """
     expected = (nx, ny, no, ns)
     if wavelets.ndim != 5 or wavelets.shape[1:5] != expected:
         raise ValueError(
@@ -73,6 +83,18 @@ def _validate_legacy_coarse_shape(wavelets, nx, ny, no, ns, label):
 
 
 def _expected_coarse_shape(nx0, ny0, no, ns, nf):
+    """Function for expected coarse shape.
+
+    Args:
+        nx0: Input value for this operation.
+        ny0: Input value for this operation.
+        no: Input value for this operation.
+        ns: Input value for this operation.
+        nf: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     coarse_nx, coarse_ny = coarse_grid_dimensions(nx0, ny0)
     return coarse_nx, coarse_ny, (coarse_nx, coarse_ny, no, ns, nf)
 
@@ -226,6 +248,21 @@ def load_stimulus_simple_cell2(
     ns=None,
     nf=None,
 ):
+    """Function for load stimulus simple cell2.
+
+    Args:
+        path: Input value for this operation.
+        tt: Input value for this operation.
+        downsampling: Input value for this operation.
+        nx0: Input value for this operation.
+        ny0: Input value for this operation.
+        no: Input value for this operation.
+        ns: Input value for this operation.
+        nf: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     w_i = load_stimulus_simple_cell2_i(
         path,
         tt,
@@ -362,6 +399,14 @@ def coarseWavelet(
                     w_c_gpu = w_r_gpu.square() + w_i_gpu.square()
 
                     def resize_tensor_gpu(t):
+                        """Function for resize tensor gpu.
+
+                        Args:
+                            t: Input value for this operation.
+
+                        Returns:
+                            Result produced by the operation.
+                        """
                         t = t.permute(0, 3, 4, 1, 2)
                         t = t.reshape(chunk_len, actual_no * actual_ns, source_nx, source_ny)
                         t = F.interpolate(t, size=(nx, ny), mode='bilinear', align_corners=False, antialias=True)

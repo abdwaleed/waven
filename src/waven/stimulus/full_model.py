@@ -77,6 +77,14 @@ def load_wavelets(
     n_chunks = math.ceil(n_frames / chunk_size)
 
     def process_chunk(chunk_index):
+        """Function for process chunk.
+
+        Args:
+            chunk_index: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         start = chunk_index * chunk_size
         end = min((chunk_index + 1) * chunk_size, n_frames)
         
@@ -163,6 +171,25 @@ def load_stimulus(
     scale=None,
 ):
     # Dynamically determine frames to avoid the hardcoded 9000 mismatch
+    """Function for load stimulus.
+
+    Args:
+        pathdir: Input value for this operation.
+        wavelets_r: Input value for this operation.
+        wavelets_i: Input value for this operation.
+        nx: Input value for this operation.
+        ny: Input value for this operation.
+        chunk_size: Input value for this operation.
+        no: Input value for this operation.
+        ns: Input value for this operation.
+        nf: Input value for this operation.
+        target_nx: Input value for this operation.
+        target_ny: Input value for this operation.
+        scale: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     n_frames = wavelets_r.shape[0]
     no, ns, nf = _feature_shape(wavelets_r, no=no, ns=ns, nf=nf)
     target_nx, target_ny = (
@@ -208,6 +235,14 @@ def load_stimulus(
     pn_wavelets = np.empty(target_shape, dtype=np.float32)
 
     def process_stimulus_chunk(chunk_index):
+        """Function for process stimulus chunk.
+
+        Args:
+            chunk_index: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         start = chunk_index * chunk_size
         end = min((chunk_index + 1) * chunk_size, n_frames)
         chunk_len = end - start
@@ -226,6 +261,14 @@ def load_stimulus(
                     w_i_gpu = torch.from_numpy(np.ascontiguousarray(w_i_slice)).to(device).float()
                     
                     def resize_gpu(t):
+                        """Function for resize gpu.
+
+                        Args:
+                            t: Input value for this operation.
+
+                        Returns:
+                            Result produced by the operation.
+                        """
                         if t.ndim == 5:
                             t = t.permute(0, 3, 4, 1, 2)
                             t = t.reshape(chunk_len, no * ns, nx, ny)

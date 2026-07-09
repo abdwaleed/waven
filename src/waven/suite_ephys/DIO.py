@@ -1,3 +1,4 @@
+"""Dio module."""
 import re
 import spikeinterface.extractors as se
 from pathlib import Path
@@ -9,10 +10,26 @@ import matplotlib.pyplot as plt
 
 def get_dio_folders(rec_folder):
     # get the folder under rec_folder that ends with ".DIO"
+    """Function for get dio folders.
+
+    Args:
+        rec_folder: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     rec_folder = Path(rec_folder)
     dio_folders = [f for f in rec_folder.iterdir() if f.is_dir() and f.name.endswith(".DIO")]
     # sort by part number: no part suffix -> 1, .part2 -> 2, .part3 -> 3, etc.
     def _part_num(f):
+        """Function for part num.
+
+        Args:
+            f: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         m = re.search(r'\.part(\d+)\.DIO$', f.name)
         return int(m.group(1)) if m else 1
     return sorted(dio_folders, key=_part_num)
@@ -20,6 +37,15 @@ def get_dio_folders(rec_folder):
 
 def extract_DIN(DIO_folder, channel_id):
     # get the file name
+    """Function for extract DIN.
+
+    Args:
+        DIO_folder: Input value for this operation.
+        channel_id: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     DIO_folder = Path(DIO_folder)
 
     # file name is end with Din1.dat
@@ -37,6 +63,15 @@ def extract_DIN(DIO_folder, channel_id):
 
 def concatenate_din_data(dio_folders, channel_id: int):
     # initialize the din_data
+    """Function for concatenate din data.
+
+    Args:
+        dio_folders: Input value for this operation.
+        channel_id: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     time, state = extract_DIN(dio_folders[0], channel_id)
 
     if len(dio_folders) == 1:

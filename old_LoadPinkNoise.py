@@ -27,6 +27,19 @@ from .Analysis_Utils import *
 
 
 def load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=False):
+    """Function for load wavelets.
+
+    Args:
+        pathdir: Input value for this operation.
+        nx: Input value for this operation.
+        ny: Input value for this operation.
+        wavelets_r: Input value for this operation.
+        wavelets_i: Input value for this operation.
+        direction: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     w_r = wavelets_r.reshape((-1, ny, nx, 3, 9))
     w_i = wavelets_i.reshape((-1, ny, nx, 3, 9))
     cos = np.clip(w_r, a_min=0, a_max=None)
@@ -60,6 +73,18 @@ def load_wavelets(pathdir, nx, ny, wavelets_r, wavelets_i, direction=False):
 
 
 def load_stimulus(pathdir, wavelets_r, wavelets_i, nx=161, ny=60):
+    """Function for load stimulus.
+
+    Args:
+        pathdir: Input value for this operation.
+        wavelets_r: Input value for this operation.
+        wavelets_i: Input value for this operation.
+        nx: Input value for this operation.
+        ny: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     wavelets_r = np.load(pathdir + '/cwt_pn_real_1_9000.npy')
     wavelets_i = np.load(pathdir + '/cwt_pn_imag_1_9000.npy')
     ## load wavelets
@@ -108,6 +133,20 @@ def load_stimulus(pathdir, wavelets_r, wavelets_i, nx=161, ny=60):
 def load_stimulus_simple_cell(path='/media/sophie/Expansion1/UCL/datatest/',nx=27, ny=11, no=8,ns=6, nf=1, downsampling=False):
     #wavelets_r=np.load(path+'dwt_videodata_r.npy')
     #wavelets_i = np.load(path+'dwt_videodata_i.npy')
+    """Function for load stimulus simple cell.
+
+    Args:
+        path: Input value for this operation.
+        nx: Input value for this operation.
+        ny: Input value for this operation.
+        no: Input value for this operation.
+        ns: Input value for this operation.
+        nf: Input value for this operation.
+        downsampling: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     wavelets_r=np.load(os.path.join(path, 'dwt_videodata_0.npy')) 
     wavelets_i = np.load(os.path.join(path, 'dwt_videodata_1.npy')) 
     print(wavelets_r.shape)
@@ -126,6 +165,16 @@ def load_stimulus_simple_cell(path='/media/sophie/Expansion1/UCL/datatest/',nx=2
 def load_stimulus_simple_cell2_i(path='/media/sophie/Expansion1/UCL/datatest/', tt=[0,9000], downsampling=False):
 
 
+    """Function for load stimulus simple cell2 i.
+
+    Args:
+        path: Input value for this operation.
+        tt: Input value for this operation.
+        downsampling: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     wavelets_i = np.load(path+'dwt_videodata2_i.npy')[tt[0]:tt[1]]#,  mmap_mode='c')
     if downsampling:
         # wavelets_i = skimage.transform.resize(abs(wavelets_i), (9000, 20, 8, 8, 3), anti_aliasing=True)
@@ -137,6 +186,16 @@ def load_stimulus_simple_cell2_i(path='/media/sophie/Expansion1/UCL/datatest/', 
 
 
 def load_stimulus_simple_cell2_r(path='/media/sophie/Expansion1/UCL/datatest/',tt=[0,9000], downsampling=False):
+    """Function for load stimulus simple cell2 r.
+
+    Args:
+        path: Input value for this operation.
+        tt: Input value for this operation.
+        downsampling: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     wavelets_r=np.load(path+'dwt_videodata2_r.npy')[tt[0]:tt[1]]#, mmap_mode='c')
     W_R=[]
     if downsampling:
@@ -150,11 +209,35 @@ def load_stimulus_simple_cell2_r(path='/media/sophie/Expansion1/UCL/datatest/',t
     return wavelets_r
 
 def load_stimulus_simple_cell2(path='/media/sophie/Expansion1/UCL/datatest/', tt=[0, 9000], downsampling=False):
+    """Function for load stimulus simple cell2.
+
+    Args:
+        path: Input value for this operation.
+        tt: Input value for this operation.
+        downsampling: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     w_i=load_stimulus_simple_cell2_i(path, tt, downsampling)
     w_r = load_stimulus_simple_cell2_r(path, tt, downsampling)
     return w_r, w_i
 
 def loadExperiment(dirs, exp_info, pathdir,block_end, n_planes, n_repeat=6,n_frames=9000):
+    """Function for loadExperiment.
+
+    Args:
+        dirs: Input value for this operation.
+        exp_info: Input value for this operation.
+        pathdir: Input value for this operation.
+        block_end: Input value for this operation.
+        n_planes: Input value for this operation.
+        n_repeat: Input value for this operation.
+        n_frames: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     exp_path = clu.find_expt_file(exp_info, 'root', dirs=dirs)
     exp_path=exp_info[0]+'/'+exp_info[1]
     tlfile = clu.find_expt_file(exp_info, 'timeline', dirs)
@@ -276,6 +359,22 @@ def loadExperiment(dirs, exp_info, pathdir,block_end, n_planes, n_repeat=6,n_fra
 
 
 def align_rotary_encoder(exp_info, dirs,spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, threshold=1.25, methods='frame2ttl'):
+    """Function for align rotary encoder.
+
+    Args:
+        exp_info: Input value for this operation.
+        dirs: Input value for this operation.
+        spks: Input value for this operation.
+        Nb_frames: Input value for this operation.
+        nb_plane: Input value for this operation.
+        plane: Input value for this operation.
+        w: Input value for this operation.
+        threshold: Input value for this operation.
+        methods: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     tlfile = clu.find_expt_file(exp_info, 'timeline', dirs)
     tl = tlu.load_timeline(tlfile)
 
@@ -320,6 +419,24 @@ def align_rotary_encoder(exp_info, dirs,spks, Nb_frames, nb_plane=1, plane=-1, w
     return rotary_encoder_vals
 
 def align_datas(exp_info, dirs,spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, threshold=1.25, methods='frame2ttl', exptype='zebra', plotting=False):
+    """Function for align datas.
+
+    Args:
+        exp_info: Input value for this operation.
+        dirs: Input value for this operation.
+        spks: Input value for this operation.
+        Nb_frames: Input value for this operation.
+        nb_plane: Input value for this operation.
+        plane: Input value for this operation.
+        w: Input value for this operation.
+        threshold: Input value for this operation.
+        methods: Input value for this operation.
+        exptype: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     tlfile = clu.find_expt_file(exp_info, 'timeline', dirs)
     tl = tlu.load_timeline(tlfile)
 
@@ -517,6 +634,25 @@ def align_datas(exp_info, dirs,spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, thr
 
 def loadFluoMesoscope(exp_info, dirs, path, block_end, Nb_plane=3, Nb_frames=9000, first=False, last=True,
                      threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra'):
+    """Function for loadFluoMesoscope.
+
+    Args:
+        exp_info: Input value for this operation.
+        dirs: Input value for this operation.
+        path: Input value for this operation.
+        block_end: Input value for this operation.
+        Nb_plane: Input value for this operation.
+        Nb_frames: Input value for this operation.
+        first: Input value for this operation.
+        last: Input value for this operation.
+        threshold: Input value for this operation.
+        plane: Input value for this operation.
+        method: Input value for this operation.
+        exptype: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if first:
         print('first session')
         if Nb_plane != 1:
@@ -662,6 +798,27 @@ def loadFluoMesoscope(exp_info, dirs, path, block_end, Nb_plane=3, Nb_frames=900
 
 
 def loadSPKMesoscope(exp_info, dirs, path, block_end, Nb_plane=3, Nb_frames=9000, first=False, last=True,  threshold=1.25,plane=-1,  method='frame2ttl', exptype='zebra', w=0, plotting=False):
+    """Function for loadSPKMesoscope.
+
+    Args:
+        exp_info: Input value for this operation.
+        dirs: Input value for this operation.
+        path: Input value for this operation.
+        block_end: Input value for this operation.
+        Nb_plane: Input value for this operation.
+        Nb_frames: Input value for this operation.
+        first: Input value for this operation.
+        last: Input value for this operation.
+        threshold: Input value for this operation.
+        plane: Input value for this operation.
+        method: Input value for this operation.
+        exptype: Input value for this operation.
+        w: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if first:
         print('first session')
         if Nb_plane != 1:
@@ -772,6 +929,17 @@ def loadSPKMesoscope(exp_info, dirs, path, block_end, Nb_plane=3, Nb_frames=9000
 
 
 def loadRespMesoscope(exp_info, dirs, path, block_end):
+    """Function for loadRespMesoscope.
+
+    Args:
+        exp_info: Input value for this operation.
+        dirs: Input value for this operation.
+        path: Input value for this operation.
+        block_end: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     tlfile = clu.find_expt_file(exp_info, 'timeline', dirs)
     tl = tlu.load_timeline(tlfile)
 
@@ -874,6 +1042,18 @@ def loadRespMesoscope(exp_info, dirs, path, block_end):
 
 
 def get_rfs(i, r2, r1, i2, i1,y2, y1, neuron_pos):
+    """Function for get rfs.
+
+    Args:
+        i: Input value for this operation.
+        r2: Input value for this operation.
+        r1: Input value for this operation.
+        i2: Input value for this operation.
+        i1: Input value for this operation.
+        y2: Input value for this operation.
+        y1: Input value for this operation.
+        neuron_pos: Input value for this operation.
+    """
     RFS = []
     print('r2')
     for o in range(8):
@@ -962,6 +1142,14 @@ def get_rfs(i, r2, r1, i2, i1,y2, y1, neuron_pos):
 
 
 def plotRFS(RFSs):
+    """Function for plotRFS.
+
+    Args:
+        RFSs: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     vmax = np.max(RFSs)
     vmin = -np.max(RFSs)
     print(vmin, vmax)
@@ -988,6 +1176,16 @@ def plotRFS(RFSs):
 
 
 def splitDataset(x_i, x_r, y):
+    """Function for splitDataset.
+
+    Args:
+        x_i: Input value for this operation.
+        x_r: Input value for this operation.
+        y: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     BATCH_SIZE = 1
     Dataset = TensorDataset(torch.Tensor(y[4500:]).T, torch.Tensor(y[:4500]).T)
     r2 = torch.Tensor(x_r.reshape(9000, 135, 54, 8, 4)[4500:])
@@ -1001,6 +1199,15 @@ def splitDataset(x_i, x_r, y):
 
 
 def getRFS_idx(idx, x_i, x_r, y, neuron_pos):
+    """Function for getRFS idx.
+
+    Args:
+        idx: Input value for this operation.
+        x_i: Input value for this operation.
+        x_r: Input value for this operation.
+        y: Input value for this operation.
+        neuron_pos: Input value for this operation.
+    """
     r2, r1, i2, i1, DL = splitDataset(x_i, x_r, y)
     get_rfs(idx, r2, r1, i2, i1, torch.Tensor(y[4500:]).T, torch.Tensor(y[:4500]).T, neuron_pos)
 
@@ -1015,6 +1222,15 @@ def GetRFS_allneurons(x_i, x_r, y, startid , neuron_pos):
     # I1_DL = DataLoader(I1, shuffle=False, batch_size=BATCH_SIZE)
     # I2_DL = DataLoader(I2, shuffle=False, batch_size=BATCH_SIZE)
 
+    """Function for GetRFS allneurons.
+
+    Args:
+        x_i: Input value for this operation.
+        x_r: Input value for this operation.
+        y: Input value for this operation.
+        startid: Input value for this operation.
+        neuron_pos: Input value for this operation.
+    """
     r2, r1, i2, i1, DL=splitDataset(x_i, x_r, y)
 
 

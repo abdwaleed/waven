@@ -1,0 +1,91 @@
+site_name: waven
+site_description: Scientific documentation for Gabor-wavelet analysis of neural responses.
+site_dir: site
+docs_dir: docs
+repo_url: https://github.com/abdwaleed/waven
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - content.tabs.link
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: teal
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - src
+          options:
+            docstring_style: google
+            docstring_options:
+              warn_missing_types: false
+              warn_unknown_params: false
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            inherited_members: false
+            members_order: source
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - tutorials/index.md
+      - First GUI Analysis: tutorials/first-gui-analysis.md
+      - Scripted Pipeline: tutorials/scripted-pipeline.md
+  - How-To:
+      - how-to/index.md
+      - Install waven: how-to/install.md
+      - Prepare Configuration: how-to/prepare-configuration.md
+      - Build Gabor Libraries: how-to/build-gabor-libraries.md
+      - Run Wavelet Decomposition: how-to/run-wavelet-decomposition.md
+      - Run RF Analysis: how-to/run-rf-analysis.md
+      - Export Results: how-to/export-results.md
+      - Build The Documentation: how-to/build-docs.md
+  - Explanation:
+      - explanation/index.md
+      - Pipeline Intuition: explanation/pipeline-intuition.md
+      - Methods Transparency: explanation/methods-transparency.md
+      - Orientation Selectivity: explanation/orientation-selectivity.md
+      - File Lifecycle: explanation/file-lifecycle.md
+  - Reference:
+      - reference/index.md
+      - Configuration: reference/config.md
+      - Pipeline: reference/pipeline.md
+      - Wavelets: reference/wavelets.md
+      - Stimulus: reference/stimulus.md
+      - Analysis: reference/analysis.md
+      - GUI: reference/gui.md
+      - Storage: reference/storage.md
+      - Runtime: reference/runtime.md
+      - Time Alignment: reference/time-alignment.md
+      - Neural Data: reference/neural-data.md
+      - Plotting: reference/plotting.md
+      - Compatibility Modules: reference/compatibility.md
+  - Examples:
+      - examples/index.md
+  - FAQ: faq.md

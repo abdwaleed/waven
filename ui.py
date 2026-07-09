@@ -1,3 +1,4 @@
+"""Ui module."""
 from pathlib import Path
 import sys
 import traceback
@@ -10,6 +11,12 @@ if str(LOCAL_SRC) not in sys.path:
 
 
 def show_startup_error(title, message):
+    """Function for show startup error.
+
+    Args:
+        title: Input value for this operation.
+        message: Input value for this operation.
+    """
     try:
         import tkinter as tk
         from tkinter import messagebox
@@ -23,6 +30,11 @@ def show_startup_error(title, message):
 
 
 def show_missing_dependency_error(exc):
+    """Function for show missing dependency error.
+
+    Args:
+        exc: Input value for this operation.
+    """
     missing = exc.name or "a required package"
     message = (
         f"Cannot launch waven GUI because Python is missing '{missing}'.\n\n"

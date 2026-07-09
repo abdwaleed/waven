@@ -206,6 +206,16 @@ def create_fine_gabor_library(
 def model_trial_indices(analysis: AnalysisConfig, n_trials: int) -> Tuple[Sequence[int], Sequence[int]]:
     """Resolve configured train/test trial indices, accepting ``auto`` for test."""
     def parse_indices(value: str, label: str, train_indices=None):
+        """Function for parse indices.
+
+        Args:
+            value: Input value for this operation.
+            label: Input value for this operation.
+            train_indices: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         text = str(value).strip()
         if text.lower() in {"", "auto"}:
             if train_indices is None:

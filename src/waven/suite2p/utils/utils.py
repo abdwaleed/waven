@@ -1,3 +1,4 @@
+"""Utils module."""
 
 import numpy as n
 from scipy.ndimage import convolve1d
@@ -179,6 +180,22 @@ def get_stim_response_matrix(data, post_stim_wait_ms=0.085, window_ms = 0.41, ve
 from scipy.interpolate import interp1d
 def interp_event_responses(ts, spks, events, window = n.arange(-1,2,0.1), interp_kind = 'linear', interp_axis=-1, resp_shape = None, 
                            mean_over_window=False, print_interval=None):
+    """Function for interp event responses.
+
+    Args:
+        ts: Input value for this operation.
+        spks: Input value for this operation.
+        events: Input value for this operation.
+        window: Input value for this operation.
+        interp_kind: Input value for this operation.
+        interp_axis: Input value for this operation.
+        resp_shape: Input value for this operation.
+        mean_over_window: Input value for this operation.
+        print_interval: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     f_spks = interp1d(ts, spks, bounds_error=False, kind=interp_kind, axis=interp_axis)
     n_cells = spks.shape[0]
     n_events = len(events)
@@ -199,6 +216,18 @@ def interp_event_responses(ts, spks, events, window = n.arange(-1,2,0.1), interp
 
 def extract_event_responses(ts, spks, events, window = (-1, 2), remove_nans=False):
 
+    """Function for extract event responses.
+
+    Args:
+        ts: Input value for this operation.
+        spks: Input value for this operation.
+        events: Input value for this operation.
+        window: Input value for this operation.
+        remove_nans: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     vol_period = n.diff(ts).mean()
     window_len = window[1] - window[0]
     n_responses = int(n.floor(window_len / vol_period))
@@ -227,6 +256,16 @@ def extract_event_responses(ts, spks, events, window = (-1, 2), remove_nans=Fals
     return ts_resp, responses
 
 def stimresp_matrix(stimuli, responses, n_responses_per_stim = 2):
+    """Function for stimresp matrix.
+
+    Args:
+        stimuli: Input value for this operation.
+        responses: Input value for this operation.
+        n_responses_per_stim: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     unique_stim = n.unique(stimuli)
     n_unique_stim = len(unique_stim)
     print(n_unique_stim)
@@ -250,6 +289,17 @@ def get_response_per_stim(stimuli, responses, n_responses_per_stim=31,exclude_st
 #         responses = responses[stimulus_all[:,0] != exclude_idx]
 #         stimulus = stimuli[stimulus_all[:,0] != exclude_idx]
 
+    """Function for get response per stim.
+
+    Args:
+        stimuli: Input value for this operation.
+        responses: Input value for this operation.
+        n_responses_per_stim: Input value for this operation.
+        exclude_stimuli: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     n_stimulus = (n.unique(stimuli[:,0])).shape[0] - len(exclude_stimuli)
     n_contrast = (n.unique(stimuli[:,1])).shape[0]
     n_cells = responses.shape[1]
@@ -269,6 +319,17 @@ def get_response_per_stim(stimuli, responses, n_responses_per_stim=31,exclude_st
 
     return mean_responses, all_responses
 def split_test_train(Xs, Ys, train_frac=0.65, seed=23581321):
+    """Function for split test train.
+
+    Args:
+        Xs: Input value for this operation.
+        Ys: Input value for this operation.
+        train_frac: Input value for this operation.
+        seed: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     n_samples = Xs.shape[0]
     n.random.seed(seed)
     rnd_idx = n.random.choice(n.arange(n_samples), n_samples, False)
@@ -314,6 +375,18 @@ def angle(vector1, vector2):
     return n.rad2deg(n.sign(minor) * n.arccos(n.clip(n.dot(v1_u, v2_u), -1.0, 1.0)))
 
 def zscore(x, ax=0, shift=True, epsilon=0, keepdims=True):
+    """Function for zscore.
+
+    Args:
+        x: Input value for this operation.
+        ax: Input value for this operation.
+        shift: Input value for this operation.
+        epsilon: Input value for this operation.
+        keepdims: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     m = x.mean(axis=int(ax), keepdims=keepdims)
     std = x.std(axis=int(ax), keepdims=keepdims) + epsilon
     if shift: return (x-m)/std
@@ -340,6 +413,15 @@ def scale_std(data, time_window=None, eps=1e-6):
 
 
 def moving_zscore(xs, window=1000):
+    """Function for moving zscore.
+
+    Args:
+        xs: Input value for this operation.
+        window: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     nx = len(xs)
     xf = n.copy(xs)
     for i in range(0, nx, window):
@@ -348,12 +430,31 @@ def moving_zscore(xs, window=1000):
     return xf
 
 def standardize(x, ax=0, epsilon=0, keepdims=True):
+    """Function for standardize.
+
+    Args:
+        x: Input value for this operation.
+        ax: Input value for this operation.
+        epsilon: Input value for this operation.
+        keepdims: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     mn = x.min(axis=int(ax), keepdims=keepdims)
     mx = x.max(axis=int(ax), keepdims=keepdims)
     return (x - mn) / (mx-mn)
 
 
 def mean_around_diag(mat):
+    """Function for mean around diag.
+
+    Args:
+        mat: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     return mat[mat.shape[0]//2]
     mat = mat.copy()
     for i in range(mat.shape[0]):
@@ -417,12 +518,34 @@ def bin_trials(resps, n_trials_per_bin = 5):
     return binned_resps
 
 def old_moving_average(x, n_window, axis=0):
+    """Function for old moving average.
+
+    Args:
+        x: Input value for this operation.
+        n_window: Input value for this operation.
+        axis: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     conv_window = n.ones(n_window)/n_window
     conv_window = n.ones(n_window)/n_window
     cv = convolve1d(x, conv_window,mode='reflect', axis=axis)
     return cv
 
 def moving_average(x, width=3, causal=True, axis=0, mode='nearest'):
+    """Function for moving average.
+
+    Args:
+        x: Input value for this operation.
+        width: Input value for this operation.
+        causal: Input value for this operation.
+        axis: Input value for this operation.
+        mode: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if width==1: 
         return x
     kernel = n.ones(width*2-1)
@@ -433,6 +556,13 @@ def moving_average(x, width=3, causal=True, axis=0, mode='nearest'):
 
 
 def bin_by_filter(filtvals, vals, bins=None):
+    """Function for bin by filter.
+
+    Args:
+        filtvals: Input value for this operation.
+        vals: Input value for this operation.
+        bins: Input value for this operation.
+    """
     n_bins = len(bins) - 1
     pass
     # for i in range(n_bins):
@@ -441,12 +571,31 @@ ragged_avg = n.vectorize(n.mean)
 ragged_std = n.vectorize(n.std)
 
 def bin_by_coord_2d(cs_y, cs_x, vals, bins):
+    """Function for bin by coord 2d.
+
+    Args:
+        cs_y: Input value for this operation.
+        cs_x: Input value for this operation.
+        vals: Input value for this operation.
+        bins: Input value for this operation.
+    """
     bins_y, bins_x = bins
     n_bins_y = len(bins_y) - 1; n_bins_x = len(bins_x) -1
 
 
 
 def bin_by_coord(coords, vals, n_bins = 10, bins=None):
+    """Function for bin by coord.
+
+    Args:
+        coords: Input value for this operation.
+        vals: Input value for this operation.
+        n_bins: Input value for this operation.
+        bins: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if bins is None:
         if n_bins is None:
             n_bins = len(n.unique(coords))
@@ -470,6 +619,16 @@ def bin_by_coord(coords, vals, n_bins = 10, bins=None):
 
 
 def to_rgb(frame, bw = None, bits = 8):
+    """Function for to rgb.
+
+    Args:
+        frame: Input value for this operation.
+        bw: Input value for this operation.
+        bits: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if bw is None:
         bw = (frame.min(), frame.max())
     rng = bw[1] - bw[0]
@@ -484,6 +643,17 @@ def to_rgb(frame, bw = None, bits = 8):
     return frame_rgb
 
 def filt(signal, width = 3, axis=0, mode='gaussian'):
+    """Function for filt.
+
+    Args:
+        signal: Input value for this operation.
+        width: Input value for this operation.
+        axis: Input value for this operation.
+        mode: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if width == 0:
         return signal
 
@@ -538,6 +708,21 @@ def split_sets(xs, ys, ratios = (0.7,0.2,0.1), seed = None, more_ys = []):
 
 def load_timeline_info(subject, date, exp_idx, dirs=None, load_vs=True, 
                        v_filt_sec=1, interp_vs=True, frame_counts=None):
+    """Function for load timeline info.
+
+    Args:
+        subject: Input value for this operation.
+        date: Input value for this operation.
+        exp_idx: Input value for this operation.
+        dirs: Input value for this operation.
+        load_vs: Input value for this operation.
+        v_filt_sec: Input value for this operation.
+        interp_vs: Input value for this operation.
+        frame_counts: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     exp_info = (subject, date, exp_idx)
     tlfile = clu.find_expt_file(exp_info, 'timeline', dirs)
     tl = tlu.load_timeline(tlfile)
@@ -584,6 +769,17 @@ def load_timeline_info(subject, date, exp_idx, dirs=None, load_vs=True,
 # frame counter continued incrementing while no frames were actually acquired
 def fix_mid_acquisition_crash(frame_counts, job_idx, frame_ts, diag_plot=False):
     
+    """Function for fix mid acquisition crash.
+
+    Args:
+        frame_counts: Input value for this operation.
+        job_idx: Input value for this operation.
+        frame_ts: Input value for this operation.
+        diag_plot: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     jobids = frame_counts['jobids']
     nframes = frame_counts['nframes'][jobids==job_idx]
     crash_file_idx = n.where(nframes != 100)[0][0]
@@ -610,6 +806,16 @@ def fix_mid_acquisition_crash(frame_counts, job_idx, frame_ts, diag_plot=False):
     return new_frame_ts
 
 def get_cells(outputs, iscell_tag='iscell_curated_slider', filter_spks = True):
+    """Function for get cells.
+
+    Args:
+        outputs: Input value for this operation.
+        iscell_tag: Input value for this operation.
+        filter_spks: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     coords = [stat['coords'] for i,stat in enumerate(outputs['stats']) if outputs[iscell_tag][i,0] ]
     lams = [stat['lam'] for i,stat in enumerate(outputs['stats']) if outputs[iscell_tag][i,0] ]
     nz,ny,nx = outputs['vmap'].shape; shape = nz,ny,nx
@@ -620,6 +826,18 @@ def get_cells(outputs, iscell_tag='iscell_curated_slider', filter_spks = True):
     return full_spks, meds, coords, lams
 
 def get_exp_data(job, full_spks,exp_idx, v_filt_sec = 0.25, v_abs=True):
+    """Function for get exp data.
+
+    Args:
+        job: Input value for this operation.
+        full_spks: Input value for this operation.
+        exp_idx: Input value for this operation.
+        v_filt_sec: Input value for this operation.
+        v_abs: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     exp_tidxs = job.get_exp_frame_idxs(exp_idx)
     spks = full_spks[:,exp_tidxs[0]:exp_tidxs[1]]
     exp_info = (job.params['subject'], job.params['date'], exp_idx)
@@ -633,6 +851,18 @@ def get_exp_data(job, full_spks,exp_idx, v_filt_sec = 0.25, v_abs=True):
     return frame_ts, spks, vs[:n_frames], tl_ts, sync_led_raw, exp_tidxs
 
 def sweep_params(func, sweep_def, other_args = {}, verbose=False, run=False):
+    """Function for sweep params.
+
+    Args:
+        func: Input value for this operation.
+        sweep_def: Input value for this operation.
+        other_args: Input value for this operation.
+        verbose: Input value for this operation.
+        run: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     param_per_run = {}
     n_per_param = []
     param_names = []
@@ -660,6 +890,15 @@ def sweep_params(func, sweep_def, other_args = {}, verbose=False, run=False):
     return sweep_info, outputs
 
 def collate_sweep_results(outputs, sweep_info):
+    """Function for collate sweep results.
+
+    Args:
+        outputs: Input value for this operation.
+        sweep_info: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     n_outputs = len(outputs[-1])
     param_dict = sweep_info['param_dict']
     param_names = sweep_info['param_names']

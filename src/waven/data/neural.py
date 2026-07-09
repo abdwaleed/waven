@@ -23,6 +23,20 @@ from ..suite2p.utils import timelinepy as tlu
 from ..suite2p.utils import utils
 
 def loadExperiment(dirs, exp_info, pathdir, block_end, n_planes=1, n_repeat=6, n_frames=18000):
+    """Function for loadExperiment.
+
+    Args:
+        dirs: Input value for this operation.
+        exp_info: Input value for this operation.
+        pathdir: Input value for this operation.
+        block_end: Input value for this operation.
+        n_planes: Input value for this operation.
+        n_repeat: Input value for this operation.
+        n_frames: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     exp_path = exp_info[0] + '/' + exp_info[1]
     tlfile = clu.find_expt_file(exp_info, 'root', dirs=dirs) 
     tlfile = clu.find_expt_file(exp_info, 'timeline', dirs)
@@ -95,6 +109,22 @@ def loadExperiment(dirs, exp_info, pathdir, block_end, n_planes=1, n_repeat=6, n
 
 
 def align_rotary_encoder(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, threshold=1.25, methods='frame2ttl'):
+    """Function for align rotary encoder.
+
+    Args:
+        exp_info: Input value for this operation.
+        dirs: Input value for this operation.
+        spks: Input value for this operation.
+        Nb_frames: Input value for this operation.
+        nb_plane: Input value for this operation.
+        plane: Input value for this operation.
+        w: Input value for this operation.
+        threshold: Input value for this operation.
+        methods: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     tl, frame_times, input_ind, syncEcho_thresh = _extract_timeline_sync(exp_info, dirs, threshold, methods)
     
     rotary_encoder_ind = 'rotary_encoder' == tlu.get_input_names(tl)
@@ -249,6 +279,16 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
     """
     
     def load_plane_data(p, start_idx, end_idx):
+        """Function for load plane data.
+
+        Args:
+            p: Input value for this operation.
+            start_idx: Input value for this operation.
+            end_idx: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         mask = np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)
         if data_type == 'fluo':
             F = np.load(path + '/plane%d/F.npy' % p, mmap_mode='c')[mask]
@@ -344,6 +384,25 @@ def _extract_timeline_sync(exp_info, dirs, threshold, methods):
 # Updated defaults: Nb_plane=1, Nb_frames=18000
 def loadFluoMesoscope(exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=18000, first=False, last=True,
                       threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra'):
+    """Function for loadFluoMesoscope.
+
+    Args:
+        exp_info: Input value for this operation.
+        dirs: Input value for this operation.
+        path: Input value for this operation.
+        block_end: Input value for this operation.
+        Nb_plane: Input value for this operation.
+        Nb_frames: Input value for this operation.
+        first: Input value for this operation.
+        last: Input value for this operation.
+        threshold: Input value for this operation.
+        plane: Input value for this operation.
+        method: Input value for this operation.
+        exptype: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     return _base_load_mesoscope('fluo', exp_info, dirs, path, block_end, Nb_plane, Nb_frames, 
                                 first, last, threshold, plane, method, exptype, w=0.0, plotting=False)
 
@@ -351,12 +410,43 @@ def loadFluoMesoscope(exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=180
 # Updated defaults: Nb_plane=1, Nb_frames=18000
 def loadSPKMesoscope(exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=18000, first=False, last=True, 
                      threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra', w=0, plotting=False):
+    """Function for loadSPKMesoscope.
+
+    Args:
+        exp_info: Input value for this operation.
+        dirs: Input value for this operation.
+        path: Input value for this operation.
+        block_end: Input value for this operation.
+        Nb_plane: Input value for this operation.
+        Nb_frames: Input value for this operation.
+        first: Input value for this operation.
+        last: Input value for this operation.
+        threshold: Input value for this operation.
+        plane: Input value for this operation.
+        method: Input value for this operation.
+        exptype: Input value for this operation.
+        w: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     return _base_load_mesoscope('spk', exp_info, dirs, path, block_end, Nb_plane, Nb_frames, 
                                 first, last, threshold, plane, method, exptype, w=w, plotting=plotting)
 
 
 # Added n_planes parameter to bypass the 3-plane math if you only have 1 plane
 def correctNeuronPos(neuron_pos, resolution, n_planes):
+    """Function for correctNeuronPos.
+
+    Args:
+        neuron_pos: Input value for this operation.
+        resolution: Input value for this operation.
+        n_planes: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     neuron_pos = np.asarray(neuron_pos, dtype=np.float64).copy()
     
     # If single plane layout, bypass the legacy unwrapping

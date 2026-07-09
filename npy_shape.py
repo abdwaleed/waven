@@ -1,3 +1,4 @@
+"""Npy Shape module."""
 import numpy as np
 import os
 

@@ -81,6 +81,16 @@ def compute_signal_related_variance(resp_a, resp_b, mean_center=True):
 
 def split_trials(n_stim, n_rep, n_split = 2):
     # n_stim, n_rep = respmat.shape[:2]
+    """Function for split trials.
+
+    Args:
+        n_stim: Input value for this operation.
+        n_rep: Input value for this operation.
+        n_split: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     n_trial_split = n_rep // n_split
     trial_idxs = np.zeros((n_split, n_stim, n_rep), bool)
 
@@ -163,6 +173,17 @@ def lowess(x, y, f=1./3.):
     return y_sm, y_stderr
 
 def getHVA(signMap, neuron_pos, thresh=0.3, sign=1):
+    """Function for getHVA.
+
+    Args:
+        signMap: Input value for this operation.
+        neuron_pos: Input value for this operation.
+        thresh: Input value for this operation.
+        sign: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if sign==1:
         signMap_binary=signMap>0
     elif sign==0:
@@ -246,6 +267,16 @@ def visualSignMap(phasemap1, phasemap2):
     return areamap
 
 def getSignMap(neuron_pos, maxes, plotting=False):
+    """Function for getSignMap.
+
+    Args:
+        neuron_pos: Input value for this operation.
+        maxes: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     import scipy as sp
     x_pos=np.arange(0, np.max(neuron_pos[:, 0]))
     y_pos=np.arange(0, np.max(neuron_pos[:, 1]))
@@ -295,6 +326,16 @@ def getSignMap(neuron_pos, maxes, plotting=False):
 from skimage.color import lab2rgb
 
 def TwoDimColorMap(X, Y, plotting=False):
+    """Function for TwoDimColorMap.
+
+    Args:
+        X: Input value for this operation.
+        Y: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     az = np.arange(0, 6)  # azimuths (assumes one screen and a half)
     el = np.arange(-1.5, 1.5)
     # I chose squares of size 8 just to illustrate the point:
@@ -338,6 +379,15 @@ def TwoDimColorMap(X, Y, plotting=False):
 
 
 def rescale_to_minus_a_plus_a(arr, a=1.0):
+    """Function for rescale to minus a plus a.
+
+    Args:
+        arr: Input value for this operation.
+        a: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     arr_min, arr_max = arr.min(), arr.max()
     if arr_max == arr_min:
         return np.zeros_like(arr)  # éviter division par zéro

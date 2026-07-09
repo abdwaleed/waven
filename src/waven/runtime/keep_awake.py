@@ -32,6 +32,11 @@ class KeepAwake:
     """
 
     def __init__(self, reason: str = "waven analysis is running") -> None:
+        """Function for init.
+
+        Args:
+            reason: Input value for this operation.
+        """
         self.reason = reason
         self._process: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
@@ -75,6 +80,7 @@ class KeepAwake:
 
     def _start_windows(self) -> None:
         # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED.
+        """Function for start windows."""
         flags = 0x80000000 | 0x00000001 | 0x00000002
         try:
             ctypes.windll.kernel32.SetThreadExecutionState(flags)
@@ -82,6 +88,7 @@ class KeepAwake:
             return
 
         def refresh() -> None:
+            """Function for refresh."""
             while not self._stop_event.wait(30):
                 try:
                     ctypes.windll.kernel32.SetThreadExecutionState(flags)
@@ -92,6 +99,7 @@ class KeepAwake:
         self._thread.start()
 
     def _start_linux(self) -> None:
+        """Function for start linux."""
         if shutil.which("systemd-inhibit"):
             self._start_process(
                 [
@@ -108,6 +116,11 @@ class KeepAwake:
         self._start_periodic_linux_reset()
 
     def _start_process(self, command: List[str]) -> None:
+        """Function for start process.
+
+        Args:
+            command: Input value for this operation.
+        """
         try:
             self._process = subprocess.Popen(
                 command,
@@ -118,7 +131,9 @@ class KeepAwake:
             self._process = None
 
     def _start_periodic_linux_reset(self) -> None:
+        """Function for start periodic linux reset."""
         def reset_loop() -> None:
+            """Function for reset loop."""
             while not self._stop_event.wait(45):
                 if os.environ.get("DISPLAY") and shutil.which("xdg-screensaver"):
                     subprocess.run(

@@ -12,7 +12,13 @@ from pathlib import Path
 from ..config import parse_literal
 
 class ToolTip(object):
+    """Container for ToolTip."""
     def __init__(self, widget):
+        """Function for init.
+
+        Args:
+            widget: Input value for this operation.
+        """
         self.widget = widget
         self.tipwindow = None
         self.id = None
@@ -21,23 +27,40 @@ class ToolTip(object):
         self.widget.bind('<Leave>', self.leave)
 
     def enter(self, event=None):
+        """Function for enter.
+
+        Args:
+            event: Input value for this operation.
+        """
         self.schedule()
 
     def leave(self, event=None):
+        """Function for leave.
+
+        Args:
+            event: Input value for this operation.
+        """
         self.unschedule()
         self.hidetip()
 
     def schedule(self):
+        """Function for schedule."""
         self.unschedule()
         self.id = self.widget.after(500, self.showtip)
 
     def unschedule(self):
+        """Function for unschedule."""
         id = self.id
         self.id = None
         if id:
             self.widget.after_cancel(id)
 
     def showtip(self, event=None):
+        """Function for showtip.
+
+        Args:
+            event: Input value for this operation.
+        """
         text = self.widget.get()
         if not text: return
         x, y, cx, cy = self.widget.bbox("insert") or (0,0,0,0)
@@ -52,11 +75,20 @@ class ToolTip(object):
         label.pack(ipadx=1)
 
     def hidetip(self):
+        """Function for hidetip."""
         tw = self.tipwindow
         self.tipwindow = None
         if tw: tw.destroy()
 
 def _parse_data_dir(value):
+    """Function for parse data dir.
+
+    Args:
+        value: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     try:
         parsed = parse_literal(value, "Dir")
     except ValueError:
@@ -69,16 +101,40 @@ def _parse_data_dir(value):
 
 
 def _format_bytes(size):
+    """Function for format bytes.
+
+    Args:
+        size: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if size is None or size < 0:
         return "0.00 GB"
     return f"{size / (1024 ** 3):.2f} GB"
 
 
 def _build_size_text(gb_bytes):
+    """Function for build size text.
+
+    Args:
+        gb_bytes: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     return _format_bytes(gb_bytes)
 
 
 def _folder_size_bytes(path):
+    """Function for folder size bytes.
+
+    Args:
+        path: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     total = 0
     if not path or not os.path.exists(path):
         return None
@@ -95,6 +151,14 @@ def _folder_size_bytes(path):
 
 
 def _zarr_output_path(path):
+    """Function for zarr output path.
+
+    Args:
+        path: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     path = str(path).strip()
     if not path:
         return path
@@ -105,10 +169,27 @@ def _zarr_output_path(path):
 
 
 def _safe_name(value):
+    """Function for safe name.
+
+    Args:
+        value: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in str(value)).strip("_") or "plot"
 
 
 def _default_gabor_library_path(path_value, suffix):
+    """Function for default gabor library path.
+
+    Args:
+        path_value: Input value for this operation.
+        suffix: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     base = Path(str(path_value or "gabors_library.npy")).expanduser()
     if base.suffix:
         return str(base.with_name(f"{base.stem}{suffix}{base.suffix}"))
@@ -116,6 +197,14 @@ def _default_gabor_library_path(path_value, suffix):
 
 
 def _normalise_gabor_params(gabor_param):
+    """Function for normalise gabor params.
+
+    Args:
+        gabor_param: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     normalised = dict(gabor_param or {})
     legacy_path = normalised.get("Save Path", "gabors_library.npy")
     normalised.setdefault(
@@ -130,6 +219,14 @@ def _normalise_gabor_params(gabor_param):
 
 
 def _ordered_float_union(*sequences):
+    """Function for ordered float union.
+
+    Args:
+        sequences: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     values = []
     seen = set()
     for sequence in sequences:

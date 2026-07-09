@@ -124,6 +124,15 @@ def sibling_path_with_suffix(path: Any, suffix: str) -> Path:
 
 
 def _as_tuple(value: Any, field_name: str) -> Tuple[Any, ...]:
+    """Function for as tuple.
+
+    Args:
+        value: Input value for this operation.
+        field_name: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     parsed = parse_literal(value, field_name)
     if parsed is None:
         return tuple()
@@ -135,10 +144,28 @@ def _as_tuple(value: Any, field_name: str) -> Tuple[Any, ...]:
 
 
 def _as_float_tuple(value: Any, field_name: str) -> Tuple[float, ...]:
+    """Function for as float tuple.
+
+    Args:
+        value: Input value for this operation.
+        field_name: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     return tuple(float(item) for item in _as_tuple(value, field_name))
 
 
 def _as_int(value: Any, field_name: str) -> int:
+    """Function for as int.
+
+    Args:
+        value: Input value for this operation.
+        field_name: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     parsed = parse_literal(value, field_name)
     if parsed is None:
         raise ValueError(f"{field_name} is required")
@@ -146,6 +173,15 @@ def _as_int(value: Any, field_name: str) -> int:
 
 
 def _as_float(value: Any, field_name: str) -> float:
+    """Function for as float.
+
+    Args:
+        value: Input value for this operation.
+        field_name: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     parsed = parse_literal(value, field_name)
     if parsed is None:
         raise ValueError(f"{field_name} is required")
@@ -153,6 +189,15 @@ def _as_float(value: Any, field_name: str) -> float:
 
 
 def _as_bool(value: Any, field_name: str) -> bool:
+    """Function for as bool.
+
+    Args:
+        value: Input value for this operation.
+        field_name: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     parsed = parse_literal(value, field_name)
     if isinstance(parsed, bool):
         return parsed
@@ -168,6 +213,15 @@ def _as_bool(value: Any, field_name: str) -> bool:
 
 
 def _as_path_tuple(value: Any, field_name: str) -> Tuple[Path, ...]:
+    """Function for as path tuple.
+
+    Args:
+        value: Input value for this operation.
+        field_name: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if value is None:
         return tuple()
 
@@ -190,10 +244,28 @@ def _as_path_tuple(value: Any, field_name: str) -> Tuple[Path, ...]:
 
 
 def _get(mapping: Mapping[str, Any], key: str, default: Any = None) -> Any:
+    """Function for get.
+
+    Args:
+        mapping: Input value for this operation.
+        key: Input value for this operation.
+        default: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     return mapping[key] if key in mapping else default
 
 
 def _path_to_gui(path: Optional[Path]) -> str:
+    """Function for path to gui.
+
+    Args:
+        path: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     return "None" if path is None else str(path)
 
 
@@ -265,6 +337,14 @@ class GaborConfig:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "GaborConfig":
+        """Function for from mapping.
+
+        Args:
+            mapping: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         save_path = parse_path(_get(mapping, "Save Path"), "Save Path")
         coarse_path = (
             parse_path(_get(mapping, "Coarse Library Path"), "Coarse Library Path")
@@ -293,35 +373,75 @@ class GaborConfig:
 
     @property
     def x_positions(self) -> np.ndarray:
+        """Function for x positions.
+
+        Returns:
+            Result produced by the operation.
+        """
         return np.arange(self.nx)
 
     @property
     def y_positions(self) -> np.ndarray:
+        """Function for y positions.
+
+        Returns:
+            Result produced by the operation.
+        """
         return np.arange(self.ny)
 
     @property
     def theta_radians(self) -> np.ndarray:
+        """Function for theta radians.
+
+        Returns:
+            Result produced by the operation.
+        """
         return np.array(
             [(index * np.pi) / self.n_thetas for index in range(self.n_thetas)]
         )
 
     @property
     def sigmas_array(self) -> np.ndarray:
+        """Function for sigmas array.
+
+        Returns:
+            Result produced by the operation.
+        """
         return np.array(self.sigmas)
 
     @property
     def phases_array(self) -> np.ndarray:
+        """Function for phases array.
+
+        Returns:
+            Result produced by the operation.
+        """
         return np.array(self.phases)
 
     @property
     def frequencies_array(self) -> np.ndarray:
+        """Function for frequencies array.
+
+        Returns:
+            Result produced by the operation.
+        """
         return np.array(self.frequencies)
 
     @property
     def has_independent_frequencies(self) -> bool:
+        """Function for has independent frequencies.
+
+        Returns:
+            Result produced by the operation.
+        """
         return bool(self.frequencies) and any(freq != 0 for freq in self.frequencies)
 
     def to_gui_mapping(self) -> Dict[str, str]:
+        """Function for to gui mapping.
+
+        Returns:
+            Result produced by the operation.
+        """
         return {
             "N_thetas": str(self.n_thetas),
             "Sigmas": repr(list(self.sigmas)),
@@ -376,6 +496,15 @@ class AnalysisConfig:
         mapping: Mapping[str, Any],
         workflow: str = WORKFLOW_2P,
     ) -> "AnalysisConfig":
+        """Function for from mapping.
+
+        Args:
+            mapping: Input value for this operation.
+            workflow: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         experiment_info = _as_tuple(
             _get(mapping, "Experiment Info"),
             "Experiment Info",
@@ -472,22 +601,47 @@ class AnalysisConfig:
 
     @property
     def data_dirs(self) -> Tuple[Path, ...]:
+        """Function for data dirs.
+
+        Returns:
+            Result produced by the operation.
+        """
         return (self.data_dir,)
 
     @property
     def coarse_nx(self) -> int:
+        """Function for coarse nx.
+
+        Returns:
+            Result produced by the operation.
+        """
         return coarse_grid_dimensions(self.nx, self.ny)[0]
 
     @property
     def coarse_ny(self) -> int:
+        """Function for coarse ny.
+
+        Returns:
+            Result produced by the operation.
+        """
         return coarse_grid_dimensions(self.nx, self.ny)[1]
 
     @property
     def data_dir_strings(self) -> Sequence[str]:
+        """Function for data dir strings.
+
+        Returns:
+            Result produced by the operation.
+        """
         return [str(path) for path in self.data_dirs]
 
     @property
     def experiment_dir(self) -> Path:
+        """Function for experiment dir.
+
+        Returns:
+            Result produced by the operation.
+        """
         if not self.data_dirs:
             raise ValueError("At least one data directory is required")
         subject, date, experiment_number = self.experiment_info
@@ -495,18 +649,38 @@ class AnalysisConfig:
 
     @property
     def suite2p_dir(self) -> Path:
+        """Function for suite2p dir.
+
+        Returns:
+            Result produced by the operation.
+        """
         return self.experiment_dir / "suite2p"
 
     @property
     def screen_ratio(self) -> float:
+        """Function for screen ratio.
+
+        Returns:
+            Result produced by the operation.
+        """
         return abs(self.visual_coverage[0] - self.visual_coverage[1]) / self.nx
 
     @property
     def sigmas_array(self) -> np.ndarray:
+        """Function for sigmas array.
+
+        Returns:
+            Result produced by the operation.
+        """
         return np.array(self.sigmas)
 
     @property
     def sigmas_deg(self) -> np.ndarray:
+        """Function for sigmas deg.
+
+        Returns:
+            Result produced by the operation.
+        """
         x_max, x_min, _, _ = self.analysis_coverage
         deg_per_pix = abs(x_max - x_min) / self.nx
         return np.trunc(2 * deg_per_pix * self.sigmas_array * 100) / 100
@@ -517,6 +691,11 @@ class AnalysisConfig:
         return self.hz * 60
 
     def coverage_ratios(self) -> Tuple[float, float]:
+        """Function for coverage ratios.
+
+        Returns:
+            Result produced by the operation.
+        """
         if self.visual_coverage == self.analysis_coverage:
             return 1.0, 1.0
 
@@ -533,6 +712,11 @@ class AnalysisConfig:
         return float(ratio_x), float(ratio_y)
 
     def to_gui_mapping(self) -> Dict[str, str]:
+        """Function for to gui mapping.
+
+        Returns:
+            Result produced by the operation.
+        """
         mapping = {
             "Dir": str(self.data_dir),
             "Path Directory": str(self.path_directory),
@@ -590,6 +774,16 @@ class PipelineConfig:
         analysis_params: Optional[Mapping[str, Any]] = None,
         workflow: str = WORKFLOW_2P,
     ) -> "PipelineConfig":
+        """Function for from mappings.
+
+        Args:
+            gabor_params: Input value for this operation.
+            analysis_params: Input value for this operation.
+            workflow: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         merged_gabor = dict(DEFAULT_GABOR_PARAMS)
         merged_common = dict(DEFAULT_COMMON_PARAMS)
         merged_workflow = dict(
@@ -611,6 +805,15 @@ class PipelineConfig:
 
     @classmethod
     def from_json(cls, path: Path, workflow: str = WORKFLOW_2P) -> "PipelineConfig":
+        """Function for from json.
+
+        Args:
+            path: Input value for this operation.
+            workflow: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         import os
         path = Path(path)
 

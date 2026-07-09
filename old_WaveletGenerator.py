@@ -28,6 +28,23 @@ from skimage.filters import gabor_kernel
 
 
 def makeGaborFilter(i, j, angle, sigma, phase, f=0.4, lx=54, ly=135, plot=False, freq=True):
+    """Function for makeGaborFilter.
+
+    Args:
+        i: Input value for this operation.
+        j: Input value for this operation.
+        angle: Input value for this operation.
+        sigma: Input value for this operation.
+        phase: Input value for this operation.
+        f: Input value for this operation.
+        lx: Input value for this operation.
+        ly: Input value for this operation.
+        plot: Input value for this operation.
+        freq: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     backgrd=np.zeros((lx, ly))
     if freq:
         gk = gabor_kernel(frequency=f, theta=angle, sigma_x=sigma, sigma_y=sigma, offset=phase)
@@ -59,6 +76,23 @@ def makeGaborFilter(i, j, angle, sigma, phase, f=0.4, lx=54, ly=135, plot=False,
 
 def makeGaborFilter3D(i, j, angle, sigma, tp_w, f=0.4, lx=54, ly=135, alpha1=0, alpha2=np.pi/4):
 
+    """Function for makeGaborFilter3D.
+
+    Args:
+        i: Input value for this operation.
+        j: Input value for this operation.
+        angle: Input value for this operation.
+        sigma: Input value for this operation.
+        tp_w: Input value for this operation.
+        f: Input value for this operation.
+        lx: Input value for this operation.
+        ly: Input value for this operation.
+        alpha1: Input value for this operation.
+        alpha2: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     phases=np.linspace(alpha1, alpha2, tp_w)
     # print(phases)
     f3d=np.array([ makeGaborFilter(i, j, angle, sigma, phase, f=f, lx=lx, ly=ly) for phase in phases])
@@ -66,6 +100,19 @@ def makeGaborFilter3D(i, j, angle, sigma, tp_w, f=0.4, lx=54, ly=135, alpha1=0, 
 
 
 def makeFilterLibrary2(xs, ys, thetas, sigmas, offsets, frequencies):
+    """Function for makeFilterLibrary2.
+
+    Args:
+        xs: Input value for this operation.
+        ys: Input value for this operation.
+        thetas: Input value for this operation.
+        sigmas: Input value for this operation.
+        offsets: Input value for this operation.
+        frequencies: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     library=[]
     lx=xs.shape[0]
     ly=ys.shape[0]
@@ -116,6 +163,23 @@ def makeFilterLibrary(xs, ys, thetas, sigmas, offsets, f, freq=True):
 import itertools
 def makeFilterLibrary3D(xs, ys, thetas, sigmas, offsets, f, tp_w,  alpha1, alpha2, filename):
     # library=[]
+    """Function for makeFilterLibrary3D.
+
+    Args:
+        xs: Input value for this operation.
+        ys: Input value for this operation.
+        thetas: Input value for this operation.
+        sigmas: Input value for this operation.
+        offsets: Input value for this operation.
+        f: Input value for this operation.
+        tp_w: Input value for this operation.
+        alpha1: Input value for this operation.
+        alpha2: Input value for this operation.
+        filename: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     lx = xs.shape[0]
     ly = ys.shape[0]
     fp = np.zeros( shape=(lx, ly, thetas.shape[0], sigmas.shape[0], tp_w,ly, lx), dtype='float16')
@@ -138,18 +202,44 @@ def makeFilterLibrary3D(xs, ys, thetas, sigmas, offsets, f, tp_w,  alpha1, alpha
 
 
 def waveletTransform(frame,phase, L):
+    """Function for waveletTransform.
+
+    Args:
+        frame: Input value for this operation.
+        phase: Input value for this operation.
+        L: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     output=L[:, :, :,phase]@torch.Tensor(frame.flatten()).cuda()
     # output=torch.sum(output, axis=(0, 1))
     return output.detach().cpu().numpy()
 
 
 def waveletTransform3D(frame, L):
+    """Function for waveletTransform3D.
+
+    Args:
+        frame: Input value for this operation.
+        L: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     output=L@torch.Tensor(frame.flatten()).cuda()
     # output=torch.sum(output, axis=(0, 1))
     return output.detach().cpu().numpy()
 
 
 def getTrueRF(idx, rfs, L):
+    """Function for getTrueRF.
+
+    Args:
+        idx: Input value for this operation.
+        rfs: Input value for this operation.
+        L: Input value for this operation.
+    """
     rf=rfs[idx, :, :, :]#.swapaxes(0, 1)
     # rf = skimage.transform.resize(rf, (135, 54, 8),order=5, anti_aliasing=True)
     rfv=rf.reshape(1, -1)@L[:, :, :, 2, 0, :].reshape(-1,7290)
@@ -160,6 +250,16 @@ def getTrueRF(idx, rfs, L):
 
 
 def getWTfromNPY(videodata, waveletLibrary, phase):
+    """Function for getWTfromNPY.
+
+    Args:
+        videodata: Input value for this operation.
+        waveletLibrary: Input value for this operation.
+        phase: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     WT = []
     l = torch.Tensor(waveletLibrary).cuda()
     for i, frame in enumerate(videodata):
@@ -178,6 +278,16 @@ def getWTfromNPY(videodata, waveletLibrary, phase):
 
 
 def getWTfromNPY3D(videodata, waveletLibrary, tp_w):
+    """Function for getWTfromNPY3D.
+
+    Args:
+        videodata: Input value for this operation.
+        waveletLibrary: Input value for this operation.
+        tp_w: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     WT = []
     l = torch.Tensor(waveletLibrary).cuda()
     for i in range(tp_w, videodata.shape[0]):
@@ -281,6 +391,13 @@ def downsample_video_binary(path, visual_coverage, analysis_coverage, shape=(54,
 
 def downsample_video_uint(path, shape=(54, 135), chunk_size=1000):
     ## chunk size should be a divisor of the video total nb of frames
+    """Function for downsample video uint.
+
+    Args:
+        path: Input value for this operation.
+        shape: Input value for this operation.
+        chunk_size: Input value for this operation.
+    """
     frames = []
     cap = cv2.VideoCapture(path)
     ret = True

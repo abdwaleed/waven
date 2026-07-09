@@ -34,6 +34,15 @@ def coarse_indices_to_full(x, y, nx, ny, margin=5):
 
 
 def pi_formatter(x, pos):
+    """Function for pi formatter.
+
+    Args:
+        x: Input value for this operation.
+        pos: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     n = int(np.round(x / np.pi, 2))
     if n == 0:
         return "0"
@@ -51,6 +60,16 @@ def Decay(t, tau, t0):
 
 
 def convolve_Stim(stim, time_trial1, tau=1.8):
+    """Function for convolve Stim.
+
+    Args:
+        stim: Input value for this operation.
+        time_trial1: Input value for this operation.
+        tau: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     lambda_1 = 1 / tau
     t_response = time_trial1
     t0 = 0
@@ -65,6 +84,15 @@ def convolve_Stim(stim, time_trial1, tau=1.8):
 
 
 def max_by_index(idx, arr):
+    """Function for max by index.
+
+    Args:
+        idx: Input value for this operation.
+        arr: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     sub_arr = arr[idx]
     flat_idx = np.argmax(sub_arr)
     unrav = np.unravel_index(flat_idx, sub_arr.shape)
@@ -158,6 +186,17 @@ def PearsonCorrelation(stim, resp, neuron_pos, nx, ny, plotting=True):
     return rfs, [xmax, ymax]
 
 def orientation_correction_for_stretches(visual_coverage, nx, ny, omax):
+    """Function for orientation correction for stretches.
+
+    Args:
+        visual_coverage: Input value for this operation.
+        nx: Input value for this operation.
+        ny: Input value for this operation.
+        omax: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     xM, xm, yM, ym = visual_coverage
     x_ratio = abs(xM - xm) / nx
     y_ratio = abs(yM - ym) / ny
@@ -251,6 +290,16 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
 
 def realign_Stim_mc(stim, syncEcho_flip_times, stim_times):
     # Completely vectorized searchsorted execution replacing structural loop appending
+    """Function for realign Stim mc.
+
+    Args:
+        stim: Input value for this operation.
+        syncEcho_flip_times: Input value for this operation.
+        stim_times: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     idx = np.searchsorted(stim_times, syncEcho_flip_times, side='right') - 1
     return stim[:, :, idx]
 
@@ -264,6 +313,15 @@ def _vectorized_pearson_r(x, y):
 
 def repetability_trial(resps_all, neuron_pos):
     # Vectorized trial cross-comparisons bypassing cell loops
+    """Function for repetability trial.
+
+    Args:
+        resps_all: Input value for this operation.
+        neuron_pos: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     c01 = _vectorized_pearson_r(resps_all[0], resps_all[1])
     c02 = _vectorized_pearson_r(resps_all[0], resps_all[2])
     c12 = _vectorized_pearson_r(resps_all[1], resps_all[2])
@@ -277,6 +335,15 @@ def repetability_trial(resps_all, neuron_pos):
 
 
 def repetability_trial2(resps_all, neuron_pos):
+    """Function for repetability trial2.
+
+    Args:
+        resps_all: Input value for this operation.
+        neuron_pos: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     S, T, N = resps_all.shape
     sum_resps = np.sum(resps_all, axis=0, keepdims=True)
     respcorrs = np.zeros(N)
@@ -297,6 +364,16 @@ def repetability_trial2(resps_all, neuron_pos):
 
 
 def repetability_trial3(resps_all, neuron_pos, plotting=True):
+    """Function for repetability trial3.
+
+    Args:
+        resps_all: Input value for this operation.
+        neuron_pos: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     S, T, N = resps_all.shape
     
     if S == 4:
@@ -329,6 +406,15 @@ def repetability_trial3(resps_all, neuron_pos, plotting=True):
     return respcorrs3
 
 def match_cumulative_cdf(source, template):
+    """Function for match cumulative cdf.
+
+    Args:
+        source: Input value for this operation.
+        template: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     src_values, src_unique_indices, src_counts = np.unique(source.ravel(),
                                                            return_inverse=True,
                                                            return_counts=True)
@@ -342,6 +428,13 @@ def match_cumulative_cdf(source, template):
 
 
 def plotcolorbar(vmin, vmax, cmap='coolwarm'):
+    """Function for plotcolorbar.
+
+    Args:
+        vmin: Input value for this operation.
+        vmax: Input value for this operation.
+        cmap: Input value for this operation.
+    """
     if vmax < 1:
         l = np.random.randint(vmin * 1000, vmax * 1000, 10000).reshape(100, 100) / 1000
     else:
@@ -352,6 +445,11 @@ def plotcolorbar(vmin, vmax, cmap='coolwarm'):
 
 
 def plotVariability(resp):
+    """Function for plotVariability.
+
+    Args:
+        resp: Input value for this operation.
+    """
     resps_med = np.mean(resp, axis=0)
     mins = np.min(resp, axis=0)
     maxes = np.max(resp, axis=0)
@@ -367,6 +465,17 @@ def plotVariability(resp):
 
 def cart2pol4d(x, y, dp, dn):
     # Math runs sparse to save massive peak RAM
+    """Function for cart2pol4d.
+
+    Args:
+        x: Input value for this operation.
+        y: Input value for this operation.
+        dp: Input value for this operation.
+        dn: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     xx, yy, dd, nn = np.meshgrid(x, y, dp, dn, sparse=True)
     rho = np.hypot(xx, yy) + nn
     phi = np.mod(np.arctan2(yy, xx), 2 * np.pi)
@@ -379,6 +488,16 @@ def cart2pol4d(x, y, dp, dn):
 
 def cart2pol3d(x, y, dp):
     # Math runs sparse to save peak RAM
+    """Function for cart2pol3d.
+
+    Args:
+        x: Input value for this operation.
+        y: Input value for this operation.
+        dp: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     xx, yy, dd = np.meshgrid(x, y, dp, sparse=True)
     rho = np.hypot(xx, yy)
     phi = np.mod(np.arctan2(yy, xx), 2 * np.pi)
@@ -390,6 +509,15 @@ def cart2pol3d(x, y, dp):
 
 def cart2pol(x, y):
     # Completely safe as-is; rho and phi naturally evaluate to dense arrays
+    """Function for cart2pol.
+
+    Args:
+        x: Input value for this operation.
+        y: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     xx, yy = np.meshgrid(x, y, sparse=True)
     rho = np.hypot(xx, yy)
     phi = np.mod(np.arctan2(yy, xx), 2 * np.pi)
@@ -398,6 +526,16 @@ def cart2pol(x, y):
 
 def cart2pol_noise(x, y, n):
     # Completely safe as-is; rho and phi naturally evaluate to dense arrays
+    """Function for cart2pol noise.
+
+    Args:
+        x: Input value for this operation.
+        y: Input value for this operation.
+        n: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     xx, yy, nn = np.meshgrid(x, y, n, sparse=True)
     rho = np.hypot(xx, yy) + nn
     phi = np.mod(np.arctan2(yy, xx), 2 * np.pi)
@@ -405,6 +543,21 @@ def cart2pol_noise(x, y, n):
 
 
 def preferedDirection(videodata, spks, x, y, o, w_i, w_r, window_size=5):
+    """Function for preferedDirection.
+
+    Args:
+        videodata: Input value for this operation.
+        spks: Input value for this operation.
+        x: Input value for this operation.
+        y: Input value for this operation.
+        o: Input value for this operation.
+        w_i: Input value for this operation.
+        w_r: Input value for this operation.
+        window_size: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     rho, phi = cart2pol(w_r, w_i)
     plt.figure()
     plt.plot(phi * 180 / np.pi)
@@ -414,6 +567,15 @@ def preferedDirection(videodata, spks, x, y, o, w_i, w_r, window_size=5):
 
 
 def PCcorrelation(spks, neuron_pos):
+    """Function for PCcorrelation.
+
+    Args:
+        spks: Input value for this operation.
+        neuron_pos: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     n_cell = spks.shape[2]
     U, S, Vh = np.linalg.svd(spks.reshape(-1, n_cell), full_matrices=False)
     pc1 = U[:, 0]
@@ -426,6 +588,16 @@ def PCcorrelation(spks, neuron_pos):
 
 def NeuronCorrelation(idx, spks, neuron_pos):
     # OPTIMIZATION: as_tensor avoids unnecessary CPU copies. Move to GPU before reshaping/transposing.
+    """Function for NeuronCorrelation.
+
+    Args:
+        idx: Input value for this operation.
+        spks: Input value for this operation.
+        neuron_pos: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     try:
         t_spks = torch.as_tensor(spks, device='cuda')
         cc_ = torch.corrcoef(t_spks.reshape(-1, t_spks.shape[2]).T)
@@ -445,6 +617,15 @@ def NeuronCorrelation(idx, spks, neuron_pos):
 
 
 def predictSparseNoise(resp, stim, rfs, tp, save=False):
+    """Function for predictSparseNoise.
+
+    Args:
+        resp: Input value for this operation.
+        stim: Input value for this operation.
+        rfs: Input value for this operation.
+        tp: Input value for this operation.
+        save: Input value for this operation.
+    """
     img = resp[tp].reshape(1, -1) @ rfs.reshape(rfs.shape[0], -1)
     img = img.reshape(8, 20)
 
@@ -459,6 +640,28 @@ def predictSparseNoise(resp, stim, rfs, tp, save=False):
 def predictPinkNoise(maxes, vis_n, spks, rfs, tp, L, videodata, dt=50, save=False,
                      nx=None, ny=None, n_orientations=None, n_frequencies=None,
                      nx_full=None, ny_full=None):
+    """Function for predictPinkNoise.
+
+    Args:
+        maxes: Input value for this operation.
+        vis_n: Input value for this operation.
+        spks: Input value for this operation.
+        rfs: Input value for this operation.
+        tp: Input value for this operation.
+        L: Input value for this operation.
+        videodata: Input value for this operation.
+        dt: Input value for this operation.
+        save: Input value for this operation.
+        nx: Input value for this operation.
+        ny: Input value for this operation.
+        n_orientations: Input value for this operation.
+        n_frequencies: Input value for this operation.
+        nx_full: Input value for this operation.
+        ny_full: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if nx is None or ny is None:
         nx, ny = coarse_grid_dimensions(rfs[0].shape[1], rfs[0].shape[2])
     if n_orientations is None:
@@ -520,6 +723,15 @@ def predictPinkNoise(maxes, vis_n, spks, rfs, tp, L, videodata, dt=50, save=Fals
 
 
 def compute_skewness_neurons(spks, plotting=False):
+    """Function for compute skewness neurons.
+
+    Args:
+        spks: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     s = np.mean(spks, axis=0)
     # Skewness applied directly to the 1D array
     skewness = skew(s)
@@ -531,11 +743,35 @@ def compute_skewness_neurons(spks, plotting=False):
 
 
 def lowpassfilter(sig, N=1, Wn=1.5, fs=100):
+    """Function for lowpassfilter.
+
+    Args:
+        sig: Input value for this operation.
+        N: Input value for this operation.
+        Wn: Input value for this operation.
+        fs: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     sos = signal.butter(N, Wn, 'lowpass', fs=fs, output='sos')
     return signal.sosfilt(sos, sig)
 
 
 def DirectionSelectivity(x, y, o, s, w_i_downsampled, w_r_downsampled):
+    """Function for DirectionSelectivity.
+
+    Args:
+        x: Input value for this operation.
+        y: Input value for this operation.
+        o: Input value for this operation.
+        s: Input value for this operation.
+        w_i_downsampled: Input value for this operation.
+        w_r_downsampled: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     sos = signal.butter(1, 2, 'lowpass', fs=30, output='sos')
 
     wi_filt = signal.sosfilt(sos, w_i_downsampled[:, x, y, o, s])
@@ -553,6 +789,22 @@ def DirectionSelectivity(x, y, o, s, w_i_downsampled, w_r_downsampled):
 
 
 def DirectionSelectivityPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled, plotting=False):
+    """Function for DirectionSelectivityPlot.
+
+    Args:
+        idx: Input value for this operation.
+        spks: Input value for this operation.
+        x: Input value for this operation.
+        y: Input value for this operation.
+        o: Input value for this operation.
+        s: Input value for this operation.
+        w_i_downsampled: Input value for this operation.
+        w_r_downsampled: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     sos = signal.butter(1, 2, 'lowpass', fs=30, output='sos')
 
     wi_filt = signal.sosfilt(sos, w_i_downsampled[:, x, y, o, s])
@@ -624,6 +876,22 @@ def DirectionSelectivityPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsam
 
 def SinCosPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled, ncut):
     # Flatten arrays directly instead of reshaping to (-1, 1) to avoid Pandas DataFrame conversion
+    """Function for SinCosPlot.
+
+    Args:
+        idx: Input value for this operation.
+        spks: Input value for this operation.
+        x: Input value for this operation.
+        y: Input value for this operation.
+        o: Input value for this operation.
+        s: Input value for this operation.
+        w_i_downsampled: Input value for this operation.
+        w_r_downsampled: Input value for this operation.
+        ncut: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     sin = w_i_downsampled[:, x, y, o, s].ravel()
     cos = w_r_downsampled[:, x, y, o, s].ravel()
     Y = np.mean(spks[:4, :], axis=0)[:, idx].ravel()
@@ -667,6 +935,15 @@ def SinCosPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled, ncut):
 
 
 def hanningconv(interp_grid, n):
+    """Function for hanningconv.
+
+    Args:
+        interp_grid: Input value for this operation.
+        n: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     kern = np.hanning(n).reshape(-1, 1)
     kern = kern * kern.T
     kern /= kern.sum()
@@ -675,6 +952,15 @@ def hanningconv(interp_grid, n):
     return hanning
 
 def hanningconv3d(interp_grid, n):
+    """Function for hanningconv3d.
+
+    Args:
+        interp_grid: Input value for this operation.
+        n: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     kern = np.hanning(n).reshape(-1, 1)
     kern = kern * kern.T
     kern = kern[:, :, np.newaxis] * kern.T
@@ -685,6 +971,19 @@ def hanningconv3d(interp_grid, n):
 
 
 def interpolateData3d(z, dx, dy, dp, ncut, smooth=True):
+    """Function for interpolateData3d.
+
+    Args:
+        z: Input value for this operation.
+        dx: Input value for this operation.
+        dy: Input value for this operation.
+        dp: Input value for this operation.
+        ncut: Input value for this operation.
+        smooth: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     x_grid, y_grid, p_grid = np.meshgrid(dx, dy, dp)
 
     mask = ~np.isnan(z)  # Simplified mask generation
@@ -701,6 +1000,18 @@ def interpolateData3d(z, dx, dy, dp, ncut, smooth=True):
 
 
 def interpolateData(z, dx, dy, ncut, smooth=True):
+    """Function for interpolateData.
+
+    Args:
+        z: Input value for this operation.
+        dx: Input value for this operation.
+        dy: Input value for this operation.
+        ncut: Input value for this operation.
+        smooth: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     x_grid, y_grid = np.meshgrid(dx, dy)
 
     mask = ~np.isnan(z)
@@ -717,6 +1028,22 @@ def interpolateData(z, dx, dy, ncut, smooth=True):
 
 
 def SinCosPlot2(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, plotting=True):
+    """Function for SinCosPlot2.
+
+    Args:
+        idx: Input value for this operation.
+        spk: Input value for this operation.
+        w_i: Input value for this operation.
+        w_r: Input value for this operation.
+        dphi: Input value for this operation.
+        noise: Input value for this operation.
+        ncut: Input value for this operation.
+        smoothing_size: Input value for this operation.
+        plotting: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     sin = w_i.ravel()
     cos = w_r.ravel()
     dphi = dphi.ravel()
@@ -812,12 +1139,28 @@ def SinCosPlot2(idx, spk, w_i, w_r, dphi, noise, ncut, smoothing_size, plotting=
 
 
 def moving_average(a, n=3):
+    """Function for moving average.
+
+    Args:
+        a: Input value for this operation.
+        n: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     ret = np.cumsum(a, dtype=float)
     ret[n:] = ret[n:] - ret[:-n]
     return ret / n
 
 
 def UnexpectedFiring(pred, Y, videodata):
+    """Function for UnexpectedFiring.
+
+    Args:
+        pred: Input value for this operation.
+        Y: Input value for this operation.
+        videodata: Input value for this operation.
+    """
     unfire = np.logical_and(np.logical_not(pred >= 0.20), Y >= 0.5)
     plt.figure()
     plt.imshow(np.mean(videodata[np.asarray(unfire).nonzero()[0]], axis=0))
@@ -828,6 +1171,18 @@ def UnexpectedFiring(pred, Y, videodata):
 
 
 def diffSinCosPlot(idx, spks, x, y, o, s, w_i_downsampled, w_r_downsampled):
+    """Function for diffSinCosPlot.
+
+    Args:
+        idx: Input value for this operation.
+        spks: Input value for this operation.
+        x: Input value for this operation.
+        y: Input value for this operation.
+        o: Input value for this operation.
+        s: Input value for this operation.
+        w_i_downsampled: Input value for this operation.
+        w_r_downsampled: Input value for this operation.
+    """
     sos = signal.butter(1, 100, 'lowpass', fs=1000, output='sos')
     sin = np.diff(w_i_downsampled[:, x, y, o, s], append=0).reshape(-1, 1)
     cos = np.diff(w_r_downsampled[:, x, y, o, s], append=0).reshape(-1, 1)

@@ -69,6 +69,7 @@ NavigationToolbar2Tk = None
 
 
 def _ensure_plot_imports():
+    """Function for ensure plot imports."""
     global _PLOT_IMPORTS_READY, plt, FigureCanvasTkAgg, NavigationToolbar2Tk
     if _PLOT_IMPORTS_READY:
         return
@@ -83,6 +84,11 @@ def _ensure_plot_imports():
 
 
 def _ensure_gabor_imports(label="Gabor library construction"):
+    """Function for ensure gabor imports.
+
+    Args:
+        label: Input value for this operation.
+    """
     global _GABOR_IMPORTS_READY
     global makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
     if _GABOR_IMPORTS_READY:
@@ -100,6 +106,11 @@ def _ensure_gabor_imports(label="Gabor library construction"):
 
 
 def _ensure_wavelet_imports(label="stimulus wavelet generation"):
+    """Function for ensure wavelet imports.
+
+    Args:
+        label: Input value for this operation.
+    """
     global _WAVELET_IMPORTS_READY
     global coarseWavelet, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
     global video_downsample_chunk_size, convert_npy_to_zarr
@@ -124,9 +135,14 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
 
 
 def _ensure_rf_imports(label="coarse RF analysis"):
+    """Function for ensure rf imports.
+
+    Args:
+        label: Input value for this operation.
+    """
     global _RF_IMPORTS_READY
     global compute_skewness_neurons, PearsonCorrelationPinkNoise, PlotTuningCurve
-    global repetability_trial3
+    global repetability_trial3, orientation_selectivity_from_tuning, selectivity_for_rfs
     if _RF_IMPORTS_READY:
         return
     _ensure_plot_imports()
@@ -138,15 +154,26 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     from ..analysis.nonlinear_models import (
         PlotTuningCurve as _PlotTuningCurve,
     )
+    from ..analysis.orientation_selectivity import (
+        orientation_selectivity_from_tuning as _orientation_selectivity_from_tuning,
+        selectivity_for_rfs as _selectivity_for_rfs,
+    )
 
     compute_skewness_neurons = _compute_skewness_neurons
     PearsonCorrelationPinkNoise = _PearsonCorrelationPinkNoise
     PlotTuningCurve = _PlotTuningCurve
     repetability_trial3 = _repetability_trial3
+    orientation_selectivity_from_tuning = _orientation_selectivity_from_tuning
+    selectivity_for_rfs = _selectivity_for_rfs
     _RF_IMPORTS_READY = True
 
 
 def _ensure_model_imports(label="model plot capture"):
+    """Function for ensure model imports.
+
+    Args:
+        label: Input value for this operation.
+    """
     global _MODEL_IMPORTS_READY
     global run_Model, run_Full_Model, smooth_best_positions
     if _MODEL_IMPORTS_READY:
@@ -165,6 +192,11 @@ def _ensure_model_imports(label="model plot capture"):
 
 
 def _ensure_analysis_imports(label="analysis"):
+    """Function for ensure analysis imports.
+
+    Args:
+        label: Input value for this operation.
+    """
     global _ANALYSIS_IMPORTS_READY
     if _ANALYSIS_IMPORTS_READY:
         return
@@ -182,6 +214,16 @@ def select_workflow() -> str:
 
 
 def run(param_defaults, gabor_param, workflow=None):
+    """Function for run.
+
+    Args:
+        param_defaults: Input value for this operation.
+        gabor_param: Input value for this operation.
+        workflow: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     if workflow not in (WORKFLOW_2P, WORKFLOW_EPHYS):
         workflow = WORKFLOW_2P
     gabor_param = _normalise_gabor_params(gabor_param)
@@ -234,9 +276,25 @@ def run(param_defaults, gabor_param, workflow=None):
     }
 
     def workflow_display_name(value):
+        """Function for workflow display name.
+
+        Args:
+            value: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         return "Two-Photon" if value == WORKFLOW_2P else "Electrophysiology"
 
     def workflow_defaults(value):
+        """Function for workflow defaults.
+
+        Args:
+            value: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         keys = AnalysisConfig.gui_param_keys(value)
         merged = dict(DEFAULT_COMMON_PARAMS)
         if value == WORKFLOW_2P:
@@ -266,7 +324,15 @@ def run(param_defaults, gabor_param, workflow=None):
     BROWSE_ICONS = {"file": "📄", "savefile": "📄", "dir": "📁"}
 
     class RedirectText:
+        """Container for RedirectText."""
         def __init__(self, widget, max_lines=5000, flush_ms=50):
+            """Function for init.
+
+            Args:
+                widget: Input value for this operation.
+                max_lines: Input value for this operation.
+                flush_ms: Input value for this operation.
+            """
             self.widget = widget
             self.max_lines = max_lines
             self.flush_ms = flush_ms
@@ -275,6 +341,11 @@ def run(param_defaults, gabor_param, workflow=None):
             self._flush_pending = False
 
         def write(self, string):
+            """Function for write.
+
+            Args:
+                string: Input value for this operation.
+            """
             if not string:
                 return
             with self._lock:
@@ -288,6 +359,7 @@ def run(param_defaults, gabor_param, workflow=None):
                     pass
 
         def _flush(self):
+            """Function for flush."""
             with self._lock:
                 chunk = "".join(self._buffer)
                 self._buffer.clear()
@@ -307,6 +379,11 @@ def run(param_defaults, gabor_param, workflow=None):
                 pass
 
         def _insert_terminal_chunk(self, chunk):
+            """Function for insert terminal chunk.
+
+            Args:
+                chunk: Input value for this operation.
+            """
             for part in chunk.splitlines(keepends=True):
                 if "\r" in part:
                     before, _, after = part.rpartition("\r")
@@ -319,23 +396,45 @@ def run(param_defaults, gabor_param, workflow=None):
                     self.widget.insert(tk.END, part)
 
         def flush(self):
+            """Function for flush."""
             try:
                 self.widget.after(0, self._flush)
             except Exception:
                 pass
 
         def isatty(self):
+            """Function for isatty.
+
+            Returns:
+                Result produced by the operation.
+            """
             return True
 
         def writable(self):
+            """Function for writable.
+
+            Returns:
+                Result produced by the operation.
+            """
             return True
 
         @property
         def encoding(self):
+            """Function for encoding.
+
+            Returns:
+                Result produced by the operation.
+            """
             return "utf-8"
 
     class TaskResourceMonitor:
+        """Container for TaskResourceMonitor."""
         def __init__(self, label):
+            """Function for init.
+
+            Args:
+                label: Input value for this operation.
+            """
             self.label = label
             self.process = psutil.Process(os.getpid())
             self.start_time = None
@@ -350,6 +449,7 @@ def run(param_defaults, gabor_param, workflow=None):
             self._thread = None
 
         def start(self):
+            """Function for start."""
             self.start_time = time.time()
             self.start_perf = time.perf_counter()
             self.start_cpu = self.process.cpu_times()
@@ -361,12 +461,18 @@ def run(param_defaults, gabor_param, workflow=None):
             self._thread.start()
 
         def stop(self):
+            """Function for stop.
+
+            Returns:
+                Result produced by the operation.
+            """
             self._stop_event.set()
             if self._thread is not None:
                 self._thread.join(timeout=1)
             return self.summary()
 
         def _sample_loop(self):
+            """Function for sample loop."""
             while not self._stop_event.wait(1.0):
                 self.peak_rss = max(self.peak_rss, self._rss())
                 cuda_allocated, cuda_reserved = self._cuda_peaks()
@@ -374,24 +480,40 @@ def run(param_defaults, gabor_param, workflow=None):
                 self.peak_cuda_reserved = max(self.peak_cuda_reserved, cuda_reserved)
 
         def _rss(self):
+            """Function for rss.
+
+            Returns:
+                Result produced by the operation.
+            """
             try:
                 return int(self.process.memory_info().rss)
             except Exception:
                 return 0
 
         def _io_counters(self):
+            """Function for io counters.
+
+            Returns:
+                Result produced by the operation.
+            """
             try:
                 return self.process.io_counters()
             except Exception:
                 return None
 
         def _net_counters(self):
+            """Function for net counters.
+
+            Returns:
+                Result produced by the operation.
+            """
             try:
                 return psutil.net_io_counters()
             except Exception:
                 return None
 
         def _reset_cuda_peaks(self):
+            """Function for reset cuda peaks."""
             try:
                 import torch
 
@@ -402,6 +524,11 @@ def run(param_defaults, gabor_param, workflow=None):
                 pass
 
         def _cuda_peaks(self):
+            """Function for cuda peaks.
+
+            Returns:
+                Result produced by the operation.
+            """
             allocated = 0
             reserved = 0
             try:
@@ -416,6 +543,11 @@ def run(param_defaults, gabor_param, workflow=None):
             return allocated, reserved
 
         def summary(self):
+            """Function for summary.
+
+            Returns:
+                Result produced by the operation.
+            """
             elapsed = max(time.perf_counter() - self.start_perf, 1e-6) if self.start_perf else 0
             end_time = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime())
             cpu_pct = 0.0
@@ -472,17 +604,33 @@ def run(param_defaults, gabor_param, workflow=None):
     }
 
     def _current_cancel_event():
+        """Function for current cancel event.
+
+        Returns:
+            Result produced by the operation.
+        """
         return active_task.get("cancel_event")
 
     def _raise_if_cancelled():
+        """Function for raise if cancelled."""
         check_cancelled(_current_cancel_event())
 
     def _register_cancel_cleanup_path(path):
+        """Function for register cancel cleanup path.
+
+        Args:
+            path: Input value for this operation.
+        """
         if not path:
             return
         active_task.setdefault("cleanup_paths", []).append(os.path.abspath(path))
 
     def _remove_cancelled_task_paths():
+        """Function for remove cancelled task paths.
+
+        Returns:
+            Result produced by the operation.
+        """
         removed = 0
         for path in reversed(active_task.get("cleanup_paths", [])):
             try:
@@ -500,6 +648,15 @@ def run(param_defaults, gabor_param, workflow=None):
         return removed
 
     def _format_task_summary(metrics, status):
+        """Function for format task summary.
+
+        Args:
+            metrics: Input value for this operation.
+            status: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         if not metrics:
             return ""
         return (
@@ -513,6 +670,7 @@ def run(param_defaults, gabor_param, workflow=None):
         )
 
     def request_cancel_current_task():
+        """Function for request cancel current task."""
         cancel_event = active_task.get("cancel_event")
         if cancel_event is None or cancel_event.is_set():
             return
@@ -527,9 +685,11 @@ def run(param_defaults, gabor_param, workflow=None):
         print("\n[!] Cancel requested. Waiting for the current safe checkpoint, then cleaning partial files.")
 
     def flash_taskbar():
+        """Function for flash taskbar."""
         try:
             FLASHW_ALL = 3
             class FLASHWINFO(ctypes.Structure):
+                """Container for FLASHWINFO."""
                 _fields_ = [
                     ("cbSize", ctypes.c_uint),
                     ("hwnd", ctypes.c_void_p),
@@ -545,6 +705,20 @@ def run(param_defaults, gabor_param, workflow=None):
             pass
 
     def update_progress(percent=None, message=None, detail=None):
+        """Function for update progress.
+
+        Args:
+            percent: Input value for this operation.
+            message: Input value for this operation.
+            detail: Input value for this operation.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            try:
+                root.after(0, lambda: update_progress(percent, message, detail))
+            except Exception:
+                pass
+            return
+
         if percent is None:
             progress_bar.configure(mode="indeterminate")
             progress_bar.start(12)
@@ -605,6 +779,13 @@ def run(param_defaults, gabor_param, workflow=None):
             pass
 
     def begin_task(task_name, cancel_event, monitor):
+        """Function for begin task.
+
+        Args:
+            task_name: Input value for this operation.
+            cancel_event: Input value for this operation.
+            monitor: Input value for this operation.
+        """
         task_state["name"] = task_name
         task_state["start"] = time.time()
         task_state["detail"] = None
@@ -623,6 +804,13 @@ def run(param_defaults, gabor_param, workflow=None):
         print(f"\n--- {task_name} ---")
 
     def end_task(success=False, cancelled=False, metrics=None):
+        """Function for end task.
+
+        Args:
+            success: Input value for this operation.
+            cancelled: Input value for this operation.
+            metrics: Input value for this operation.
+        """
         if task_state["name"]:
             progress_bar.stop()
             progress_bar.configure(mode="determinate", value=0 if cancelled else 100)
@@ -648,9 +836,24 @@ def run(param_defaults, gabor_param, workflow=None):
             btn.configure(state=tk.NORMAL)
 
     def run_in_thread(func, task_name=None):
+        """Function for run in thread.
+
+        Args:
+            func: Input value for this operation.
+            task_name: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         label = task_name or func.__name__.replace("_", " ").title()
 
         def wrapper(*args, **kwargs):
+            """Function for wrapper.
+
+            Args:
+                args: Input value for this operation.
+                kwargs: Input value for this operation.
+            """
             cancel_event = threading.Event()
             monitor = TaskResourceMonitor(label)
             active_task["cancel_event"] = cancel_event
@@ -661,6 +864,7 @@ def run(param_defaults, gabor_param, workflow=None):
             root.after(0, lambda: begin_task(label, cancel_event, monitor))
 
             def thread_target():
+                """Function for thread target."""
                 success = False
                 cancelled = False
                 metrics = None
@@ -696,18 +900,43 @@ def run(param_defaults, gabor_param, workflow=None):
     active_recovery_dir = {"path": None}
 
     def _sem_enabled():
+        """Function for sem enabled.
+
+        Returns:
+            Result produced by the operation.
+        """
         try:
             return bool(show_sem_var.get())
         except Exception:
             return False
 
     def _sem_over_trials(trials):
+        """Function for sem over trials.
+
+        Args:
+            trials: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         trials = np.asarray(trials, dtype=float)
         if trials.ndim < 2 or trials.shape[0] <= 1:
             return None
         return np.nanstd(trials, axis=0, ddof=1) / np.sqrt(trials.shape[0])
 
     def _plot_trace_with_optional_sem(ax, trials, x=None, color='k', label=None):
+        """Function for plot trace with optional sem.
+
+        Args:
+            ax: Input value for this operation.
+            trials: Input value for this operation.
+            x: Input value for this operation.
+            color: Input value for this operation.
+            label: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         trials = np.asarray(trials, dtype=float)
         if trials.ndim == 1:
             mean = trials
@@ -736,12 +965,28 @@ def run(param_defaults, gabor_param, workflow=None):
         return None
 
     def _set_sem_caption(fig, n_trials):
+        """Function for set sem caption.
+
+        Args:
+            fig: Input value for this operation.
+            n_trials: Input value for this operation.
+        """
         if n_trials and n_trials > 1:
             fig._waven_caption = f"Error bars represent SEM over {n_trials} trials."
         elif hasattr(fig, "_waven_caption"):
             delattr(fig, "_waven_caption")
 
     def _field_value(entries, key, default=""):
+        """Function for field value.
+
+        Args:
+            entries: Input value for this operation.
+            key: Input value for this operation.
+            default: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         entry = entries.get(key) if isinstance(entries, dict) else None
         if entry is None:
             return default
@@ -751,6 +996,11 @@ def run(param_defaults, gabor_param, workflow=None):
             return default
 
     def _plot_cache_path():
+        """Function for plot cache path.
+
+        Returns:
+            Result produced by the operation.
+        """
         value = _field_value(param_entries, "Plot Cache Path", "").strip()
         if value.lower() in ("", "none", "null"):
             save_dir = _field_value(param_entries, "Full Model Save Path", "").strip()
@@ -761,6 +1011,11 @@ def run(param_defaults, gabor_param, workflow=None):
         return value
 
     def _recovery_root():
+        """Function for recovery root.
+
+        Returns:
+            Result produced by the operation.
+        """
         value = _field_value(param_entries, "Recovery Cache Directory", "").strip()
         if value.lower() in ("", "none", "null"):
             save_dir = _field_value(param_entries, "Full Model Save Path", "").strip()
@@ -771,6 +1026,11 @@ def run(param_defaults, gabor_param, workflow=None):
         return value
 
     def _load_plot_cache():
+        """Function for load plot cache.
+
+        Returns:
+            Result produced by the operation.
+        """
         path = _plot_cache_path()
         if not os.path.exists(path):
             return {"version": 1, "entries": {}}
@@ -787,6 +1047,11 @@ def run(param_defaults, gabor_param, workflow=None):
             return {"version": 1, "entries": {}}
 
     def _save_plot_cache(cache):
+        """Function for save plot cache.
+
+        Args:
+            cache: Input value for this operation.
+        """
         path = _plot_cache_path()
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         tmp_path = f"{path}.tmp"
@@ -796,6 +1061,14 @@ def run(param_defaults, gabor_param, workflow=None):
         print(f"Updated plot cache: {path}")
 
     def _cache_fingerprint(extra=None):
+        """Function for cache fingerprint.
+
+        Args:
+            extra: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         fields = {
             "workflow": workflow,
             "gabor": {key: _field_value(gabor_entries, key) for key in sorted(gabor_entries)},
@@ -810,11 +1083,28 @@ def run(param_defaults, gabor_param, workflow=None):
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _cache_key(kind, neuron_id=None):
+        """Function for cache key.
+
+        Args:
+            kind: Input value for this operation.
+            neuron_id: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         if neuron_id is None:
             return kind
         return f"{kind}:neuron:{int(neuron_id)}"
 
     def _figure_records(items):
+        """Function for figure records.
+
+        Args:
+            items: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         records = []
         for tab_name, title, fig in items:
             image_buffer = io.BytesIO()
@@ -832,6 +1122,14 @@ def run(param_defaults, gabor_param, workflow=None):
         return records
 
     def _json_safe(value):
+        """Function for json safe.
+
+        Args:
+            value: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         if isinstance(value, np.ndarray):
             return {"array_shape": list(value.shape), "dtype": str(value.dtype)}
         if isinstance(value, np.generic):
@@ -845,6 +1143,14 @@ def run(param_defaults, gabor_param, workflow=None):
         return repr(value)
 
     def _cache_safe_payload(payload):
+        """Function for cache safe payload.
+
+        Args:
+            payload: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         try:
             pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
             return payload
@@ -855,6 +1161,14 @@ def run(param_defaults, gabor_param, workflow=None):
             }
 
     def _extract_figure_data(fig):
+        """Function for extract figure data.
+
+        Args:
+            fig: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         axes_data = []
         for ax_index, ax in enumerate(fig.axes):
             axis_record = {
@@ -916,6 +1230,14 @@ def run(param_defaults, gabor_param, workflow=None):
         }
 
     def _add_array_exports(prefix, value, arrays, metadata):
+        """Function for add array exports.
+
+        Args:
+            prefix: Input value for this operation.
+            value: Input value for this operation.
+            arrays: Input value for this operation.
+            metadata: Input value for this operation.
+        """
         key = _safe_name(prefix)
         if isinstance(value, np.ndarray):
             if value.dtype != object:
@@ -947,6 +1269,14 @@ def run(param_defaults, gabor_param, workflow=None):
             metadata[key] = repr(value)
 
     def _tab_name_for_parent(parent_container):
+        """Function for tab name for parent.
+
+        Args:
+            parent_container: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         try:
             if parent_container is frame_plot_all:
                 return "All neurons"
@@ -957,15 +1287,252 @@ def run(param_defaults, gabor_param, workflow=None):
         return "Plots"
 
     def _figure_title(fig, fallback="Plot"):
+        """Function for figure title.
+
+        Args:
+            fig: Input value for this operation.
+            fallback: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         for ax in fig.axes:
             if ax.get_title():
                 return ax.get_title()
         return fallback
 
     def _set_figure_export_payload(fig, payload):
+        """Function for set figure export payload.
+
+        Args:
+            fig: Input value for this operation.
+            payload: Input value for this operation.
+        """
         setattr(fig, "_waven_export_payload", payload)
 
+    def _discrete_groups_from_column(values, max_groups=16):
+        """Function for discrete groups from column.
+
+        Args:
+            values: Input value for this operation.
+            max_groups: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        values = np.asarray(values)
+        if values.ndim != 1:
+            return None
+        finite = np.isfinite(values)
+        if not np.any(finite):
+            return None
+        finite_values = values[finite]
+        rounded = np.rint(finite_values)
+        if not np.allclose(finite_values, rounded, atol=1e-6):
+            return None
+        unique = np.unique(rounded.astype(int))
+        if unique.size < 2 or unique.size > max_groups:
+            return None
+        groups = np.full(values.shape[0], -1, dtype=int)
+        groups[finite] = rounded.astype(int)
+        return groups, [str(value) for value in unique], unique
+
+    def _spatial_quantile_groups(neuron_pos, n_bins=4):
+        """Function for spatial quantile groups.
+
+        Args:
+            neuron_pos: Input value for this operation.
+            n_bins: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        positions = np.asarray(neuron_pos, dtype=float)
+        if positions.ndim != 2 or positions.shape[0] == 0:
+            return np.zeros(0, dtype=int), [], "none"
+        axis = 0
+        values = positions[:, axis]
+        if np.nanmax(values) == np.nanmin(values) and positions.shape[1] > 1:
+            axis = 1
+            values = positions[:, axis]
+        quantiles = np.unique(np.nanquantile(values, np.linspace(0, 1, n_bins + 1)))
+        if quantiles.size <= 2:
+            return np.zeros(values.shape[0], dtype=int), ["all"], f"all neurons"
+        groups = np.digitize(values, quantiles[1:-1], right=True)
+        labels = [f"bin {idx + 1}" for idx in range(np.max(groups) + 1)]
+        return groups, labels, f"spatial x-axis bins"
+
+    def _grouping_for_selectivity(neuron_pos, preferred="unit"):
+        """Function for grouping for selectivity.
+
+        Args:
+            neuron_pos: Input value for this operation.
+            preferred: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        positions = np.asarray(neuron_pos)
+        if positions.ndim == 2:
+            if preferred == "shank":
+                candidate_columns = list(range(min(positions.shape[1], 3)))
+                max_groups = 8
+            else:
+                candidate_columns = list(range(3, positions.shape[1])) + list(range(min(positions.shape[1], 3)))
+                max_groups = 16
+            for col in candidate_columns:
+                result = _discrete_groups_from_column(positions[:, col], max_groups=max_groups)
+                if result is not None:
+                    groups, labels, unique = result
+                    label_map = {value: labels[idx] for idx, value in enumerate(unique)}
+                    mapped_labels = [label_map[value] for value in unique]
+                    return groups, mapped_labels, f"position column {col}"
+        groups, labels, source = _spatial_quantile_groups(neuron_pos)
+        return groups, labels, source
+
+    def _metric_values(selectivity, name, filter_mask=None):
+        """Function for metric values.
+
+        Args:
+            selectivity: Input value for this operation.
+            name: Input value for this operation.
+            filter_mask: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        values = np.asarray(selectivity[name], dtype=float)
+        valid = np.isfinite(values)
+        if filter_mask is not None:
+            valid = np.logical_and(valid, np.asarray(filter_mask, dtype=bool))
+        return values[valid], valid
+
+    def _plot_selectivity_population(selectivity, filter_mask, neuron_pos=None):
+        """Function for plot selectivity population.
+
+        Args:
+            selectivity: Input value for this operation.
+            filter_mask: Input value for this operation.
+            neuron_pos: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        bins = np.linspace(0, 1, 21)
+        fig, axes = plt.subplots(1, 2, figsize=(10, 3.4), constrained_layout=True)
+        specs = [("osi", "OSI"), ("gosi", "gOSI")]
+        shank_groups = None
+        shank_labels = []
+        shank_source = "not available"
+        if neuron_pos is not None:
+            shank_groups, shank_labels, shank_source = _grouping_for_selectivity(neuron_pos, preferred="shank")
+        colors = ["#059669", "#D97706", "#7C3AED", "#DC2626", "#0891B2", "#BE185D", "#4B5563", "#65A30D"]
+        for ax, (key, label) in zip(axes, specs):
+            values, valid = _metric_values(selectivity, key)
+            filtered, _ = _metric_values(selectivity, key, filter_mask=filter_mask)
+            ax.hist(values, bins=bins, color="#2563EB", alpha=0.72, label=f"All neurons (n={values.size})")
+            if filtered.size:
+                ax.hist(filtered, bins=bins, histtype="step", color="#111827", linewidth=1.6, label=f"Quality mask (n={filtered.size})")
+            if shank_groups is not None and len(shank_labels) <= 8:
+                metric_values = np.asarray(selectivity[key], dtype=float)
+                finite_filter = np.logical_and(np.asarray(filter_mask, dtype=bool), np.isfinite(metric_values))
+                for group_index, group_id in enumerate([g for g in np.unique(shank_groups) if g >= 0]):
+                    group_values = metric_values[np.logical_and(finite_filter, shank_groups == group_id)]
+                    if group_values.size:
+                        group_label = shank_labels[group_index] if group_index < len(shank_labels) else str(group_id)
+                        ax.hist(
+                            group_values,
+                            bins=bins,
+                            histtype="step",
+                            color=colors[group_index % len(colors)],
+                            linewidth=1.0,
+                            alpha=0.85,
+                            label=f"Shank {group_label}",
+                        )
+            ax.set_title(f"{label} distribution")
+            ax.set_xlabel(label)
+            ax.set_ylabel("Neuron count")
+            ax.set_xlim(0, 1)
+            ax.legend(fontsize=8)
+        fig.suptitle("Orientation Selectivity by Neuron")
+        fig._waven_caption = f"Shank grouping source: {shank_source}."
+        _set_figure_export_payload(
+            fig,
+            {
+                "source": "Run Coarse RF Analysis",
+                "selectivity": selectivity,
+                "shank_groups": shank_groups,
+                "shank_group_source": shank_source,
+                "filter_mask": filter_mask,
+            },
+        )
+        return fig
+
+    def _plot_selectivity_by_unit(selectivity, neuron_pos, filter_mask):
+        """Function for plot selectivity by unit.
+
+        Args:
+            selectivity: Input value for this operation.
+            neuron_pos: Input value for this operation.
+            filter_mask: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        unit_groups, unit_labels, unit_source = _grouping_for_selectivity(neuron_pos, preferred="unit")
+        shank_groups, shank_labels, shank_source = _grouping_for_selectivity(neuron_pos, preferred="shank")
+        bins = np.linspace(0, 1, 16)
+        unique_units = [group for group in np.unique(unit_groups) if group >= 0]
+        if len(unique_units) == 0:
+            unique_units = [0]
+            unit_groups = np.zeros_like(np.asarray(selectivity["osi"], dtype=int))
+            unit_labels = ["all"]
+        max_units = min(len(unique_units), 10)
+        unique_units = unique_units[:max_units]
+        fig, axes = plt.subplots(max_units, 2, figsize=(10, max(3.5, 2.0 * max_units)), constrained_layout=True)
+        if max_units == 1:
+            axes = np.asarray([axes])
+        colors = ["#2563EB", "#059669", "#D97706", "#7C3AED", "#DC2626", "#0891B2", "#4B5563", "#BE185D"]
+        finite_filter = np.asarray(filter_mask, dtype=bool)
+        for row, group_id in enumerate(unique_units):
+            group_mask = np.logical_and(unit_groups == group_id, finite_filter)
+            unit_label = unit_labels[row] if row < len(unit_labels) else str(group_id)
+            for col, (metric, label) in enumerate((("osi", "OSI"), ("gosi", "gOSI"))):
+                ax = axes[row, col]
+                values = np.asarray(selectivity[metric], dtype=float)
+                values = values[np.logical_and(group_mask, np.isfinite(values))]
+                ax.hist(values, bins=bins, color=colors[row % len(colors)], alpha=0.76)
+                ax.set_xlim(0, 1)
+                ax.set_title(f"Unit {unit_label} {label} (n={values.size})")
+                ax.set_xlabel(label)
+                ax.set_ylabel("Count")
+        fig.suptitle(f"Orientation Selectivity by Unit ({unit_source})")
+        fig._waven_caption = f"Shank grouping source: {shank_source}; shank labels detected: {', '.join(shank_labels) if shank_labels else 'none'}."
+        _set_figure_export_payload(
+            fig,
+            {
+                "source": "Run Coarse RF Analysis",
+                "selectivity": selectivity,
+                "unit_groups": unit_groups,
+                "unit_group_source": unit_source,
+                "shank_groups": shank_groups,
+                "shank_group_source": shank_source,
+                "filter_mask": filter_mask,
+            },
+        )
+        return fig
+
     def _model_result_payload(model_name, result, neuron_id):
+        """Function for model result payload.
+
+        Args:
+            model_name: Input value for this operation.
+            result: Input value for this operation.
+            neuron_id: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         if model_name == "run_Model":
             names = ["predictions", "nonlinear_params", "rho_phi_params", "metrics", "interpolators"]
         else:
@@ -987,6 +1554,14 @@ def run(param_defaults, gabor_param, workflow=None):
         return payload
 
     def _active_export_records(tab_name=None):
+        """Function for active export records.
+
+        Args:
+            tab_name: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         active = []
         for record in list(figure_export_records):
             section = record.get("section")
@@ -1000,6 +1575,16 @@ def run(param_defaults, gabor_param, workflow=None):
         return active
 
     def _export_figure_record(record, base_dir, index=None):
+        """Function for export figure record.
+
+        Args:
+            record: Input value for this operation.
+            base_dir: Input value for this operation.
+            index: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         fig = record["figure"]
         tab_name = record.get("tab") or "Plots"
         title = record.get("title") or _figure_title(fig)
@@ -1092,6 +1677,11 @@ def run(param_defaults, gabor_param, workflow=None):
         return graph_dir
 
     def export_single_graph(record):
+        """Function for export single graph.
+
+        Args:
+            record: Input value for this operation.
+        """
         title = record.get("title") or "plot"
         export_dir = filedialog.askdirectory(title=f"Select Folder for Export {title}")
         if not export_dir:
@@ -1104,6 +1694,11 @@ def run(param_defaults, gabor_param, workflow=None):
             print(f"Failed to export graph '{title}': {exc}")
 
     def _export_displayed_results(tab_name=None):
+        """Function for export displayed results.
+
+        Args:
+            tab_name: Input value for this operation.
+        """
         records = _active_export_records(tab_name=tab_name)
         if not records:
             label = tab_name or "displayed"
@@ -1137,16 +1732,27 @@ def run(param_defaults, gabor_param, workflow=None):
             print(f"Failed to export displayed results: {exc}")
 
     def export_all_displayed_results():
+        """Function for export all displayed results."""
         _export_displayed_results()
 
     def export_all_neurons_results():
+        """Function for export all neurons results."""
         _export_displayed_results("All neurons")
 
     def export_individual_neuron_results():
+        """Function for export individual neuron results."""
         _export_displayed_results("Individual neuron")
 
     def _render_figure_records(records, message="Loaded plots from cache.", clear=True):
+        """Function for render figure records.
+
+        Args:
+            records: Input value for this operation.
+            message: Input value for this operation.
+            clear: Input value for this operation.
+        """
         def render():
+            """Function for render."""
             _ensure_plot_imports()
             if clear:
                 clear_plot_tab(frame_plot_all)
@@ -1176,6 +1782,14 @@ def run(param_defaults, gabor_param, workflow=None):
         root.after(0, render)
 
     def _state_for_plot_cache(state):
+        """Function for state for plot cache.
+
+        Args:
+            state: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         excluded = {"wavelets_complex"}
         cached = {}
         for key, value in state.items():
@@ -1185,6 +1799,16 @@ def run(param_defaults, gabor_param, workflow=None):
         return cached
 
     def _get_cached_entry(kind, neuron_id=None, extra=None):
+        """Function for get cached entry.
+
+        Args:
+            kind: Input value for this operation.
+            neuron_id: Input value for this operation.
+            extra: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         cache = _load_plot_cache()
         entry = cache.get("entries", {}).get(_cache_key(kind, neuron_id))
         if not entry:
@@ -1194,6 +1818,14 @@ def run(param_defaults, gabor_param, workflow=None):
         return entry
 
     def _put_cached_entry(kind, entry, neuron_id=None, extra=None):
+        """Function for put cached entry.
+
+        Args:
+            kind: Input value for this operation.
+            entry: Input value for this operation.
+            neuron_id: Input value for this operation.
+            extra: Input value for this operation.
+        """
         cache = _load_plot_cache()
         cache.setdefault("entries", {})[_cache_key(kind, neuron_id)] = {
             **entry,
@@ -1203,6 +1835,14 @@ def run(param_defaults, gabor_param, workflow=None):
         _save_plot_cache(cache)
 
     def _start_recovery_checkpoint(task_name):
+        """Function for start recovery checkpoint.
+
+        Args:
+            task_name: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         root_dir = _recovery_root()
         os.makedirs(root_dir, exist_ok=True)
         task_dir = os.path.join(root_dir, _safe_name(task_name))
@@ -1219,6 +1859,12 @@ def run(param_defaults, gabor_param, workflow=None):
         return task_dir
 
     def _write_recovery_step(step, **data):
+        """Function for write recovery step.
+
+        Args:
+            step: Input value for this operation.
+            data: Input value for this operation.
+        """
         task_dir = active_recovery_dir.get("path")
         if not task_dir:
             return
@@ -1227,12 +1873,26 @@ def run(param_defaults, gabor_param, workflow=None):
             json.dump(payload, handle, indent=2, default=str)
 
     def _recovery_subdir(name):
+        """Function for recovery subdir.
+
+        Args:
+            name: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         task_dir = active_recovery_dir.get("path") or _recovery_root()
         path = os.path.join(task_dir, _safe_name(name))
         os.makedirs(path, exist_ok=True)
         return path
 
     def _finish_recovery_checkpoint(success, cancelled=False):
+        """Function for finish recovery checkpoint.
+
+        Args:
+            success: Input value for this operation.
+            cancelled: Input value for this operation.
+        """
         task_dir = active_recovery_dir.get("path")
         active_recovery_dir["path"] = None
         if not task_dir:
@@ -1260,6 +1920,15 @@ def run(param_defaults, gabor_param, workflow=None):
             print(f"Kept recovery checkpoint after failure: {task_dir}")
 
     def _library_output_path(kind, base_path):
+        """Function for library output path.
+
+        Args:
+            kind: Input value for this operation.
+            base_path: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         path = gabor_entries.get(f"{kind.title()} Library Path")
         if path is not None and path.get().strip():
             return path.get().strip()
@@ -1267,6 +1936,16 @@ def run(param_defaults, gabor_param, workflow=None):
         return f"{root}_{kind}{ext or '.npy'}"
 
     def _save_library_array(library, path_save, description):
+        """Function for save library array.
+
+        Args:
+            library: Input value for this operation.
+            path_save: Input value for this operation.
+            description: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         update_progress(70, f"Saving {description}", "Writing output file")
         os.makedirs(os.path.dirname(path_save) or ".", exist_ok=True)
         if gabor_format_var.get() == "zarr":
@@ -1292,7 +1971,65 @@ def run(param_defaults, gabor_param, workflow=None):
             print(f"{description} saved to: {output_path}")
         return output_path
 
+    def _artifact_shape(path):
+        """Function for artifact shape.
+
+        Args:
+            path: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            if str(path).endswith(".zarr") or os.path.isdir(path):
+                import zarr as _zarr
+
+                return tuple(_zarr.open(path, mode="r").shape)
+            return tuple(np.load(path, mmap_mode="r").shape)
+        except Exception as exc:
+            print(f"Could not read artifact shape for {path}: {exc}")
+            return None
+
+    def _artifact_matches(path, expected_shape):
+        """Function for artifact matches.
+
+        Args:
+            path: Input value for this operation.
+            expected_shape: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        shape = _artifact_shape(path)
+        if shape is None:
+            return False
+        expected_shape = tuple(int(dim) for dim in expected_shape)
+        if tuple(shape) != expected_shape:
+            print(f"Existing artifact has shape {shape}, expected {expected_shape}: {path}")
+            return False
+        return True
+
+    def _library_artifact_path(path_save):
+        """Function for library artifact path.
+
+        Args:
+            path_save: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
+        if gabor_format_var.get() == "zarr":
+            return os.path.splitext(path_save)[0] + ".zarr"
+        return path_save
+
     def create_gabor(kind="fine"):
+        """Function for create gabor.
+
+        Args:
+            kind: Input value for this operation.
+        """
         _ensure_gabor_imports("Gabor library construction")
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
@@ -1322,6 +2059,28 @@ def run(param_defaults, gabor_param, workflow=None):
         sigmas = np.array(sigmas)
         offsets = np.array(offsets)
         frequencies = np.array(frequencies)
+
+        _, expected_shape = _gabor_library_npy_bytes(
+            nx,
+            ny,
+            n_theta,
+            sigmas,
+            offsets,
+            frequencies if kind == "fine" else [0],
+        )
+        output_path = _library_artifact_path(path_save)
+        if _artifact_matches(output_path, expected_shape):
+            print(f"Resume: found completed {description}, reusing {output_path}")
+            _write_recovery_step(f"{kind}_gabor_reused", path=output_path, shape=expected_shape)
+            entry_key = "Coarse Library Path" if kind == "coarse" else "Fine Library Path"
+            if entry_key in gabor_entries:
+                gabor_entries[entry_key].delete(0, tk.END)
+                gabor_entries[entry_key].insert(0, output_path)
+            if kind == "fine" and "Library Path" in param_entries:
+                param_entries["Library Path"].delete(0, tk.END)
+                param_entries["Library Path"].insert(0, output_path)
+            update_progress(100, f"{description} already complete")
+            return
 
         update_progress(5, f"Building {description}", "Estimating filter bank")
         _raise_if_cancelled()
@@ -1361,10 +2120,16 @@ def run(param_defaults, gabor_param, workflow=None):
         update_progress(100, f"{description} complete")
 
     def create_both_gabor_libraries():
+        """Function for create both gabor libraries."""
         create_gabor("coarse")
         create_gabor("fine")
 
     def run_wavelet():
+        """Function for run wavelet.
+
+        Returns:
+            Result produced by the operation.
+        """
         _ensure_wavelet_imports("stimulus wavelet generation")
         _raise_if_cancelled()
         movpath = param_entries["Movie Path"].get().strip()
@@ -1402,75 +2167,104 @@ def run(param_defaults, gabor_param, workflow=None):
         ny = int(param_entries["NY"].get())
         n_thetas = int(gabor_entries["N_thetas"].get())
         coarse_nx, coarse_ny = coarse_grid_dimensions(nx, ny)
+        fallback_frames = int(param_entries["Number of Frames"].get())
+        expected_frames = _movie_frame_count(movpath, fallback_frames)
         full_downsample_path = movpath[:-4] + '_downsampled.npy'
         coarse_downsample_path = movpath[:-4] + '_coarse_downsampled.npy'
 
-        coarse_cache_present = os.path.exists(
-            os.path.join(wavelet_folder, "dwt_downsampled_videodata.npy")
-        )
-        coarse_phase_present = (
-            os.path.exists(os.path.join(wavelet_folder, "dwt_videodata_0.npy"))
-            and os.path.exists(os.path.join(wavelet_folder, "dwt_videodata_1.npy"))
-        )
-        if coarse_cache_present:
-            print(f"Found existing coarse RF wavelet output in {wavelet_folder}. Reusing it.")
-        elif coarse_phase_present:
-            print(f"Found existing coarse phase wavelets in {wavelet_folder}. Skipping coarse decomposition.")
-        else:
-            print("Step 1/2: Downsampling stimulus movie for coarse RF and real phase decomposition...")
-            if not os.path.exists(coarse_downsample_path):
-                _register_cancel_cleanup_path(coarse_downsample_path)
-            _write_recovery_step("wavelet_downsampling_started", wavelet_folder=wavelet_folder)
-            visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
-            analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
+        visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
+        analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
 
+        def _coverage_ratios():
+            """Function for coverage ratios.
+
+            Returns:
+                Result produced by the operation.
+            """
             if visual_coverage != analysis_coverage:
-                visual_coverage = np.array(visual_coverage)
-                analysis_coverage = np.array(analysis_coverage)
-                ratio_x = 1 - ((visual_coverage[0] - visual_coverage[1]) - (analysis_coverage[0] - analysis_coverage[1])) / (visual_coverage[0] - visual_coverage[1])
-                ratio_y = 1 - ((visual_coverage[2] - visual_coverage[3]) - (analysis_coverage[2] - analysis_coverage[3])) / (visual_coverage[2] - visual_coverage[3])
+                visual_coverage_arr = np.array(visual_coverage)
+                analysis_coverage_arr = np.array(analysis_coverage)
+                ratio_x = 1 - ((visual_coverage_arr[0] - visual_coverage_arr[1]) - (analysis_coverage_arr[0] - analysis_coverage_arr[1])) / (visual_coverage_arr[0] - visual_coverage_arr[1])
+                ratio_y = 1 - ((visual_coverage_arr[2] - visual_coverage_arr[3]) - (analysis_coverage_arr[2] - analysis_coverage_arr[3])) / (visual_coverage_arr[2] - visual_coverage_arr[3])
             else:
                 ratio_x = ratio_y = 1
+            return ratio_x, ratio_y
 
-            downsample_video_binary(
-                movpath,
-                visual_coverage,
-                analysis_coverage,
-                shape=(coarse_ny, coarse_nx),
-                chunk_size=video_downsample_chunk_size(),
-                ratios=(ratio_x, ratio_y),
-                save_path=coarse_downsample_path,
-                cancel_event=_current_cancel_event(),
-            )
+        coarse_cache_path = os.path.join(wavelet_folder, "dwt_downsampled_videodata.npy")
+        real_phase_path = os.path.join(wavelet_folder, "dwt_videodata_0.npy")
+        imag_phase_path = os.path.join(wavelet_folder, "dwt_videodata_1.npy")
+        coarse_phase_shape = (
+            expected_frames,
+            coarse_nx,
+            coarse_ny,
+            n_thetas,
+            len(sigmas),
+        )
+        coarse_cache_shape = (3,) + coarse_phase_shape
+        coarse_cache_ready = _artifact_matches(coarse_cache_path, coarse_cache_shape)
+
+        if coarse_cache_ready:
+            update_progress(45, "Stimulus wavelet decomposition", "Reusing coarse RF cache")
+            print(f"Resume: found completed coarse RF wavelet cache, reusing {coarse_cache_path}")
+            _write_recovery_step("coarse_cache_reused", path=coarse_cache_path, shape=coarse_cache_shape)
+        else:
+            update_progress(8, "Stimulus wavelet decomposition", "Preparing coarse stimulus movie")
+            print("Step 1/5: Preparing coarse stimulus movie...")
+            if not os.path.exists(coarse_downsample_path):
+                _register_cancel_cleanup_path(coarse_downsample_path)
+            if _artifact_matches(coarse_downsample_path, (expected_frames, coarse_ny, coarse_nx)):
+                print(f"Resume: found completed coarse downsampled movie, reusing {coarse_downsample_path}")
+                _write_recovery_step("coarse_downsampling_reused", path=coarse_downsample_path)
+            else:
+                _write_recovery_step("wavelet_downsampling_started", wavelet_folder=wavelet_folder)
+                ratio_x, ratio_y = _coverage_ratios()
+                downsample_video_binary(
+                    movpath,
+                    visual_coverage,
+                    analysis_coverage,
+                    shape=(coarse_ny, coarse_nx),
+                    chunk_size=video_downsample_chunk_size(),
+                    ratios=(ratio_x, ratio_y),
+                    save_path=coarse_downsample_path,
+                    cancel_event=_current_cancel_event(),
+                )
             _raise_if_cancelled()
-            videodata = np.load(coarse_downsample_path)
+            videodata = np.load(coarse_downsample_path, mmap_mode="r")
             videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
 
-            real_phase_path = os.path.join(wavelet_folder, "dwt_videodata_0.npy")
-            if not os.path.exists(real_phase_path):
+            update_progress(20, "Stimulus wavelet decomposition", "Preparing coarse real phase")
+            print("Step 2/5: Preparing coarse real phase wavelets...")
+            if _artifact_matches(real_phase_path, coarse_phase_shape):
+                print(f"Resume: found completed coarse real phase, reusing {real_phase_path}")
+                _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
+            else:
                 _register_cancel_cleanup_path(real_phase_path)
-            waveletDecomposition(
-                videodata,
-                0,
-                sigmas,
-                wavelet_folder,
-                coarse_lib_path,
-                cancel_event=_current_cancel_event(),
-            )
-            _write_recovery_step("coarse_phase_real_complete", path=os.path.join(wavelet_folder, "dwt_videodata_0.npy"))
-            print("Step 2/2: Wavelet decomposition (imaginary phase)...")
-            imag_phase_path = os.path.join(wavelet_folder, "dwt_videodata_1.npy")
-            if not os.path.exists(imag_phase_path):
+                waveletDecomposition(
+                    videodata,
+                    0,
+                    sigmas,
+                    wavelet_folder,
+                    coarse_lib_path,
+                    cancel_event=_current_cancel_event(),
+                )
+                _write_recovery_step("coarse_phase_real_complete", path=real_phase_path)
+
+            update_progress(32, "Stimulus wavelet decomposition", "Preparing coarse imaginary phase")
+            print("Step 3/5: Preparing coarse imaginary phase wavelets...")
+            if _artifact_matches(imag_phase_path, coarse_phase_shape):
+                print(f"Resume: found completed coarse imaginary phase, reusing {imag_phase_path}")
+                _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
+            else:
                 _register_cancel_cleanup_path(imag_phase_path)
-            waveletDecomposition(
-                videodata,
-                1,
-                sigmas,
-                wavelet_folder,
-                coarse_lib_path,
-                cancel_event=_current_cancel_event(),
-            )
-            _write_recovery_step("coarse_phase_imaginary_complete", path=os.path.join(wavelet_folder, "dwt_videodata_1.npy"))
+                waveletDecomposition(
+                    videodata,
+                    1,
+                    sigmas,
+                    wavelet_folder,
+                    coarse_lib_path,
+                    cancel_event=_current_cancel_event(),
+                )
+                _write_recovery_step("coarse_phase_imaginary_complete", path=imag_phase_path)
 
         print(
             f"Coarse RF grid derived from config: {coarse_nx} x {coarse_ny} "
@@ -1488,66 +2282,61 @@ def run(param_defaults, gabor_param, workflow=None):
             full_output = full_output_target
             os.makedirs(full_output, exist_ok=True)
 
-        print("Step 3: Generating coarse wavelet cache for RF analysis...")
-        cache_path = os.path.join(wavelet_folder, "dwt_downsampled_videodata.npy")
-        if not os.path.exists(cache_path):
-            _register_cancel_cleanup_path(cache_path)
-        for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
-            scratch_path = os.path.join(wavelet_folder, scratch_name)
-            if not os.path.exists(scratch_path):
-                _register_cancel_cleanup_path(scratch_path)
-        coarseWavelet(
-            wavelet_folder,
-            False,
-            nx0=coarse_nx,
-            ny0=coarse_ny,
-            no=n_thetas,
-            ns=len(sigmas),
-            nf=1,
-            nx=coarse_nx,
-            ny=coarse_ny,
-            chunk_size=None,
-            cancel_event=_current_cancel_event(),
-        )
-        _raise_if_cancelled()
-        _write_recovery_step(
-            "coarse_cache_complete",
-            path=os.path.join(wavelet_folder, "dwt_downsampled_videodata.npy"),
-        )
-        for intermediate_name in ("dwt_videodata_0.npy", "dwt_videodata_1.npy"):
-            intermediate_path = os.path.join(wavelet_folder, intermediate_name)
-            try:
-                if os.path.exists(intermediate_path):
-                    os.remove(intermediate_path)
-                    print(f"Removed intermediate coarse phase file: {intermediate_path}")
-            except Exception as exc:
-                print(f"Could not remove intermediate file {intermediate_path}: {exc}")
+        if not coarse_cache_ready:
+            update_progress(48, "Stimulus wavelet decomposition", "Generating coarse RF cache")
+            print("Step 4/5: Generating coarse wavelet cache for RF analysis...")
+            if not os.path.exists(coarse_cache_path):
+                _register_cancel_cleanup_path(coarse_cache_path)
+            for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
+                scratch_path = os.path.join(wavelet_folder, scratch_name)
+                if not os.path.exists(scratch_path):
+                    _register_cancel_cleanup_path(scratch_path)
+            coarseWavelet(
+                wavelet_folder,
+                False,
+                nx0=coarse_nx,
+                ny0=coarse_ny,
+                no=n_thetas,
+                ns=len(sigmas),
+                nf=1,
+                nx=coarse_nx,
+                ny=coarse_ny,
+                chunk_size=None,
+                cancel_event=_current_cancel_event(),
+            )
+            _raise_if_cancelled()
+            if not _artifact_matches(coarse_cache_path, coarse_cache_shape):
+                raise ValueError(f"Coarse cache was written with an unexpected shape: {coarse_cache_path}")
+            _write_recovery_step("coarse_cache_complete", path=coarse_cache_path)
+            for intermediate_path in (real_phase_path, imag_phase_path):
+                try:
+                    if os.path.exists(intermediate_path):
+                        os.remove(intermediate_path)
+                        print(f"Removed intermediate coarse phase file: {intermediate_path}")
+                except Exception as exc:
+                    print(f"Could not remove intermediate file {intermediate_path}: {exc}")
 
-        for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
-            scratch_path = os.path.join(wavelet_folder, scratch_name)
-            try:
-                if os.path.exists(scratch_path):
-                    os.remove(scratch_path)
-                    print(f"Removed temporary coarse cache scratch file: {scratch_path}")
-            except Exception as exc:
-                print(f"Could not remove temporary scratch file {scratch_path}: {exc}")
+            for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
+                scratch_path = os.path.join(wavelet_folder, scratch_name)
+                try:
+                    if os.path.exists(scratch_path):
+                        os.remove(scratch_path)
+                        print(f"Removed temporary coarse cache scratch file: {scratch_path}")
+                except Exception as exc:
+                    print(f"Could not remove temporary scratch file {scratch_path}: {exc}")
 
         sigmas_full = parse_literal(
             param_entries["Sigmas Full Model"].get(),
             "Sigmas Full Model",
         )
-        print("Step 4: Generating full-resolution wavelets for run_Full_Model...")
-        if not os.path.exists(full_downsample_path):
+        update_progress(65, "Stimulus wavelet decomposition", "Preparing full-resolution wavelets")
+        print("Step 5/5: Generating full-resolution wavelets for run_Full_Model...")
+        if _artifact_matches(full_downsample_path, (expected_frames, ny, nx)):
+            print(f"Resume: found completed full-resolution downsampled movie, reusing {full_downsample_path}")
+            _write_recovery_step("full_downsampling_reused", path=full_downsample_path)
+        else:
             _register_cancel_cleanup_path(full_downsample_path)
-            visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
-            analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
-            if visual_coverage != analysis_coverage:
-                visual_coverage_arr = np.array(visual_coverage)
-                analysis_coverage_arr = np.array(analysis_coverage)
-                ratio_x = 1 - ((visual_coverage_arr[0] - visual_coverage_arr[1]) - (analysis_coverage_arr[0] - analysis_coverage_arr[1])) / (visual_coverage_arr[0] - visual_coverage_arr[1])
-                ratio_y = 1 - ((visual_coverage_arr[2] - visual_coverage_arr[3]) - (analysis_coverage_arr[2] - analysis_coverage_arr[3])) / (visual_coverage_arr[2] - visual_coverage_arr[3])
-            else:
-                ratio_x = ratio_y = 1
+            ratio_x, ratio_y = _coverage_ratios()
             downsample_video_binary(
                 movpath,
                 visual_coverage,
@@ -1559,8 +2348,16 @@ def run(param_defaults, gabor_param, workflow=None):
                 cancel_event=_current_cancel_event(),
             )
         _raise_if_cancelled()
-        videodata = np.load(full_downsample_path)
+        videodata = np.load(full_downsample_path, mmap_mode="r")
         videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
+        full_model_shape = (
+            videodata.shape[0],
+            nx,
+            ny,
+            n_thetas,
+            len(sigmas_full),
+            max(1, len(frequencies)),
+        )
         zarr_chunks = (
             max(1, int(param_entries["Hz"].get()) * 60),
             1,
@@ -1573,9 +2370,11 @@ def run(param_defaults, gabor_param, workflow=None):
             suffix = "_r" if phase == 0 else "_i"
             target_ext = ".zarr" if is_zarr_wavelet else ".npy"
             target = os.path.join(full_output, f"dwt_videodata2{suffix}{target_ext}")
-            if os.path.exists(target):
-                print(f"Found existing full-model wavelets: {target}")
+            if _artifact_matches(target, full_model_shape):
+                print(f"Resume: found completed full-model wavelets, reusing {target}")
+                _write_recovery_step(f"full_model_phase_{phase}_reused", path=target, shape=full_model_shape)
                 continue
+            update_progress(75 + phase * 10, "Stimulus wavelet decomposition", f"Writing full-model phase {phase}")
             _register_cancel_cleanup_path(target)
             waveletDecompositionFull(
                 videodata,
@@ -1589,6 +2388,8 @@ def run(param_defaults, gabor_param, workflow=None):
                 zarr_chunks=zarr_chunks if is_zarr_wavelet else None,
                 cancel_event=_current_cancel_event(),
             )
+            if not _artifact_matches(target, full_model_shape):
+                raise ValueError(f"Full-model wavelets were written with an unexpected shape: {target}")
             _write_recovery_step(f"full_model_phase_{phase}_complete", path=target)
 
         if is_zarr_wavelet:
@@ -1599,6 +2400,7 @@ def run(param_defaults, gabor_param, workflow=None):
             )
         else:
             print(f"All wavelet files are ready. Coarse: {wavelet_folder} | Full-model NPY: {full_output}")
+        update_progress(100, "Stimulus wavelet decomposition", "Wavelet files ready")
     
     def embed_interactive_figure(fig, parent_container, title=None):
         """Embed a matplotlib figure with navigation toolbar in ``parent_container``."""
@@ -1656,6 +2458,11 @@ def run(param_defaults, gabor_param, workflow=None):
         return canvas
 
     def refresh_figure_caption(fig):
+        """Function for refresh figure caption.
+
+        Args:
+            fig: Input value for this operation.
+        """
         caption = getattr(fig, "_waven_caption", "")
         for record in figure_export_records:
             if record.get("figure") is fig and record.get("caption_widget") is not None:
@@ -1663,6 +2470,11 @@ def run(param_defaults, gabor_param, workflow=None):
                 break
 
     def clear_plot_tab(parent):
+        """Function for clear plot tab.
+
+        Args:
+            parent: Input value for this operation.
+        """
         tab_name = _tab_name_for_parent(parent)
         for widget in parent.winfo_children():
             widget.destroy()
@@ -1672,6 +2484,11 @@ def run(param_defaults, gabor_param, workflow=None):
         ]
 
     def switch_to_individual_tab(flash=True):
+        """Function for switch to individual tab.
+
+        Args:
+            flash: Input value for this operation.
+        """
         try:
             plot_tabs.set("Individual neuron")
         except Exception:
@@ -1694,6 +2511,13 @@ def run(param_defaults, gabor_param, workflow=None):
                 pass
 
     def embed_captured_figures(figures, parent, title_prefix):
+        """Function for embed captured figures.
+
+        Args:
+            figures: Input value for this operation.
+            parent: Input value for this operation.
+            title_prefix: Input value for this operation.
+        """
         if not figures:
             ctk.CTkLabel(
                 parent,
@@ -1705,6 +2529,14 @@ def run(param_defaults, gabor_param, workflow=None):
             embed_interactive_figure(fig, parent, f"{title_prefix} {index}")
 
     def capture_new_figures(callback):
+        """Function for capture new figures.
+
+        Args:
+            callback: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         _ensure_plot_imports()
         before = set(plt.get_fignums())
         result = callback()
@@ -1713,12 +2545,25 @@ def run(param_defaults, gabor_param, workflow=None):
         return result, figures
 
     def gui_trailing_sep(path):
+        """Function for gui trailing sep.
+
+        Args:
+            path: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         path = str(path)
         if path.endswith(("/", "\\")):
             return path
         return path + os.sep
     
     def plot_data():
+        """Function for plot data.
+
+        Returns:
+            Result produced by the operation.
+        """
         _ensure_rf_imports("coarse RF analysis")
         rf_extra = {
             "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
@@ -1776,6 +2621,7 @@ def run(param_defaults, gabor_param, workflow=None):
         sigmas_deg = np.trunc(2 * deg_per_pix * sigmas * 100) / 100
 
         if spks_path.strip().lower() in ("", "none", "null"):
+            update_progress(10, "Coarse receptive-field analysis", "Aligning neural data")
             from .. import time_alignment as ta
 
             try:
@@ -1807,6 +2653,7 @@ def run(param_defaults, gabor_param, workflow=None):
                 neuron_pos[:, 1] = abs(neuron_pos[:, 1] - np.max(neuron_pos[:, 1]))
         else:
             try:
+                update_progress(10, "Coarse receptive-field analysis", "Loading pre-aligned spikes")
                 spks = np.load(spks_path)
                 parent_dir = os.path.dirname(spks_path)
                 neuron_pos = np.load(os.path.join(parent_dir, 'pos.npy'))
@@ -1815,6 +2662,7 @@ def run(param_defaults, gabor_param, workflow=None):
                 return False
 
         print("Loading neural data and coarse wavelets...")
+        update_progress(25, "Coarse receptive-field analysis", "Loading coarse wavelets")
         _write_recovery_step("loading_neural_data")
         respcorr = repetability_trial3(spks, neuron_pos, plotting=False)
         skewness = np.array(compute_skewness_neurons(spks, plotting=False))
@@ -1846,6 +2694,8 @@ def run(param_defaults, gabor_param, workflow=None):
                                                 neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
                                                 n_orientations=n_orientations,
                                                 plotting=False)
+        update_progress(75, "Coarse receptive-field analysis", "Computing OSI/gOSI")
+        orientation_selectivity = selectivity_for_rfs(rfs_gabor)
         _write_recovery_step("coarse_rf_complete", wavelet_dir=parent_dir)
         analysis_state.clear()
         analysis_state.update(
@@ -1865,11 +2715,14 @@ def run(param_defaults, gabor_param, workflow=None):
             coarse_nx=coarse_nx,
             coarse_ny=coarse_ny,
             n_orientations=n_orientations,
+            orientation_selectivity=orientation_selectivity,
             nb_frames=nb_frames,
             wavelet_dir=parent_dir,
         )
 
         def render_gui_plots():
+            """Function for render gui plots."""
+            update_progress(90, "Coarse receptive-field analysis", "Rendering plots")
             clear_plot_tab(frame_plot_all)
             clear_plot_tab(frame_plot_individual)
             embedded_canvases.clear()
@@ -1947,6 +2800,11 @@ def run(param_defaults, gabor_param, workflow=None):
             ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4, ax3_5]
 
             def draw_individual_neuron(neuron_id):
+                """Function for draw individual neuron.
+
+                Args:
+                    neuron_id: Input value for this operation.
+                """
                 try:
                     entry_neuron.delete(0, tk.END)
                     entry_neuron.insert(0, str(neuron_id))
@@ -1977,6 +2835,7 @@ def run(param_defaults, gabor_param, workflow=None):
                     canvas2.draw()
 
                     rf2d, x_tuning, y_tuning, ori_tun, s_tuning, f_tuning = PlotTuningCurve(rfs_gabor, neuron_id, analysis_coverage, sigmas_deg, screen_ratio, frequencies, show=False)
+                    neuron_osi, neuron_gosi = orientation_selectivity_from_tuning(ori_tun)
                     for ax in ax3: ax.clear()
 
                     heat = ax3[0].imshow(rf2d, cmap='coolwarm', aspect='equal')
@@ -2002,7 +2861,7 @@ def run(param_defaults, gabor_param, workflow=None):
                     ax3[2].set_xlabel("Azimuth (deg)")
                     ax3[2].set_ylabel("Correlation (a.u.)")
                     ax3[3].plot(ori_tun, 'o-', c='k')
-                    ax3[3].set_title('Orientation (deg)')
+                    ax3[3].set_title(f'Orientation (OSI {neuron_osi:.3f}, gOSI {neuron_gosi:.3f})')
                     n_ori = rfs_gabor[0].shape[3]
                     ax3[3].set_xticks(
                         [0, max(1, n_ori // 2), max(2, n_ori - 1)],
@@ -2029,6 +2888,8 @@ def run(param_defaults, gabor_param, workflow=None):
                             "x_tuning": x_tuning,
                             "y_tuning": y_tuning,
                             "orientation_tuning": ori_tun,
+                            "osi": neuron_osi,
+                            "gosi": neuron_gosi,
                             "size_tuning": s_tuning,
                             "frequency_tuning": f_tuning,
                             "best_params": np.asarray(rfs_gabor[1])[:, neuron_id],
@@ -2041,6 +2902,11 @@ def run(param_defaults, gabor_param, workflow=None):
                     print(f"Error drawing selected neuron: {e}")
 
             def onpick(event):
+                """Function for onpick.
+
+                Args:
+                    event: Input value for this operation.
+                """
                 try:
                     draw_individual_neuron(int(event.ind[0]))
                 except Exception as e:
@@ -2074,12 +2940,25 @@ def run(param_defaults, gabor_param, workflow=None):
                     "visual_coverage": visual_coverage,
                 },
             )
+            fig_osi_population = _plot_selectivity_population(
+                orientation_selectivity,
+                filter_mask,
+                neuron_pos=neuron_pos,
+            )
+            fig_osi_units = _plot_selectivity_by_unit(
+                orientation_selectivity,
+                neuron_pos,
+                filter_mask,
+            )
             embed_interactive_figure(fig1, frame_plot_all, title="Neuron Layout")
             embed_interactive_figure(fig10, frame_plot_all, title="Population Retinotopy Maps")
+            embed_interactive_figure(fig_osi_population, frame_plot_all, title="OSI and gOSI by Neuron/Shank")
+            embed_interactive_figure(fig_osi_units, frame_plot_all, title="OSI and gOSI by Unit")
             canvas2 = embed_interactive_figure(fig2, frame_plot_individual, title="Spike Train")
             canvas3 = embed_interactive_figure(fig3, frame_plot_individual, title="Selected Neuron Tuning")
 
             def click_RF():
+                """Function for click RF."""
                 try:
                     neuron_id = int(param_entries["Neuron ID"].get())
                     draw_individual_neuron(neuron_id)
@@ -2099,6 +2978,8 @@ def run(param_defaults, gabor_param, workflow=None):
                         [
                             ("all", "Neuron Layout", fig1),
                             ("all", "Population Retinotopy Maps", fig10),
+                            ("all", "OSI and gOSI by Neuron/Shank", fig_osi_population),
+                            ("all", "OSI and gOSI by Unit", fig_osi_units),
                             ("individual", "Spike Train", fig2),
                             ("individual", "Selected Neuron Tuning", fig3),
                         ]
@@ -2107,16 +2988,31 @@ def run(param_defaults, gabor_param, workflow=None):
                 extra=rf_extra,
             )
             print("Plots rendered successfully.")
+            update_progress(100, "Coarse receptive-field analysis", "Plots ready")
 
         root.after(0, render_gui_plots)
 
     def _selected_neuron_id():
+        """Function for selected neuron id.
+
+        Returns:
+            Result produced by the operation.
+        """
         neuron_id = int(param_entries["Neuron ID"].get())
         if "spks" in analysis_state and not (0 <= neuron_id < analysis_state["spks"].shape[2]):
             raise ValueError(f"Neuron ID {neuron_id} is outside the loaded range.")
         return neuron_id
 
     def _parse_bool_entry(value, label):
+        """Function for parse bool entry.
+
+        Args:
+            value: Input value for this operation.
+            label: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         normalized = str(value).strip().lower()
         if normalized in {"1", "true", "yes", "y", "on"}:
             return True
@@ -2125,6 +3021,17 @@ def run(param_defaults, gabor_param, workflow=None):
         raise ValueError(f"{label} must be True or False.")
 
     def _parse_trial_indices_entry(value, n_trials, label, train_indices=None):
+        """Function for parse trial indices entry.
+
+        Args:
+            value: Input value for this operation.
+            n_trials: Input value for this operation.
+            label: Input value for this operation.
+            train_indices: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         text = str(value).strip()
         if text.lower() in {"", "auto"}:
             if train_indices is None:
@@ -2156,6 +3063,14 @@ def run(param_defaults, gabor_param, workflow=None):
         return indices
 
     def _model_split_settings(state):
+        """Function for model split settings.
+
+        Args:
+            state: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         n_trials = int(state["spks"].shape[0])
         if n_trials < 2:
             raise ValueError("Model cross-validation requires at least two trials.")
@@ -2183,17 +3098,34 @@ def run(param_defaults, gabor_param, workflow=None):
         }
 
     def _require_rf_state():
+        """Function for require rf state.
+
+        Returns:
+            Result produced by the operation.
+        """
         if not analysis_state:
             raise RuntimeError("Run Coarse RF Analysis before model plotting.")
         return analysis_state
 
     def _append_model_figures(figures, title_prefix):
+        """Function for append model figures.
+
+        Args:
+            figures: Input value for this operation.
+            title_prefix: Input value for this operation.
+        """
         def render():
+            """Function for render."""
             switch_to_individual_tab(flash=True)
             embed_captured_figures(figures, frame_plot_individual, title_prefix)
         root.after(0, render)
 
     def plot_run_model_outputs():
+        """Function for plot run model outputs.
+
+        Returns:
+            Result produced by the operation.
+        """
         _ensure_model_imports("run_Model plot capture")
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
@@ -2228,6 +3160,11 @@ def run(param_defaults, gabor_param, workflow=None):
         frames_per_minute = int(param_entries["Hz"].get()) * 60
 
         def call_model():
+            """Function for call model.
+
+            Returns:
+                Result produced by the operation.
+            """
             return run_Model(
                 smoothed_best_params[:, [neuron_id]],
                 raw_best_params[:, [neuron_id]],
@@ -2264,6 +3201,11 @@ def run(param_defaults, gabor_param, workflow=None):
         _append_model_figures(figures, f"run_Model neuron {neuron_id}")
 
     def plot_run_full_model_outputs():
+        """Function for plot run full model outputs.
+
+        Returns:
+            Result produced by the operation.
+        """
         _ensure_model_imports("run_Full_Model plot capture")
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
@@ -2295,6 +3237,11 @@ def run(param_defaults, gabor_param, workflow=None):
         frames_per_minute = int(param_entries["Hz"].get()) * 60
 
         def call_full_model():
+            """Function for call full model.
+
+            Returns:
+                Result produced by the operation.
+            """
             return run_Full_Model(
                 raw_best_params,
                 smoothed_best_params,
@@ -2337,6 +3284,7 @@ def run(param_defaults, gabor_param, workflow=None):
         _append_model_figures(figures, f"run_Full_Model neuron {neuron_id}")
 
     def click_save():
+        """Function for click save."""
         try:
             state = _require_rf_state()
         except Exception as exc:
@@ -2368,6 +3316,7 @@ def run(param_defaults, gabor_param, workflow=None):
             print(f"Failed to export retinotopy matrix: {exc}")
 
     def export_plots():
+        """Function for export plots."""
         if not embedded_canvases:
             messagebox.showinfo("No Plots", "Run an analysis before exporting plots.")
             print("No embedded plots are available to export.")
@@ -2396,6 +3345,7 @@ def run(param_defaults, gabor_param, workflow=None):
             print(f"Failed to export SVG plots: {exc}")
 
     def save_app_state():
+        """Function for save app state."""
         state = {
             "workflow": workflow,
             "gabor": {key: entry.get() for key, entry in gabor_entries.items()},
@@ -2422,6 +3372,7 @@ def run(param_defaults, gabor_param, workflow=None):
             print(f"Failed to save GUI state: {exc}")
 
     def load_app_state():
+        """Function for load app state."""
         path = filedialog.askopenfilename(
             title="Load Configuration",
             defaultextension=".json",
@@ -2457,6 +3408,7 @@ def run(param_defaults, gabor_param, workflow=None):
 
 
     def cleanup_temporary_directories():
+        """Function for cleanup temporary directories."""
         for temp_dir in list(temp_directories):
             if os.path.isdir(temp_dir):
                 try:
@@ -2467,6 +3419,7 @@ def run(param_defaults, gabor_param, workflow=None):
         temp_directories.clear()
 
     def quit_app():
+        """Function for quit app."""
         keep_awake.stop()
         cleanup_temporary_directories()
         root.quit()
@@ -2525,6 +3478,7 @@ def run(param_defaults, gabor_param, workflow=None):
         return int(np.prod(shape, dtype=np.int64) * dtype_size), shape
 
     def estimate_gabor_library_size():
+        """Function for estimate gabor library size."""
         try:
             nx = int(gabor_entries["NX"].get())
             ny = int(gabor_entries["NY"].get())
@@ -2582,6 +3536,7 @@ def run(param_defaults, gabor_param, workflow=None):
             gabor_size_label.configure(text="Gabor disk size: enter valid dimensions to calculate")
 
     def estimate_wavelet_size():
+        """Function for estimate wavelet size."""
         try:
             n_frames_entry = param_entries.get("Number of Frames")
             fallback_frames = int(n_frames_entry.get()) if n_frames_entry is not None else 0
@@ -2644,6 +3599,7 @@ def run(param_defaults, gabor_param, workflow=None):
             wavelet_size_label.configure(text="Wavelet disk size: enter valid dimensions to calculate")
 
     def refresh_size_estimates():
+        """Function for refresh size estimates."""
         estimate_gabor_library_size()
         estimate_wavelet_size()
 
@@ -2705,6 +3661,7 @@ def run(param_defaults, gabor_param, workflow=None):
     root.title(f"Neuron Analysis Toolkit — {workflow_label}")
 
     def on_closing():
+        """Function for on closing."""
         if messagebox.askokcancel("Quit", "Are you sure you want to close the application? Unsaved temporary data will be removed."):
             keep_awake.stop()
             cleanup_temporary_directories()
@@ -2764,6 +3721,13 @@ def run(param_defaults, gabor_param, workflow=None):
                     pass
 
     def set_pane_sash(pane, index, position):
+        """Function for set pane sash.
+
+        Args:
+            pane: Input value for this operation.
+            index: Input value for this operation.
+            position: Input value for this operation.
+        """
         try:
             pane.sashpos(index, position)
             return
@@ -2782,6 +3746,7 @@ def run(param_defaults, gabor_param, workflow=None):
     view_menu = tk.Menu(menubar, tearoff=0)
 
     def toggle_terminal():
+        """Function for toggle terminal."""
         try:
             if str(frame_log) in right_pane.panes():
                 right_pane.forget(frame_log)
@@ -2794,6 +3759,7 @@ def run(param_defaults, gabor_param, workflow=None):
     left_panel_visible = [True]
 
     def toggle_left_panel():
+        """Function for toggle left panel."""
         try:
             if str(left_frame) in paned_h.panes():
                 paned_h.forget(left_frame)
@@ -2815,7 +3781,6 @@ def run(param_defaults, gabor_param, workflow=None):
     status_frame = ctk.CTkFrame(content_root, fg_color="transparent")
     status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=0, pady=(6, 0))
     status_var = tk.StringVar(value="Ready")
-    ctk.CTkLabel(status_frame, textvariable=status_var, text_color=muted_text).pack(side=tk.LEFT)
     progress_bar = ttk.Progressbar(status_frame, mode="determinate", length=260, maximum=100)
     progress_bar.pack(side=tk.RIGHT, padx=(8, 0))
 
@@ -2920,6 +3885,14 @@ def run(param_defaults, gabor_param, workflow=None):
     text_log.configure(blockcursor=False)
 
     def _terminal_mousewheel(event):
+        """Function for terminal mousewheel.
+
+        Args:
+            event: Input value for this operation.
+
+        Returns:
+            Result produced by the operation.
+        """
         try:
             step = -int(event.delta / 120) if getattr(event, "delta", 0) else 0
             text_log.yview_scroll(step * 3, "units")
@@ -2992,6 +3965,11 @@ def run(param_defaults, gabor_param, workflow=None):
     workflow_var = tk.StringVar(value=workflow)
 
     def set_workflow_from_panel(value):
+        """Function for set workflow from panel.
+
+        Args:
+            value: Input value for this operation.
+        """
         nonlocal workflow, workflow_label
         workflow = value
         workflow_label = workflow_display_name(workflow)
@@ -3095,6 +4073,11 @@ def run(param_defaults, gabor_param, workflow=None):
     ctk.CTkLabel(format_frame, text="Library format:", text_color=muted_text).pack(side=tk.LEFT)
 
     def _set_gabor_format(val):
+        """Function for set gabor format.
+
+        Args:
+            val: Input value for this operation.
+        """
         gabor_format_var.set(val)
         try:
             refresh_size_estimates()
@@ -3154,6 +4137,11 @@ def run(param_defaults, gabor_param, workflow=None):
     ctk.CTkLabel(format_frame_wavelet, text="Full-model format:", text_color=muted_text).pack(side=tk.LEFT)
 
     def _set_wavelet_format(val):
+        """Function for set wavelet format.
+
+        Args:
+            val: Input value for this operation.
+        """
         wavelet_format_var.set(val)
         try:
             refresh_size_estimates()
@@ -3243,6 +4231,12 @@ def run(param_defaults, gabor_param, workflow=None):
     }
 
     def render_parameter_fields(preserve_values=False, loaded_values=None):
+        """Function for render parameter fields.
+
+        Args:
+            preserve_values: Input value for this operation.
+            loaded_values: Input value for this operation.
+        """
         existing_values = {}
         if preserve_values:
             existing_values = {

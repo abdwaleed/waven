@@ -293,12 +293,31 @@ def getWTfromNPY(
 
 
 def waveletTransform(frame,phase, L):
+    """Function for waveletTransform.
+
+    Args:
+        frame: Input value for this operation.
+        phase: Input value for this operation.
+        L: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     output=L[:, :, :,phase]@torch.Tensor(frame.flatten()).cuda()
     # output=torch.sum(output, axis=(0, 1))
     return output.detach().cpu().numpy()
 
 
 def waveletTransform3D(frame, L):
+    """Function for waveletTransform3D.
+
+    Args:
+        frame: Input value for this operation.
+        L: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     output=L@torch.Tensor(frame.flatten()).cuda()
     # output=torch.sum(output, axis=(0, 1))
     return output.detach().cpu().numpy()
@@ -532,6 +551,13 @@ def waveletDecompositionFull(
 
 
 def getTrueRF(idx, rfs, L):
+    """Function for getTrueRF.
+
+    Args:
+        idx: Input value for this operation.
+        rfs: Input value for this operation.
+        L: Input value for this operation.
+    """
     rf=rfs[idx, :, :, :]#.swapaxes(0, 1)
     # rf = skimage.transform.resize(rf, (135, 54, 8),order=5, anti_aliasing=True)
     rfv=rf.reshape(1, -1)@L[:, :, :, 2, 0, :].reshape(-1,7290)

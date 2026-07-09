@@ -1,4 +1,5 @@
 #!/usr/bin/python
+"""Readtrodesextracteddatafile3 module."""
 #Requires numpy to be installed. re and sys are defaults for python
 #assumes python 2.7
 import numpy as np
@@ -6,6 +7,14 @@ import re
 from sys import argv
 # Main function
 def readTrodesExtractedDataFile(filename):
+    """Function for readTrodesExtractedDataFile.
+
+    Args:
+        filename: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
     with open(filename, 'rb') as f:
         # Check if first line is start of settings block
         if f.readline().decode('ascii').strip() != '<Start settings>':
@@ -38,7 +47,15 @@ def readTrodesExtractedDataFile(filename):
 # Returns: np.dtype
 def parseFields(fieldstr):
     # Returns np.dtype from field string
-    sep = re.split('\s', re.sub(r"\>\<|\>|\<", ' ', fieldstr).strip())
+    """Function for parseFields.
+
+    Args:
+        fieldstr: Input value for this operation.
+
+    Returns:
+        Result produced by the operation.
+    """
+    sep = re.split(r"\s", re.sub(r"\>\<|\>|\<", ' ', fieldstr).strip())
     # print(sep)
     typearr = []
     # Every two elmts is fieldname followed by datatype
@@ -48,7 +65,7 @@ def parseFields(fieldstr):
         ftype = 'uint32'
         # Finds if a <num>* is included in datatype
         if sep[i+1].__contains__('*'):
-            temptypes = re.split('\*', sep[i+1])
+            temptypes = re.split(r"\*", sep[i+1])
             # Results in the correct assignment, whether str is num*dtype or dtype*num
             ftype = temptypes[temptypes[0].isdigit()]
             repeats = int(temptypes[temptypes[1].isdigit()])
