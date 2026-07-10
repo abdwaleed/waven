@@ -13,7 +13,7 @@ Large files are intentionally reused across runs.
 | `dwt_downsampled_videodata.npy` | `(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` | `.npy`, `float32` | Yes, this is the durable coarse RF cache. |
 | `dwt_videodata2_r.npy` / `.zarr` | `(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)` | `float32` | Yes when running full models. |
 | `dwt_videodata2_i.npy` / `.zarr` | same as real phase | `float32` | Yes when running full models. |
-| aligned `spikes.npy` and `pos.npy` | spikes: `(n_trials, n_frames, n_neurons)`; positions: `(n_neurons, 2 or 3)` | numeric `.npy` | Yes, these make reruns reproducible. |
+| aligned `spikes.npy` / `spikes.zarr` and `pos.npy` / `pos.zarr` | spikes: `(n_trials, n_frames, n_neurons)`; positions: `(n_neurons, 2 or 3)` | numeric `.npy` or `.zarr` | Yes, these make reruns reproducible. |
 | `plot_cache.pkl.gz` | precomputed GUI plotting payload | compressed pickle | Optional; keep for faster GUI startup. |
 | `model_results/` | parameters, predictions, metrics, exports | mixed arrays and metadata | Yes for analysis records. |
 | explicit exports | PNG/SVG/NPZ/JSON/Pickle bundles | mixed | Yes for figures and paper provenance. |

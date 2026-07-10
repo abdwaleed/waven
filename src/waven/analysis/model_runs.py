@@ -8,6 +8,8 @@ from .receptive_fields import *
 from .nonlinear_models import *
 from .trial_stats import *
 
+SECONDS_PER_MINUTE = 60
+
 def signaltonoiseScipy(a, axis=0, ddof=0):
     """Function for signaltonoiseScipy.
 
@@ -234,7 +236,10 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
             f"{wavelets_i.shape} and {wavelets_r.shape}"
         )
     if frames_per_minute is None:
-        frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
+        raise ValueError(
+            "run_Model requires frames_per_minute from the configured stimulus "
+            "frame rate. Pass int(Hz) * 60 from the GUI/config."
+        )
     frames_per_minute = int(frames_per_minute)
 
     num_neurons = spks.shape[2]
@@ -276,7 +281,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                    savepath='outputs', n_min=5, tt=None,
                    memmapping=True, train_idx=None, test_idx=None, double_wavelet_model=False, lastmin=False,
                    plotting=False, frames_per_minute=None,
-                   hz=DEFAULT_MOVIE_FRAME_RATE_HZ, show_sem_errorbars=False):
+                   hz=None, show_sem_errorbars=False):
     """Function for run Full Model.
 
     Args:
@@ -313,6 +318,11 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     if test_idx is None:
         test_idx = [1, 3]
     if frames_per_minute is None:
+        if hz is None:
+            raise ValueError(
+                "run_Full_Model requires frames_per_minute or hz from the "
+                "configured stimulus frame rate."
+            )
         frames_per_minute = int(hz) * SECONDS_PER_MINUTE
     frames_per_minute = int(frames_per_minute)
     hz = int(hz)

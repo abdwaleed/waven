@@ -31,6 +31,8 @@ def _is_zarr_dir(path: str) -> bool:
                 return True
             if os.path.exists(os.path.join(path, ".zgroup")):
                 return True
+            if os.path.exists(os.path.join(path, "zarr.json")):
+                return True
         return False
     except Exception:
         return False

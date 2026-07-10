@@ -25,6 +25,15 @@ runs `run_Model`. In `full` mode, they build the fine/full artifacts and the
 model button runs `run_Full_Model`. Coarse RF analysis remains separate because
 the full model still uses coarse RF preferred features as seeds.
 
+The `Neural Spike/Position Cache` section groups the aligned-neural-cache
+controls in chronological order before Gabor and wavelet work. `Spks Path` is
+the optional "I already calculated these" path; point it at `spikes.npy` or
+`spikes.zarr` when a cache already exists. The `Create as` selector controls
+whether the `Create pos/spikes Cache (.npy or .zarr)` button writes
+`spikes.npy`/`pos.npy` or `spikes.zarr`/`pos.zarr`. If `Spks Path` is blank or
+`None`, the GUI first searches the experiment cache for either supported pair.
+If none is found, alignment runs and writes the selected format.
+
 ::: waven.gui
 
 ::: waven.app.gui

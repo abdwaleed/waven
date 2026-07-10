@@ -12,18 +12,24 @@ from .filters import (
     makeGaborFilter3D,
 )
 from .decomposition import (
+    build_convolution_kernel_cache,
+    convolution_kernel_cache_path,
     downsample_video_binary,
     downsample_video_uint,
     getTrueRF,
     getWTfromNPY,
     waveletDecomposition,
+    waveletDecompositionConv,
     waveletDecompositionFull,
+    waveletDecompositionFullConv,
     waveletTransform,
     waveletTransform3D,
 )
 
 __all__ = [
     "has_enough_ram",
+    "build_convolution_kernel_cache",
+    "convolution_kernel_cache_path",
     "makeGaborFilter",
     "makeGaborFilter3D",
     "makeFilterLibrary",
@@ -35,6 +41,8 @@ __all__ = [
     "waveletTransform",
     "waveletTransform3D",
     "waveletDecomposition",
+    "waveletDecompositionConv",
     "waveletDecompositionFull",
+    "waveletDecompositionFullConv",
     "getTrueRF",
 ]

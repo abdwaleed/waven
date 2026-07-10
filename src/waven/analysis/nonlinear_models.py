@@ -1118,7 +1118,10 @@ def getmetrics(x, y, n, frames_per_minute=None):
         Result produced by the operation.
     """
     if frames_per_minute is None:
-        frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
+        raise ValueError(
+            "var_exp requires frames_per_minute from the configured stimulus "
+            "frame rate."
+        )
     frames_per_minute = int(frames_per_minute)
     ev = explained_variance_score(
         np.mean(y.reshape(n, frames_per_minute), axis=0),
@@ -1585,7 +1588,10 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
         Result produced by the operation.
     """
     if frames_per_minute is None:
-        frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
+        raise ValueError(
+            "GetNeuronVisresponse requires frames_per_minute from the configured "
+            "stimulus frame rate."
+        )
     frames_per_minute = int(frames_per_minute)
     train_idx = [int(i) for i in train_idx]
     test_idx = [int(i) for i in test_idx]

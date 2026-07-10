@@ -15,13 +15,6 @@ import numpy as np
 
 from .config import AnalysisConfig, GaborConfig, PipelineConfig, coarse_grid_dimensions, parse_literal
 
-DEFAULT_MOVIE_FRAME_RATE_HZ = 30
-SECONDS_PER_MINUTE = 60
-DEFAULT_FRAMES_PER_MINUTE = (
-    DEFAULT_MOVIE_FRAME_RATE_HZ * SECONDS_PER_MINUTE
-)
-
-
 @dataclass
 class SpikeData:
     """Spike responses and corrected neuron positions."""
@@ -311,6 +304,7 @@ def load_spikes_and_positions(
     threshold: float = 1.25,
     method: str = "frame2ttl",
     correct_positions: bool = True,
+    neural_cache_format: str = "npy",
 ) -> SpikeData:
     """Load spike responses and neuron positions for the configured workflow."""
     from . import time_alignment as ta
@@ -330,6 +324,7 @@ def load_spikes_and_positions(
         threshold=threshold,
         method=method,
         correct_positions=correct_positions,
+        output_format=neural_cache_format,
     )
 
     validate_spike_data(aligned.spikes, aligned.neuron_pos)
@@ -533,7 +528,10 @@ def run_simple_model(
     from . import Analysis_Utils as au
 
     if frames_per_minute is None:
-        frames_per_minute = DEFAULT_FRAMES_PER_MINUTE
+        raise ValueError(
+            "run_simple_model requires frames_per_minute from the configured "
+            "stimulus frame rate. Pass analysis.frames_per_minute."
+        )
 
     raw_best_params = np.array(rf_analysis.rf_results[1])
     smoothed_best_params = smooth_best_positions(

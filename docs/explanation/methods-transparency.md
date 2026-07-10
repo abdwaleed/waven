@@ -5,7 +5,7 @@ The GUI workflow is staged:
 1. Select two-photon or electrophysiology data.
 2. Build or reuse Gabor filter libraries.
 3. Decompose the stimulus into Gabor wavelet arrays.
-4. Align neural data or load existing `spikes.npy` and `pos.npy`.
+4. Align neural data or load existing `spikes` and `pos` caches in `.npy` or `.zarr` format.
 5. Run coarse receptive-field analysis.
 6. Inspect population maps and individual-neuron tuning.
 7. Run simple or full nonlinear models.

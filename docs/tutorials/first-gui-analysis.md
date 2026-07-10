@@ -22,7 +22,7 @@ files. The most important paths are:
 - `Movie Path`: stimulus movie, usually `.mp4`.
 - `Save Path`: default Gabor-library output path.
 - `Coarse Library Path` and `Fine Library Path`: explicit reusable library paths.
-- `Spks Path`: optional aligned `spikes.npy`; use `None` to run alignment.
+- `Spks Path`: optional aligned `spikes.npy` or `spikes.zarr`; use `None` to load an existing sibling `pos`/`spikes` cache pair or run alignment.
 - `Full Model Wavelet Path`: folder containing or receiving full-model wavelets.
 - `Full Model Save Path`: folder for model outputs, plot cache, and exports.
 

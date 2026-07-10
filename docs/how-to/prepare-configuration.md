@@ -73,7 +73,7 @@ These fields define the Gabor filters before they are applied to the movie.
 | `Path Directory` | path string | directory | yes | Working directory for coarse wavelet outputs and RF cache files. |
 | `Movie Path` | path string ending in `.mp4` or compatible video | file | yes | Stimulus movie used for downsampling and wavelet decomposition. |
 | `Library Path` | path string ending in `.npy` or `.zarr` | file or Zarr directory | yes | Backward-compatible library path. The GUI also tracks explicit coarse/fine library paths. |
-| `Spks Path` | path string, `"None"`, or `""` | file | optional | Existing aligned `spikes.npy`. Use `"None"` to run workflow-specific alignment instead. |
+| `Spks Path` | path string, `"None"`, or `""` | file or Zarr directory | optional | Existing aligned `spikes.npy` or `spikes.zarr`. The loader looks for a sibling `pos.npy` or `pos.zarr`; use `"None"` to search the experiment cache first and then run workflow-specific alignment if no valid pair exists. |
 | `Full Model Wavelet Path` | path string or `""` | directory | optional but recommended for full mode | Directory containing or receiving `dwt_videodata2_r/i.npy` or `.zarr`. |
 | `Full Model Save Path` | path string or `""` | directory | optional but recommended | Directory for model outputs, plot cache, and exports. |
 | `Plot Cache Path` | path string ending in `.pkl.gz` or `""` | file | optional | GUI cache file for expensive plot payloads. |

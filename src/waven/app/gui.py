@@ -57,6 +57,7 @@ from ..gui_support import (
 )
 from ..runtime.keep_awake import KeepAwake
 from ..runtime.task_control import OperationCancelled, check_cancelled, format_duration
+from ..storage.neural_cache import find_neural_cache_pair, load_neural_cache_pair
 _ANALYSIS_IMPORTS_READY = False
 _GABOR_IMPORTS_READY = False
 _WAVELET_IMPORTS_READY = False
@@ -113,22 +114,32 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     """
     global _WAVELET_IMPORTS_READY
     global coarseWavelet, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
+    global build_convolution_kernel_cache, convolution_kernel_cache_path
+    global waveletDecompositionConv, waveletDecompositionFullConv
     global video_downsample_chunk_size, convert_npy_to_zarr
     if _WAVELET_IMPORTS_READY:
         return
     from ..stimulus import coarseWavelet as _coarseWavelet
     from ..wavelets.decomposition import (
+        build_convolution_kernel_cache as _build_convolution_kernel_cache,
+        convolution_kernel_cache_path as _convolution_kernel_cache_path,
         downsample_video_binary as _downsample_video_binary,
         waveletDecomposition as _waveletDecomposition,
+        waveletDecompositionConv as _waveletDecompositionConv,
         waveletDecompositionFull as _waveletDecompositionFull,
+        waveletDecompositionFullConv as _waveletDecompositionFullConv,
     )
     from ..runtime.performance import video_downsample_chunk_size as _video_downsample_chunk_size
     from ..storage.wavelet_zarr import convert_npy_to_zarr as _convert_npy_to_zarr
 
     coarseWavelet = _coarseWavelet
+    build_convolution_kernel_cache = _build_convolution_kernel_cache
+    convolution_kernel_cache_path = _convolution_kernel_cache_path
     downsample_video_binary = _downsample_video_binary
     waveletDecomposition = _waveletDecomposition
+    waveletDecompositionConv = _waveletDecompositionConv
     waveletDecompositionFull = _waveletDecompositionFull
+    waveletDecompositionFullConv = _waveletDecompositionFullConv
     video_downsample_chunk_size = _video_downsample_chunk_size
     convert_npy_to_zarr = _convert_npy_to_zarr
     _WAVELET_IMPORTS_READY = True
@@ -264,7 +275,7 @@ def run(param_defaults, gabor_param, workflow=None):
         "Library Path": "Gabor Library Path",
         "Coarse Library Path": "Coarse Gabor Library Path",
         "Fine Library Path": "Fine Gabor Library Path",
-        "Spks Path": "Pre-aligned Spikes (.npy, optional)",
+        "Spks Path": "Pre-aligned Spikes (.npy/.zarr, optional)",
         "Full Model Wavelet Path": "Full-Model Wavelet Store",
         "Full Model Save Path": "Full-Model Results Directory",
         "Plot Cache Path": "Plot Cache File",
@@ -2025,6 +2036,45 @@ def run(param_defaults, gabor_param, workflow=None):
             return os.path.splitext(path_save)[0] + ".zarr"
         return path_save
 
+    def _convolution_kernel_cache_output_path(kind):
+        """Return where the compact convolution kernel cache should be stored."""
+        base_path = gabor_entries["Save Path"].get().strip()
+        library_path = _library_output_path(kind, base_path)
+        folder_path = os.path.dirname(library_path or base_path) or "."
+        return convolution_kernel_cache_path(folder_path, kind)
+
+    def _ensure_convolution_kernel_cache(kind, force=False):
+        """Build or reuse the compact convolution kernel cache for ``kind``."""
+        _ensure_wavelet_imports("convolution kernel cache construction")
+        sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
+        frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        phase_offsets = parse_literal(gabor_entries["Phases"].get(), "Phases")
+        n_theta = int(gabor_entries["N_thetas"].get())
+        kind = kind.lower()
+        if kind == "fine":
+            sigmas = _ordered_float_union(
+                sigmas,
+                parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
+            )
+            cache_frequencies = frequencies
+        elif kind == "coarse":
+            cache_frequencies = []
+        else:
+            raise ValueError(f"Unknown convolution kernel cache kind: {kind}")
+
+        cache_path = _convolution_kernel_cache_output_path(kind)
+        folder_path = os.path.dirname(cache_path) or "."
+        return build_convolution_kernel_cache(
+            folder_path,
+            kind,
+            sigmas,
+            n_theta,
+            phase_offsets=phase_offsets,
+            frequencies=cache_frequencies,
+            force=force,
+            cancel_event=_current_cancel_event(),
+        )
+
     def _selected_analysis_scale():
         """Return the currently selected analysis scale."""
         try:
@@ -2032,6 +2082,22 @@ def run(param_defaults, gabor_param, workflow=None):
         except NameError:
             return "coarse"
         return value if value in {"coarse", "full"} else "coarse"
+
+    def _selected_wavelet_backend():
+        """Return the selected wavelet decomposition backend."""
+        try:
+            value = wavelet_backend_var.get()
+        except NameError:
+            return "legacy"
+        return value if value in {"legacy", "convolution"} else "legacy"
+
+    def _selected_neural_cache_format():
+        """Return the selected aligned neural-cache output format."""
+        try:
+            value = neural_cache_format_var.get()
+        except NameError:
+            return "npy"
+        return value if value in {"npy", "zarr"} else "npy"
 
     def _scale_label(scale=None):
         """Return a short user-facing label for an analysis scale."""
@@ -2044,6 +2110,18 @@ def run(param_defaults, gabor_param, workflow=None):
 
     def create_selected_gabor_library():
         """Build the Gabor library required by the selected analysis scale."""
+        if _selected_wavelet_backend() == "convolution":
+            kind = _selected_gabor_kind()
+            description = "fine full-model" if kind == "fine" else "coarse RF"
+            update_progress(5, "Convolution kernel cache", f"Building {description} compact kernels")
+            print(
+                "Convolution backend selected: building compact Gabor kernels instead "
+                "of the giant flattened legacy library."
+            )
+            cache_path = _ensure_convolution_kernel_cache(kind)
+            print(f"Convolution kernel cache ready: {cache_path}")
+            update_progress(100, "Convolution kernel cache", "Compact kernels ready")
+            return
         create_gabor(_selected_gabor_kind())
 
     def create_gabor(kind="fine"):
@@ -2155,8 +2233,11 @@ def run(param_defaults, gabor_param, workflow=None):
         _ensure_wavelet_imports("stimulus wavelet generation")
         _raise_if_cancelled()
         scale = scale or _selected_analysis_scale()
+        backend = _selected_wavelet_backend()
         if scale not in {"coarse", "full"}:
             raise ValueError(f"Unknown wavelet decomposition scale: {scale}")
+        if backend not in {"legacy", "convolution"}:
+            raise ValueError(f"Unknown wavelet decomposition backend: {backend}")
         movpath = param_entries["Movie Path"].get().strip()
         if not movpath:
             print("Error: Movie Path is required.")
@@ -2171,6 +2252,7 @@ def run(param_defaults, gabor_param, workflow=None):
 
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        phase_offsets = parse_literal(gabor_entries["Phases"].get(), "Phases")
         fine_library_sigmas = _ordered_float_union(
             sigmas,
             parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
@@ -2184,10 +2266,20 @@ def run(param_defaults, gabor_param, workflow=None):
             coarse_lib_path = legacy_lib_path
         if not fine_lib_path:
             fine_lib_path = legacy_lib_path
-        if scale == "coarse" and not coarse_lib_path:
+        if backend == "legacy" and scale == "coarse" and not coarse_lib_path:
             raise ValueError("Coarse Library Path is required. Select Coarse RF and click Build Gabor Library first.")
-        if scale == "full" and not fine_lib_path:
+        if backend == "legacy" and scale == "full" and not fine_lib_path:
             raise ValueError("Fine Library Path is required. Select Full model and click Build Gabor Library first.")
+        coarse_kernel_cache_path = None
+        fine_kernel_cache_path = None
+        if backend == "convolution":
+            cache_kind = "fine" if scale == "full" else "coarse"
+            update_progress(4, "Convolution kernel cache", "Checking compact kernel cache")
+            cache_path = _ensure_convolution_kernel_cache(cache_kind)
+            if scale == "full":
+                fine_kernel_cache_path = cache_path
+            else:
+                coarse_kernel_cache_path = cache_path
         nx = int(param_entries["NX"].get())
         ny = int(param_entries["NY"].get())
         n_thetas = int(gabor_entries["N_thetas"].get())
@@ -2255,6 +2347,11 @@ def run(param_defaults, gabor_param, workflow=None):
                         save_path=coarse_downsample_path,
                         cancel_event=_current_cancel_event(),
                     )
+                if not _artifact_matches(coarse_downsample_path, (expected_frames, coarse_ny, coarse_nx)):
+                    raise FileNotFoundError(
+                        "Coarse downsampled stimulus was not created. "
+                        f"Check that Movie Path points to a readable video: {movpath}"
+                    )
                 _raise_if_cancelled()
                 videodata = np.load(coarse_downsample_path, mmap_mode="r")
                 videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
@@ -2266,14 +2363,26 @@ def run(param_defaults, gabor_param, workflow=None):
                     _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
                 else:
                     _register_cancel_cleanup_path(real_phase_path)
-                    waveletDecomposition(
-                        videodata,
-                        0,
-                        sigmas,
-                        wavelet_folder,
-                        coarse_lib_path,
-                        cancel_event=_current_cancel_event(),
-                    )
+                    if backend == "convolution":
+                        waveletDecompositionConv(
+                            videodata,
+                            0,
+                            sigmas,
+                            wavelet_folder,
+                            n_orientations=n_thetas,
+                            phase_offsets=phase_offsets,
+                            kernel_cache_path=coarse_kernel_cache_path,
+                            cancel_event=_current_cancel_event(),
+                        )
+                    else:
+                        waveletDecomposition(
+                            videodata,
+                            0,
+                            sigmas,
+                            wavelet_folder,
+                            coarse_lib_path,
+                            cancel_event=_current_cancel_event(),
+                        )
                     _write_recovery_step("coarse_phase_real_complete", path=real_phase_path)
 
                 update_progress(45, "Coarse wavelet decomposition", "Preparing coarse imaginary phase")
@@ -2283,14 +2392,26 @@ def run(param_defaults, gabor_param, workflow=None):
                     _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
                 else:
                     _register_cancel_cleanup_path(imag_phase_path)
-                    waveletDecomposition(
-                        videodata,
-                        1,
-                        sigmas,
-                        wavelet_folder,
-                        coarse_lib_path,
-                        cancel_event=_current_cancel_event(),
-                    )
+                    if backend == "convolution":
+                        waveletDecompositionConv(
+                            videodata,
+                            1,
+                            sigmas,
+                            wavelet_folder,
+                            n_orientations=n_thetas,
+                            phase_offsets=phase_offsets,
+                            kernel_cache_path=coarse_kernel_cache_path,
+                            cancel_event=_current_cancel_event(),
+                        )
+                    else:
+                        waveletDecomposition(
+                            videodata,
+                            1,
+                            sigmas,
+                            wavelet_folder,
+                            coarse_lib_path,
+                            cancel_event=_current_cancel_event(),
+                        )
                     _write_recovery_step("coarse_phase_imaginary_complete", path=imag_phase_path)
 
                 update_progress(68, "Coarse wavelet decomposition", "Generating coarse RF cache")
@@ -2379,6 +2500,11 @@ def run(param_defaults, gabor_param, workflow=None):
                 save_path=full_downsample_path,
                 cancel_event=_current_cancel_event(),
             )
+        if not _artifact_matches(full_downsample_path, (expected_frames, ny, nx)):
+            raise FileNotFoundError(
+                "Full-resolution downsampled stimulus was not created. "
+                f"Check that Movie Path points to a readable video: {movpath}"
+            )
         _raise_if_cancelled()
         videodata = np.load(full_downsample_path, mmap_mode="r")
         videodata = videodata.astype(int) - np.logical_not(videodata).astype(int)
@@ -2408,18 +2534,33 @@ def run(param_defaults, gabor_param, workflow=None):
                 continue
             update_progress(45 + phase * 25, "Full wavelet decomposition", f"Writing full-model phase {phase}")
             _register_cancel_cleanup_path(target)
-            waveletDecompositionFull(
-                videodata,
-                phase,
-                sigmas_full,
-                frequencies,
-                full_output,
-                fine_lib_path,
-                library_sigmas=fine_library_sigmas,
-                output_format=output_format,
-                zarr_chunks=zarr_chunks if is_zarr_wavelet else None,
-                cancel_event=_current_cancel_event(),
-            )
+            if backend == "convolution":
+                waveletDecompositionFullConv(
+                    videodata,
+                    phase,
+                    sigmas_full,
+                    frequencies,
+                    full_output,
+                    n_orientations=n_thetas,
+                    phase_offsets=phase_offsets,
+                    output_format=output_format,
+                    zarr_chunks=zarr_chunks if is_zarr_wavelet else None,
+                    kernel_cache_path=fine_kernel_cache_path,
+                    cancel_event=_current_cancel_event(),
+                )
+            else:
+                waveletDecompositionFull(
+                    videodata,
+                    phase,
+                    sigmas_full,
+                    frequencies,
+                    full_output,
+                    fine_lib_path,
+                    library_sigmas=fine_library_sigmas,
+                    output_format=output_format,
+                    zarr_chunks=zarr_chunks if is_zarr_wavelet else None,
+                    cancel_event=_current_cancel_event(),
+                )
             if not _artifact_matches(target, full_model_shape):
                 raise ValueError(f"Full-model wavelets were written with an unexpected shape: {target}")
             _write_recovery_step(f"full_model_phase_{phase}_complete", path=target)
@@ -2589,7 +2730,97 @@ def run(param_defaults, gabor_param, workflow=None):
         if path.endswith(("/", "\\")):
             return path
         return path + os.sep
-    
+
+    def _neural_alignment_context():
+        """Return parsed inputs needed to load or create aligned neural caches."""
+        data_dirs = _parse_data_dir(param_entries["Dir"].get())
+        exp_info = parse_literal(param_entries["Experiment Info"].get(), "Experiment Info")
+        block_end = int(param_entries["Block End"].get())
+        nb_frames = int(param_entries["Number of Frames"].get())
+        pathdata = Path(data_dirs[0]) / exp_info[0] / exp_info[1] / str(exp_info[2])
+        pathsuite2p = pathdata / "suite2p"
+        if workflow == WORKFLOW_2P:
+            n_planes = int(param_entries["Number of Planes"].get())
+            resolution = float(param_entries["Resolution"].get())
+            sampling_rate = None
+        else:
+            n_planes = None
+            resolution = None
+            sampling_rate = float(param_entries["Sampling Rate (samples / sec)"].get())
+        return {
+            "data_dirs": data_dirs,
+            "experiment_info": exp_info,
+            "pathdata": pathdata,
+            "suite2p_dir": pathsuite2p,
+            "block_end": block_end,
+            "n_planes": n_planes,
+            "nb_frames": nb_frames,
+            "resolution": resolution,
+            "sampling_rate": sampling_rate,
+        }
+
+    def create_neural_cache():
+        """Create or validate the aligned ``pos`` and ``spikes`` cache pair."""
+        context = _neural_alignment_context()
+        spks_text = param_entries["Spks Path"].get().strip()
+        if spks_text.lower() not in ("", "none", "null"):
+            spks_path = Path(spks_text)
+            update_progress(10, "Neural cache", "Validating existing aligned cache")
+            spks, neuron_pos, loaded_spks_path, loaded_pos_path = load_neural_cache_pair(
+                spks_path.parent,
+                spks_path,
+                mmap_mode=None,
+            )
+            print(f"Validated aligned spikes cache: {loaded_spks_path} {tuple(spks.shape)}")
+            print(f"Validated neuron position cache: {loaded_pos_path} {tuple(np.asarray(neuron_pos).shape)}")
+            param_entries["Spks Path"].delete(0, tk.END)
+            param_entries["Spks Path"].insert(0, str(loaded_spks_path))
+            update_progress(100, "Neural cache", "Existing cache ready")
+            return True
+
+        cache_pair = find_neural_cache_pair(context["pathdata"])
+        if cache_pair is not None:
+            update_progress(20, "Neural cache", "Loading existing aligned cache")
+            spks, neuron_pos, loaded_spks_path, loaded_pos_path = load_neural_cache_pair(context["pathdata"])
+            print(f"Resume: found aligned spikes cache: {loaded_spks_path} {tuple(spks.shape)}")
+            print(f"Resume: found neuron position cache: {loaded_pos_path} {tuple(np.asarray(neuron_pos).shape)}")
+            param_entries["Spks Path"].delete(0, tk.END)
+            param_entries["Spks Path"].insert(0, str(loaded_spks_path))
+            update_progress(100, "Neural cache", "Existing cache ready")
+            return True
+
+        update_progress(10, "Neural cache", "Aligning neural data")
+        from .. import time_alignment as ta
+
+        aligned = ta.load_aligned_spikes(
+            workflow,
+            experiment_info=context["experiment_info"],
+            data_dir=Path(context["data_dirs"][0]),
+            data_dir_strings=context["data_dirs"],
+            suite2p_dir=context["suite2p_dir"],
+            block_end=context["block_end"],
+            n_planes=context["n_planes"],
+            nb_frames=context["nb_frames"],
+            resolution=context["resolution"],
+            sampling_rate=context["sampling_rate"],
+            threshold=1.25,
+            method="frame2ttl",
+            save_dir=context["pathdata"],
+            output_format=_selected_neural_cache_format(),
+        )
+        cache_pair = find_neural_cache_pair(context["pathdata"])
+        if cache_pair is None:
+            raise FileNotFoundError(
+                f"Alignment finished but no spikes/pos cache pair was found in {context['pathdata']}."
+            )
+        saved_spks_path, saved_pos_path = cache_pair
+        print(f"Created aligned spikes cache: {saved_spks_path} {tuple(aligned.spikes.shape)}")
+        print(f"Created neuron position cache: {saved_pos_path} {tuple(np.asarray(aligned.neuron_pos).shape)}")
+        param_entries["Spks Path"].delete(0, tk.END)
+        param_entries["Spks Path"].insert(0, str(saved_spks_path))
+        update_progress(100, "Neural cache", "Cache created")
+        return True
+
     def plot_data():
         """Function for plot data.
 
@@ -2653,46 +2884,63 @@ def run(param_defaults, gabor_param, workflow=None):
         sigmas_deg = np.trunc(2 * deg_per_pix * sigmas * 100) / 100
 
         if spks_path.strip().lower() in ("", "none", "null"):
-            update_progress(10, "Coarse receptive-field analysis", "Aligning neural data")
-            from .. import time_alignment as ta
+            cache_pair = find_neural_cache_pair(Path(pathdata))
+            if cache_pair is not None:
+                update_progress(10, "Coarse receptive-field analysis", "Loading aligned neural cache")
+                spks, neuron_pos, saved_spks_path, saved_pos_path = load_neural_cache_pair(Path(pathdata))
+                print(f"Loaded aligned spikes from: {saved_spks_path}")
+                print(f"Loaded neuron positions from: {saved_pos_path}")
+            else:
+                update_progress(10, "Coarse receptive-field analysis", "Aligning neural data")
+                from .. import time_alignment as ta
 
-            try:
-                aligned = ta.load_aligned_spikes(
-                    workflow,
-                    experiment_info=exp_info,
-                    data_dir=Path(data_dirs[0]),
-                    data_dir_strings=data_dirs,
-                    suite2p_dir=Path(pathsuite2p),
-                    block_end=block_end,
-                    n_planes=n_planes,
-                    nb_frames=nb_frames,
-                    resolution=resolution,
-                    sampling_rate=sampling_rate,
-                    threshold=1.25,
-                    method='frame2ttl',
-                    save_dir=Path(pathdata),
-                )
-            except NotImplementedError as exc:
-                print(exc)
-                return False
-            spks = aligned.spikes
-            neuron_pos = aligned.neuron_pos
-            saved_spks_path = Path(pathdata) / "spikes.npy"
-            if saved_spks_path.exists():
+                try:
+                    aligned = ta.load_aligned_spikes(
+                        workflow,
+                        experiment_info=exp_info,
+                        data_dir=Path(data_dirs[0]),
+                        data_dir_strings=data_dirs,
+                        suite2p_dir=Path(pathsuite2p),
+                        block_end=block_end,
+                        n_planes=n_planes,
+                        nb_frames=nb_frames,
+                        resolution=resolution,
+                        sampling_rate=sampling_rate,
+                        threshold=1.25,
+                        method='frame2ttl',
+                        save_dir=Path(pathdata),
+                        output_format=_selected_neural_cache_format(),
+                    )
+                except NotImplementedError as exc:
+                    print(exc)
+                    return False
+                spks = aligned.spikes
+                neuron_pos = aligned.neuron_pos
+                cache_pair = find_neural_cache_pair(Path(pathdata))
+                saved_spks_path = cache_pair[0] if cache_pair else None
+                if saved_spks_path is not None:
+                    print(f"Saved aligned neural cache as {_selected_neural_cache_format().upper()}: {saved_spks_path}")
+            if saved_spks_path is not None and saved_spks_path.exists():
                 param_entries["Spks Path"].delete(0, tk.END)
                 param_entries["Spks Path"].insert(0, str(saved_spks_path))
             if workflow == WORKFLOW_2P:
+                neuron_pos = np.asarray(neuron_pos)
                 neuron_pos[:, 1] = abs(neuron_pos[:, 1] - np.max(neuron_pos[:, 1]))
         else:
             try:
                 update_progress(10, "Coarse receptive-field analysis", "Loading pre-aligned spikes")
-                spks = np.load(spks_path)
-                parent_dir = os.path.dirname(spks_path)
-                neuron_pos = np.load(os.path.join(parent_dir, 'pos.npy'))
+                spks, neuron_pos, loaded_spks_path, loaded_pos_path = load_neural_cache_pair(
+                    Path(spks_path).parent,
+                    Path(spks_path),
+                    mmap_mode=None,
+                )
+                print(f"Loaded aligned spikes from: {loaded_spks_path}")
+                print(f"Loaded neuron positions from: {loaded_pos_path}")
             except Exception as e:
                 print(f"File not found: {e}")
                 return False
 
+        neuron_pos = np.asarray(neuron_pos)
         print("Loading neural data and coarse wavelets...")
         update_progress(25, "Coarse receptive-field analysis", "Loading coarse wavelets")
         _write_recovery_step("loading_neural_data")
@@ -3387,11 +3635,13 @@ def run(param_defaults, gabor_param, workflow=None):
         state = {
             "workflow": workflow,
             "analysis_scale": _selected_analysis_scale(),
+            "wavelet_backend": _selected_wavelet_backend(),
             "gabor": {key: entry.get() for key, entry in gabor_entries.items()},
             "analysis": {key: entry.get() for key, entry in param_entries.items()},
             "save_options": {
                 "gabor_format": gabor_format_var.get(),
                 "wavelet_format": wavelet_format_var.get(),
+                "neural_cache_format": _selected_neural_cache_format(),
             },
         }
         path = filedialog.asksaveasfilename(
@@ -3430,6 +3680,10 @@ def run(param_defaults, gabor_param, workflow=None):
             if loaded_scale in {"coarse", "full"}:
                 analysis_scale_var.set(loaded_scale)
                 set_analysis_scale_from_panel(loaded_scale)
+            loaded_backend = state.get("wavelet_backend")
+            if loaded_backend in {"legacy", "convolution"}:
+                wavelet_backend_var.set(loaded_backend)
+                set_wavelet_backend_from_panel(loaded_backend)
             for key, value in state.get("gabor", {}).items():
                 if key in gabor_entries:
                     gabor_entries[key].delete(0, tk.END)
@@ -3443,6 +3697,9 @@ def run(param_defaults, gabor_param, workflow=None):
             save_options = state.get("save_options", {})
             gabor_format_var.set(save_options.get("gabor_format", gabor_format_var.get()))
             wavelet_format_var.set(save_options.get("wavelet_format", wavelet_format_var.get()))
+            neural_cache_format = save_options.get("neural_cache_format")
+            if neural_cache_format in {"npy", "zarr"}:
+                neural_cache_format_var.set(neural_cache_format)
             refresh_size_estimates()
             print(f"Loaded GUI state from: {path}")
         except Exception as exc:
@@ -4058,14 +4315,21 @@ def run(param_defaults, gabor_param, workflow=None):
     workflow_segment.set(workflow)
 
     analysis_scale_var = tk.StringVar(value="coarse")
+    wavelet_backend_var = tk.StringVar(value="legacy")
+    neural_cache_format_var = tk.StringVar(value="npy")
 
     def refresh_scale_controls():
         """Refresh labels and estimates for the selected analysis scale."""
         scale = _selected_analysis_scale()
         label = _scale_label(scale)
+        backend = _selected_wavelet_backend()
+        backend_label = "Convolution" if backend == "convolution" else "Legacy"
         try:
-            btn_submit_gabor.configure(text=f"Build Gabor Library ({label})")
-            btn_submit_wavelet.configure(text=f"Run Wavelet Decomposition ({label})")
+            if backend == "convolution":
+                btn_submit_gabor.configure(text=f"Prepare Convolution Kernels ({label})")
+            else:
+                btn_submit_gabor.configure(text=f"Build Gabor Library ({label})")
+            btn_submit_wavelet.configure(text=f"Run Wavelet Decomposition ({label}, {backend_label})")
             btn_run_model_plots.configure(text=f"Run Model Plots ({label})")
             if scale == "full":
                 wavelet_format_segment.configure(state="normal")
@@ -4080,6 +4344,13 @@ def run(param_defaults, gabor_param, workflow=None):
         if value not in {"coarse", "full"}:
             return
         analysis_scale_var.set(value)
+        refresh_scale_controls()
+
+    def set_wavelet_backend_from_panel(value):
+        """Update the active legacy/convolution wavelet backend."""
+        if value not in {"legacy", "convolution"}:
+            return
+        wavelet_backend_var.set(value)
         refresh_scale_controls()
 
     scale_frame = ctk.CTkFrame(frame_session, fg_color="transparent")
@@ -4109,6 +4380,33 @@ def run(param_defaults, gabor_param, workflow=None):
     analysis_scale_segment.pack(fill=tk.X)
     analysis_scale_segment.set(analysis_scale_var.get())
 
+    backend_frame = ctk.CTkFrame(frame_session, fg_color="transparent")
+    backend_frame.pack(fill=tk.X, pady=(8, 8))
+    ctk.CTkLabel(
+        backend_frame,
+        text="Wavelet backend",
+        text_color=text_color,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).pack(anchor="w", pady=(0, 4))
+    wavelet_backend_segment = ctk.CTkSegmentedButton(
+        backend_frame,
+        values=["legacy", "convolution"],
+        variable=wavelet_backend_var,
+        command=set_wavelet_backend_from_panel,
+        height=28,
+        corner_radius=6,
+        border_width=1,
+        fg_color="#E5E7EB",
+        selected_color=primary_btn,
+        selected_hover_color="#1D4ED8",
+        unselected_color="#F3F4F6",
+        unselected_hover_color="#E5E7EB",
+        text_color="#FFFFFF",
+        text_color_disabled="#9CA3AF",
+    )
+    wavelet_backend_segment.pack(fill=tk.X)
+    wavelet_backend_segment.set(wavelet_backend_var.get())
+
     btn_load_state = ctk.CTkButton(
         frame_session,
         text="Load Configuration",
@@ -4126,8 +4424,8 @@ def run(param_defaults, gabor_param, workflow=None):
     )
     btn_save_state.pack(fill=tk.X, pady=3)
 
-    # --- 1 · Gabor filter bank ---
-    frame_gabor = ttk.LabelFrame(frame_left, text="1 · Gabor Filter Bank", padding=15)
+    # --- Gabor filter bank ---
+    frame_gabor = ttk.LabelFrame(frame_left, text="2 - Gabor Filter Bank", padding=15)
     frame_gabor.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10), padx=10)
     frame_gabor.columnconfigure(1, weight=1)
 
@@ -4195,8 +4493,8 @@ def run(param_defaults, gabor_param, workflow=None):
     )
     gabor_size_label.grid(row=len(gabor_param)+2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
-    # --- 2 · Stimulus wavelet pipeline ---
-    frame_processing = ttk.LabelFrame(frame_left, text="2 · Stimulus Wavelet Pipeline", padding=15)
+    # --- Stimulus wavelet pipeline ---
+    frame_processing = ttk.LabelFrame(frame_left, text="3 - Stimulus Wavelet Pipeline", padding=15)
     frame_processing.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
     wavelet_format_var = tk.StringVar(value="zarr")
@@ -4277,7 +4575,6 @@ def run(param_defaults, gabor_param, workflow=None):
             "Experiment Info",
             "Movie Path",
             "Library Path",
-            "Spks Path",
             "Path Directory",
             "Full Model Wavelet Path",
             "Full Model Save Path",
@@ -4321,7 +4618,7 @@ def run(param_defaults, gabor_param, workflow=None):
             existing_values = {
                 key: entry.get()
                 for key, entry in param_entries.items()
-                if key != "Neuron ID"
+                if key not in {"Neuron ID", "Spks Path"}
             }
         if loaded_values:
             existing_values.update({str(key): str(value) for key, value in loaded_values.items()})
@@ -4329,7 +4626,7 @@ def run(param_defaults, gabor_param, workflow=None):
         for widget in frame_params.winfo_children():
             widget.destroy()
         for key in list(param_entries):
-            if key != "Neuron ID":
+            if key not in {"Neuron ID", "Spks Path"}:
                 param_entries.pop(key, None)
 
         workflow_param_keys, filtered_param_defaults = workflow_defaults(workflow)
@@ -4348,8 +4645,60 @@ def run(param_defaults, gabor_param, workflow=None):
     render_parameter_fields()
     refresh_size_estimates()
 
-    # --- 3 · Neural & RF analysis ---
-    frame_analysis = ttk.LabelFrame(frame_left, text="3 · Neural & RF Analysis", padding=15)
+    # --- Neural spike/position cache ---
+    frame_neural_cache = ttk.LabelFrame(frame_left, text="1 - Neural Spike/Position Cache", padding=15)
+    frame_neural_cache.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    frame_neural_cache.columnconfigure(1, weight=1)
+
+    add_config_row(
+        frame_neural_cache,
+        "Spks Path",
+        param_defaults.get("Spks Path", "None"),
+        param_entries,
+        0,
+        frame_color,
+        ANALYSIS_LABELS,
+    )
+
+    neural_cache_format_frame = ctk.CTkFrame(frame_neural_cache, fg_color="transparent")
+    neural_cache_format_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    ctk.CTkLabel(
+        neural_cache_format_frame,
+        text="Create as:",
+        text_color=muted_text,
+    ).pack(side=tk.LEFT)
+
+    neural_cache_format_segment = ctk.CTkSegmentedButton(
+        neural_cache_format_frame,
+        values=["npy", "zarr"],
+        variable=neural_cache_format_var,
+        height=26,
+        corner_radius=6,
+        border_width=1,
+        fg_color="#E5E7EB",
+        selected_color=primary_btn,
+        selected_hover_color="#1D4ED8",
+        unselected_color="#F3F4F6",
+        unselected_hover_color="#E5E7EB",
+        text_color="#FFFFFF",
+        text_color_disabled="#9CA3AF",
+    )
+    neural_cache_format_segment.pack(side=tk.LEFT, padx=(10, 0))
+    neural_cache_format_segment.set(neural_cache_format_var.get())
+
+    btn_create_neural_cache = ctk.CTkButton(
+        frame_neural_cache,
+        text="Create pos/spikes Cache (.npy or .zarr)",
+        height=34,
+        corner_radius=6,
+        fg_color=primary_btn,
+        hover_color="#1D4ED8",
+        command=run_in_thread(create_neural_cache, "Neural cache creation"),
+    )
+    btn_create_neural_cache.grid(row=2, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+
+    # --- Neural & RF analysis ---
+    frame_analysis = ttk.LabelFrame(frame_left, text="4 - Neural & RF Analysis", padding=15)
     frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
     show_sem_var = tk.BooleanVar(value=False)
@@ -4424,8 +4773,8 @@ def run(param_defaults, gabor_param, workflow=None):
     )
     btn_run_model_plots.pack(fill=tk.X, pady=(8, 0))
 
-    # --- 4 · Export ---
-    frame_export = ttk.LabelFrame(frame_left, text="4 · Export", padding=15)
+    # --- Export ---
+    frame_export = ttk.LabelFrame(frame_left, text="5 - Export", padding=15)
     frame_export.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
     btn_export_all_results = ctk.CTkButton(
@@ -4458,6 +4807,7 @@ def run(param_defaults, gabor_param, workflow=None):
     frame_controls.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 5))
 
     all_buttons = [
+        btn_create_neural_cache,
         btn_submit_gabor,
         btn_submit_wavelet,
         btn_submit_plot,
@@ -4470,6 +4820,27 @@ def run(param_defaults, gabor_param, workflow=None):
         btn_load_state,
     ]
     refresh_scale_controls()
+
+    for section in (
+        frame_session,
+        frame_params,
+        frame_neural_cache,
+        frame_gabor,
+        frame_processing,
+        frame_analysis,
+        frame_export,
+        frame_controls,
+    ):
+        section.pack_forget()
+
+    frame_session.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10), padx=10)
+    frame_params.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    frame_neural_cache.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    frame_gabor.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10), padx=10)
+    frame_processing.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    frame_export.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    frame_controls.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 5))
 
     try:
         root.mainloop()

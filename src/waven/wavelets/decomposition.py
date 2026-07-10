@@ -24,6 +24,8 @@ import numpy as np
 import skimage
 import skimage.transform
 import torch
+import torch.nn.functional as F
+from skimage.filters import gabor_kernel
 from tqdm import tqdm
 
 from ..runtime.performance import resolve_compute_device, video_downsample_chunk_size, wavelet_filter_chunk_size
@@ -140,6 +142,232 @@ def _project_library_phase(
         del lib_chunk, product
 
 
+def _legacy_frequency_for_sigma(sigma):
+    """Return the coupled coarse-library frequency used by legacy Gabor filters."""
+    return (-0.016 * float(sigma)) + 0.148
+
+
+def _phase_offset_from_index(phase, phase_offsets=None):
+    """Return the configured phase offset for a legacy phase index."""
+    phase_index = int(phase)
+    if phase_offsets is None:
+        phase_offsets = (0.0, np.pi / 2)
+    phase_offsets = tuple(float(value) for value in phase_offsets)
+    if phase_index < 0 or phase_index >= len(phase_offsets):
+        raise ValueError(
+            f"Phase index {phase_index} is outside the configured phase offsets "
+            f"({len(phase_offsets)} phases)."
+        )
+    return phase_offsets[phase_index]
+
+
+def _gabor_kernel_for_conv(angle, sigma, phase, frequency=None, coupled_frequency=False):
+    """Return a compact 2D kernel matching ``makeGaborFilter`` orientation/layout.
+
+    ``makeGaborFilter`` places ``gabor_kernel(...).real`` on an ``x, y`` canvas,
+    then transposes the cropped frame so it aligns with video frames stored as
+    ``y, x``.  PyTorch ``conv2d`` receives kernels as ``height, width``;
+    therefore the compact convolution kernel is the transposed Gabor real part.
+    """
+    if coupled_frequency:
+        frequency = _legacy_frequency_for_sigma(sigma)
+    if frequency is None:
+        raise ValueError("frequency is required unless coupled_frequency=True")
+    kernel = gabor_kernel(
+        frequency=float(frequency),
+        theta=float(angle),
+        sigma_x=float(sigma),
+        sigma_y=float(sigma),
+        offset=float(phase),
+    ).real
+    return np.asarray(kernel.T, dtype=np.float32)
+
+
+def _conv_frame_chunk_size(num_frames):
+    """Return a conservative frame chunk size for convolution decomposition."""
+    if resolve_compute_device(prefer_gpu=True) == "cuda":
+        return max(1, min(int(num_frames), 256))
+    return max(1, min(int(num_frames), 128))
+
+
+def _center_pad_kernels(kernels):
+    """Pad variable-sized Gabor kernels into one center-aligned bank."""
+    max_h = max(kernel.shape[0] for kernel in kernels)
+    max_w = max(kernel.shape[1] for kernel in kernels)
+    if max_h % 2 == 0:
+        max_h += 1
+    if max_w % 2 == 0:
+        max_w += 1
+
+    bank = np.zeros((len(kernels), max_h, max_w), dtype=np.float32)
+    for idx, kernel in enumerate(kernels):
+        h, w = kernel.shape
+        top = (max_h - h) // 2
+        left = (max_w - w) // 2
+        bank[idx, top:top + h, left:left + w] = kernel
+    return bank
+
+
+@torch.no_grad()
+def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_event=None):
+    """Yield ``conv2d`` responses as ``(start, end, chunk, x, y, theta)`` chunks."""
+    kernel_array = _center_pad_kernels(kernels)
+    kernel_tensor = torch.as_tensor(kernel_array[:, None, :, :], dtype=torch.float32, device=device)
+    pad_y = int(kernel_array.shape[1] // 2)
+    pad_x = int(kernel_array.shape[2] // 2)
+    num_frames = int(videodata.shape[0])
+
+    for start in range(0, num_frames, frame_chunk_size):
+        check_cancelled(cancel_event)
+        end = min(start + frame_chunk_size, num_frames)
+        frames = np.asarray(videodata[start:end], dtype=np.float32)
+        frame_tensor = torch.as_tensor(frames[:, None, :, :], dtype=torch.float32, device=device)
+        response = F.conv2d(frame_tensor, kernel_tensor, padding=(pad_y, pad_x))
+        yield start, end, response.permute(0, 3, 2, 1).cpu().numpy()
+        del frame_tensor, response
+
+
+def convolution_kernel_cache_path(folder_path, kind):
+    """Return the compact convolution-kernel cache path for an analysis scale."""
+    kind = str(kind).lower()
+    if kind not in {"coarse", "fine"}:
+        raise ValueError(f"Unknown convolution kernel cache kind: {kind}")
+    return os.path.join(folder_path, f"gabor_kernels_{kind}_conv.npz")
+
+
+def _kernel_cache_matches(cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets):
+    """Return whether an existing compact-kernel cache matches requested metadata."""
+    if not cache_path or not os.path.exists(cache_path):
+        return False
+    try:
+        with np.load(cache_path) as cache:
+            cache_kind = str(cache["kind"].item())
+            cache_sigmas = np.asarray(cache["sigmas"], dtype=float)
+            cache_frequencies = np.asarray(cache["frequencies"], dtype=float)
+            cache_phases = np.asarray(cache["phase_offsets"], dtype=float)
+            cache_orientations = int(cache["n_orientations"].item())
+            cache_kernels = cache["kernels"]
+    except Exception as exc:
+        print(f"Could not read convolution kernel cache {cache_path}: {exc}")
+        return False
+
+    frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
+    phase_offsets = np.asarray(phase_offsets if phase_offsets is not None else (0.0, np.pi / 2), dtype=float)
+    expected_prefix = (len(phase_offsets), len(sigmas), max(1, len(frequencies)))
+    if cache_kind != str(kind).lower() or cache_orientations != int(n_orientations):
+        return False
+    if tuple(cache_kernels.shape[:3]) != expected_prefix:
+        return False
+    if cache_sigmas.shape != np.asarray(sigmas, dtype=float).shape:
+        return False
+    if cache_frequencies.shape != frequencies.shape:
+        return False
+    if cache_phases.shape != phase_offsets.shape:
+        return False
+    return (
+        np.allclose(cache_sigmas, np.asarray(sigmas, dtype=float))
+        and np.allclose(cache_frequencies, frequencies)
+        and np.allclose(cache_phases, phase_offsets)
+    )
+
+
+def build_convolution_kernel_cache(
+    folder_path,
+    kind,
+    sigmas,
+    n_orientations,
+    phase_offsets=None,
+    frequencies=None,
+    force=False,
+    cancel_event=None,
+):
+    """Build or reuse the compact Gabor-kernel cache used by convolution wavelets.
+
+    The cache stores center-padded spatial kernels, not flattened image-sized
+    filter libraries.  Coarse caches use the legacy sigma-coupled frequency;
+    fine caches include the independent frequency axis used by the full model.
+    """
+    kind = str(kind).lower()
+    if kind not in {"coarse", "fine"}:
+        raise ValueError(f"Unknown convolution kernel cache kind: {kind}")
+
+    os.makedirs(folder_path, exist_ok=True)
+    sigmas = np.asarray(sigmas, dtype=float)
+    phase_offsets = np.asarray(phase_offsets if phase_offsets is not None else (0.0, np.pi / 2), dtype=float)
+    frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
+    if kind == "coarse":
+        frequencies_for_cache = np.asarray([], dtype=float)
+    else:
+        frequencies_for_cache = frequencies if frequencies.size else np.asarray([0.0], dtype=float)
+
+    cache_path = convolution_kernel_cache_path(folder_path, kind)
+    if not force and _kernel_cache_matches(
+        cache_path,
+        kind,
+        sigmas,
+        frequencies_for_cache,
+        n_orientations,
+        phase_offsets,
+    ):
+        print(f"Resume: found completed convolution kernel cache, reusing {cache_path}")
+        return cache_path
+
+    thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
+    kernels = []
+    for phase_offset in phase_offsets:
+        for sigma in sigmas:
+            freq_iter = frequencies_for_cache if kind == "fine" else np.asarray([0.0], dtype=float)
+            for frequency in freq_iter:
+                check_cancelled(cancel_event)
+                if kind == "coarse":
+                    orientation_kernels = [
+                        _gabor_kernel_for_conv(theta, sigma, phase_offset, coupled_frequency=True)
+                        for theta in thetas
+                    ]
+                else:
+                    orientation_kernels = [
+                        _gabor_kernel_for_conv(theta, sigma, phase_offset, frequency=frequency)
+                        for theta in thetas
+                    ]
+                kernels.extend(orientation_kernels)
+
+    padded = _center_pad_kernels(kernels)
+    kernel_shape = (
+        len(phase_offsets),
+        len(sigmas),
+        max(1, len(frequencies_for_cache)),
+        int(n_orientations),
+        padded.shape[-2],
+        padded.shape[-1],
+    )
+    kernel_bank = padded.reshape(kernel_shape)
+    np.savez(
+        cache_path,
+        kind=np.asarray(kind),
+        sigmas=sigmas,
+        frequencies=frequencies_for_cache,
+        phase_offsets=phase_offsets,
+        n_orientations=np.asarray(int(n_orientations)),
+        kernels=kernel_bank,
+    )
+    print(f"Convolution kernel cache saved to: {cache_path}")
+    return cache_path
+
+
+def _load_convolution_kernel_cache(cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets):
+    """Load and validate a compact convolution-kernel cache."""
+    if not cache_path:
+        return None
+    frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
+    if not _kernel_cache_matches(cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets):
+        raise ValueError(
+            "Convolution kernel cache does not match the current configuration. "
+            f"Rebuild the Gabor library for the selected backend, or remove this cache: {cache_path}"
+        )
+    with np.load(cache_path) as cache:
+        return np.asarray(cache["kernels"], dtype=np.float32)
+
+
 def _process_binary_chunk(frames_buffer, xi, xe, yi, ye, shape, actual_len):
     """Background worker for binary downsampling."""
     chunk_arr = np.stack(frames_buffer, axis=0) > 100
@@ -173,8 +401,7 @@ def downsample_video_binary(
 
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
-        print(f"Error opening video: {path}")
-        return
+        raise IOError(f"Cannot open video file for downsampling: {path}")
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     ratio_x, ratio_y = ratios
@@ -186,7 +413,9 @@ def downsample_video_binary(
     
     # Grab one frame to dynamically determine cropping bounds
     ret, first_img = cap.read()
-    if not ret: return
+    if not ret:
+        cap.release()
+        raise IOError(f"Cannot read the first frame from video: {path}")
     img_gray = first_img[:, :, 0] > 100
     xe = int(ratio_y * img_gray.shape[0])
     ye = int(ratio_x * img_gray.shape[1])
@@ -237,6 +466,7 @@ def downsample_video_binary(
         frame_idx += rem_size
         print(progress_message("Video downsample", frame_idx, total_frames, progress_start, unit="frames"))
         
+    cap.release()
     output_mmap.flush()
     del output_mmap
     gc.collect()
@@ -614,6 +844,220 @@ def waveletDecompositionFull(
         print("Saving full-model array to disk...", end="\n\n")
         np.save(save_path, wt_final)
         print(f"Success! Saved full-model array to {save_path}", end="\n\n")
+
+
+def waveletDecompositionConv(
+    videodata,
+    phase,
+    sigmas,
+    folder_path,
+    n_orientations,
+    phase_offsets=None,
+    kernel_cache_path=None,
+    frame_chunk_size=None,
+    cancel_event=None,
+):
+    """Decompose a movie using compact Gabor kernels and ``torch.conv2d``.
+
+    This is the coarse RF convolution backend. It mirrors the legacy coarse
+    library path by using sigma-coupled frequencies and writing
+    ``dwt_videodata_{phase}.npy`` with shape
+    ``(time, nx, ny, n_orientations, n_sigmas)``.
+    """
+    device = resolve_compute_device(prefer_gpu=True)
+    num_frames, ny, nx = videodata.shape
+    sigmas = np.asarray(sigmas, dtype=float)
+    thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
+    phase_offset = _phase_offset_from_index(phase, phase_offsets)
+    kernel_cache = _load_convolution_kernel_cache(
+        kernel_cache_path,
+        "coarse",
+        sigmas,
+        [],
+        n_orientations,
+        phase_offsets,
+    ) if kernel_cache_path else None
+    final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
+    save_path = os.path.join(folder_path, f"dwt_videodata_{phase}.npy")
+    required_bytes = _array_bytes(final_shape, np.float32)
+
+    if has_enough_ram(required_bytes, safety_margin=1.20):
+        wt_final = np.zeros(final_shape, dtype=np.float32)
+        use_mmap = False
+        print(f"Using RAM output for convolution coarse phase {phase} ({required_bytes / (1024**3):.2f} GB).")
+    else:
+        wt_final = np.lib.format.open_memmap(save_path, mode="w+", dtype=np.float32, shape=final_shape)
+        use_mmap = True
+        print(f"Using disk-backed output for convolution coarse phase {phase}; RAM is below safe working set.")
+
+    if frame_chunk_size is None:
+        frame_chunk_size = _conv_frame_chunk_size(num_frames)
+    print(f"Convolution backend frame chunk size: {frame_chunk_size}")
+
+    start_time = time.time()
+    for s_idx, sigma in enumerate(sigmas):
+        check_cancelled(cancel_event)
+        if kernel_cache is not None:
+            kernels = kernel_cache[int(phase), s_idx, 0]
+        else:
+            kernels = [
+                _gabor_kernel_for_conv(theta, sigma, phase_offset, coupled_frequency=True)
+                for theta in thetas
+            ]
+        for start, end, response in _conv2d_wavelet_bank(
+            videodata,
+            kernels,
+            device,
+            frame_chunk_size,
+            cancel_event=cancel_event,
+        ):
+            wt_final[start:end, :, :, :, s_idx] = response
+        print(progress_message(f"Convolution coarse phase {phase}", s_idx + 1, len(sigmas), start_time))
+        gc.collect()
+
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    if use_mmap:
+        wt_final.flush()
+        del wt_final
+        print(f"Success! Saved streamed convolution coarse array to {save_path}")
+    else:
+        print("Saving convolution coarse array to disk...", end="\n\n")
+        np.save(save_path, wt_final)
+        print(f"Success! Saved convolution coarse array to {save_path}", end="\n\n")
+
+
+def waveletDecompositionFullConv(
+    videodata,
+    phase,
+    sigmas,
+    frequencies,
+    folder_path,
+    n_orientations,
+    phase_offsets=None,
+    output_format="npy",
+    zarr_chunks=None,
+    kernel_cache_path=None,
+    frame_chunk_size=None,
+    cancel_event=None,
+):
+    """Decompose full-model wavelets with compact Gabor kernels and ``conv2d``.
+
+    Writes ``dwt_videodata2_r`` or ``dwt_videodata2_i`` with the same shape and
+    output format as :func:`waveletDecompositionFull`:
+    ``(time, nx, ny, n_orientations, n_sigmas, n_frequencies)``.
+    """
+    device = resolve_compute_device(prefer_gpu=True)
+    num_frames, ny, nx = videodata.shape
+    sigmas = np.asarray(sigmas, dtype=float)
+    frequencies = np.asarray(frequencies, dtype=float)
+    if frequencies.size == 0:
+        frequencies = np.asarray([0.0], dtype=float)
+    thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
+    phase_offset = _phase_offset_from_index(phase, phase_offsets)
+    kernel_cache = _load_convolution_kernel_cache(
+        kernel_cache_path,
+        "fine",
+        sigmas,
+        frequencies,
+        n_orientations,
+        phase_offsets,
+    ) if kernel_cache_path else None
+    final_shape = (
+        int(num_frames),
+        int(nx),
+        int(ny),
+        int(n_orientations),
+        len(sigmas),
+        len(frequencies),
+    )
+
+    phase_suffix = "_r" if phase == 0 else "_i"
+    output_format = str(output_format or "npy").lower()
+    if output_format not in {"npy", "zarr"}:
+        raise ValueError(f"Unsupported full-model wavelet output format: {output_format}")
+    save_ext = ".zarr" if output_format == "zarr" else ".npy"
+    save_path = os.path.join(folder_path, f"dwt_videodata2{phase_suffix}{save_ext}")
+    required_bytes = _array_bytes(final_shape, np.float32)
+
+    if output_format == "zarr":
+        try:
+            import zarr
+            from numcodecs import Blosc
+        except ImportError as exc:
+            raise ImportError(
+                "Zarr wavelet output requires the 'zarr' and 'numcodecs' packages. "
+                "Install project requirements or select 'npy' as the full-model format."
+            ) from exc
+        os.makedirs(folder_path, exist_ok=True)
+        compressor = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
+        if zarr_chunks is None:
+            zarr_chunks = (min(num_frames, 1800), 1, 1, int(n_orientations), len(sigmas), len(frequencies))
+        zarr_chunks = tuple(
+            min(int(dim), int(max(1, chunk)))
+            for dim, chunk in zip(final_shape, zarr_chunks)
+        )
+        wt_final = _open_zarr_array(
+            zarr,
+            save_path,
+            mode="w",
+            shape=final_shape,
+            chunks=zarr_chunks,
+            dtype=np.float32,
+            compressor=compressor,
+        )
+        use_mmap = False
+        print(f"Writing convolution full-model phase {phase} directly to Zarr: {save_path}")
+    elif has_enough_ram(required_bytes, safety_margin=1.20):
+        wt_final = np.zeros(final_shape, dtype=np.float32)
+        use_mmap = False
+        print(f"Using RAM output for convolution full-model phase {phase} ({required_bytes / (1024**3):.2f} GB).")
+    else:
+        wt_final = np.lib.format.open_memmap(save_path, mode="w+", dtype=np.float32, shape=final_shape)
+        use_mmap = True
+        print(f"Using disk-backed output for convolution full-model phase {phase}; RAM is below safe working set.")
+
+    if frame_chunk_size is None:
+        frame_chunk_size = _conv_frame_chunk_size(num_frames)
+    print(f"Convolution backend frame chunk size: {frame_chunk_size}")
+
+    total_steps = max(1, len(sigmas) * len(frequencies))
+    completed_steps = 0
+    start_time = time.time()
+    for s_idx, sigma in enumerate(sigmas):
+        for f_idx, frequency in enumerate(frequencies):
+            check_cancelled(cancel_event)
+            if kernel_cache is not None:
+                kernels = kernel_cache[int(phase), s_idx, f_idx]
+            else:
+                kernels = [
+                    _gabor_kernel_for_conv(theta, sigma, phase_offset, frequency=frequency)
+                    for theta in thetas
+                ]
+            for start, end, response in _conv2d_wavelet_bank(
+                videodata,
+                kernels,
+                device,
+                frame_chunk_size,
+                cancel_event=cancel_event,
+            ):
+                wt_final[start:end, :, :, :, s_idx, f_idx] = response
+            completed_steps += 1
+            print(progress_message(f"Convolution full-model phase {phase}", completed_steps, total_steps, start_time))
+            gc.collect()
+
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    if output_format == "zarr":
+        print(f"Success! Saved convolution full-model Zarr array to {save_path}", end="\n\n")
+    elif use_mmap:
+        wt_final.flush()
+        del wt_final
+        print(f"Success! Saved streamed convolution full-model array to {save_path}")
+    else:
+        print("Saving convolution full-model array to disk...", end="\n\n")
+        np.save(save_path, wt_final)
+        print(f"Success! Saved convolution full-model array to {save_path}", end="\n\n")
 
 
 def getTrueRF(idx, rfs, L):

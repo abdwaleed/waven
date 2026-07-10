@@ -11,6 +11,8 @@ from typing import Any, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .storage.neural_cache import load_neural_cache_pair, save_aligned_neural_cache
+
 WORKFLOW_2P = "2p"
 WORKFLOW_EPHYS = "ephys"
 
@@ -24,12 +26,14 @@ class AlignedNeuralData:
     aligned_spikes: Optional[np.ndarray] = None
 
 
-def _save_aligned_outputs(neuron_pos: np.ndarray, spikes: np.ndarray, save_dir: Optional[Path]) -> None:
+def _save_aligned_outputs(
+    neuron_pos: np.ndarray,
+    spikes: np.ndarray,
+    save_dir: Optional[Path],
+    output_format: str = "npy",
+) -> dict:
     """Persist aligned arrays beside the experiment data for later GUI reuse."""
-    output_dir = Path(".") if save_dir is None else Path(save_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    np.save(output_dir / "pos.npy", neuron_pos)
-    np.save(output_dir / "spikes.npy", spikes)
+    return save_aligned_neural_cache(neuron_pos, spikes, save_dir, output_format)
 
 
 def load_two_photon_spikes(
@@ -46,11 +50,12 @@ def load_two_photon_spikes(
     method: str = "frame2ttl",
     correct_positions: bool = True,
     save_dir: Optional[Path] = None,
+    output_format: str = "npy",
 ) -> AlignedNeuralData:
     """Load and time-align two-photon (suite2p) spike data.
 
-    When ``spks_path`` is set, reads pre-aligned ``spikes.npy`` and sibling
-    ``pos.npy`` and skips suite2p alignment.
+    When ``spks_path`` is set, reads pre-aligned ``spikes`` and sibling ``pos``
+    caches in either NPY or Zarr format and skips suite2p alignment.
     """
     from .data import neural as neural_io
 
@@ -69,13 +74,11 @@ def load_two_photon_spikes(
         if correct_positions:
             neuron_pos = neural_io.correctNeuronPos(neuron_pos, resolution, n_planes)
     else:
-        spikes = np.load(spks_path, mmap_mode="r")
-        pos_path = spks_path.parent / "pos.npy"
-        neuron_pos = np.load(pos_path)
+        spikes, neuron_pos, _, _ = load_neural_cache_pair(spks_path.parent, spks_path)
         aligned_spikes = None
 
     if spks_path is None:
-        _save_aligned_outputs(neuron_pos, spikes, save_dir)
+        _save_aligned_outputs(neuron_pos, spikes, save_dir, output_format)
 
     return AlignedNeuralData(
         spikes=spikes,
@@ -89,6 +92,7 @@ def align_ephys_data(
     nb_frames: int,
     sampling_rate: float,
     save_dir: Optional[Path] = None,
+    output_format: str = "npy",
     **kwargs: Any,
 ) -> AlignedNeuralData:
     
@@ -104,7 +108,7 @@ def align_ephys_data(
     Returns:
         Result produced by the operation.
     """
-    import suite_ephys.DIO as DIO
+    from .suite_ephys import DIO as DIO
     import numpy as np
     import os
     import re
@@ -337,7 +341,7 @@ def align_ephys_data(
     
     print(neuron_pos.shape)
     print(spikes.shape)
-    _save_aligned_outputs(neuron_pos, spikes, save_dir or data_dir)
+    _save_aligned_outputs(neuron_pos, spikes, save_dir or data_dir, output_format)
 
     return AlignedNeuralData(
         spikes=spikes,
@@ -373,13 +377,25 @@ def load_aligned_spikes(
     method: str = "frame2ttl",
     correct_positions: bool = True,
     save_dir: Optional[Path] = None,
+    output_format: str = "npy",
 ) -> AlignedNeuralData:
     """Dispatch spike loading to the workflow-specific alignment routine."""
+    cache_dir = Path(".") if save_dir is None else Path(save_dir)
+    if save_dir is None:
+        if workflow == WORKFLOW_2P and data_dir_strings:
+            cache_dir = Path(data_dir_strings[0]) / experiment_info[0] / experiment_info[1] / str(experiment_info[2])
+        else:
+            cache_dir = Path(data_dir)
+
     if spks_path is not None:
-        spikes = np.load(spks_path, mmap_mode="r")
-        pos_path = spks_path.parent / "pos.npy"
-        neuron_pos = np.load(pos_path)
+        spikes, neuron_pos, _, _ = load_neural_cache_pair(spks_path.parent, spks_path)
         return AlignedNeuralData(spikes=spikes, neuron_pos=neuron_pos)
+
+    try:
+        spikes, neuron_pos, _, _ = load_neural_cache_pair(cache_dir)
+        return AlignedNeuralData(spikes=spikes, neuron_pos=neuron_pos)
+    except FileNotFoundError:
+        pass
 
     if workflow == WORKFLOW_2P:
         if resolution is None or n_planes is None:
@@ -395,7 +411,8 @@ def load_aligned_spikes(
             threshold=threshold,
             method=method,
             correct_positions=correct_positions,
-            save_dir=save_dir,
+            save_dir=cache_dir,
+            output_format=output_format,
         )
 
     if workflow == WORKFLOW_EPHYS:
@@ -405,7 +422,8 @@ def load_aligned_spikes(
             data_dir,
             nb_frames,
             sampling_rate,
-            save_dir=save_dir,
+            save_dir=cache_dir,
+            output_format=output_format,
             experiment_info=experiment_info,
             threshold=threshold,
             method=method,
