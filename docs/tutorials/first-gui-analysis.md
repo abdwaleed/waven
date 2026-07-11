@@ -17,14 +17,18 @@ If you do not need documentation tooling on the analysis machine, use
 ## 2. Prepare `pipeline_config.json`
 
 Copy the provided `pipeline_config.json` and edit paths so they point to local
-files. The most important paths are:
+folders. The GUI uses a strict folder layout under `Project Root`; file names
+inside the final folder usually do not matter when there is only one valid
+candidate.
 
-- `Movie Path`: stimulus movie, usually `.mp4`.
-- `Save Path`: default Gabor-library output path.
-- `Coarse Library Path` and `Fine Library Path`: explicit reusable library paths.
-- `Spks Path`: optional aligned `spikes.npy` or `spikes.zarr`; use `None` to load an existing sibling `pos`/`spikes` cache pair or run alignment.
+- `Project Root`: root folder containing `input/`, `cache/`, and `output/`.
+- `Movie Path`: folder containing one stimulus movie.
+- `Save Path`, `Coarse Library Path`, and `Fine Library Path`: Gabor cache folders.
+- `Spks Path`: folder containing or receiving aligned `spikes` and `pos` arrays.
 - `Full Model Wavelet Path`: folder containing or receiving full-model wavelets.
-- `Full Model Save Path`: folder for model outputs, plot cache, and exports.
+- `Full Model Save Path`: folder for model outputs.
+
+The standard layout is documented in [Project Layout](../reference/project-layout.md).
 
 Before launching the GUI, sanity-check the largest dimensions:
 

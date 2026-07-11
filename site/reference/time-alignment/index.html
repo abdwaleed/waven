@@ -69,7 +69,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -127,7 +127,31 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
     
   
 </form>
@@ -707,6 +731,10 @@
       
         
       
+        
+      
+        
+      
     
     
     
@@ -804,6 +832,62 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/pipeline-2p/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Two-Photon Pipeline Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/pipeline-ephys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ephys Pipeline Mindmap
   
 
     
@@ -947,6 +1031,8 @@
       
         
       
+        
+      
     
     
     
@@ -999,6 +1085,34 @@
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../project-layout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Layout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -1810,7 +1924,12 @@ Electrophysiology alignment is provided as a template for user implementation.</
   </span>
 
 <a href="#waven.time_alignment.AlignedNeuralData" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">AlignedNeuralData</span><span class="p">(</span><span class="n">spikes</span><span class="p">:</span> <span class="n">ndarray</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">:</span> <span class="n">ndarray</span><span class="p">,</span> <span class="n">aligned_spikes</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">AlignedNeuralData</span><span class="p">(</span>
+    <span class="n">spikes</span><span class="p">:</span> <span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">neuron_pos</span><span class="p">:</span> <span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">aligned_spikes</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">unit_ids</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -1857,25 +1976,34 @@ Electrophysiology alignment is provided as a template for user implementation.</
 
 
 <a href="#waven.time_alignment.load_two_photon_spikes" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_two_photon_spikes</span><span class="p">(</span><span class="n">experiment_info</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">data_dirs</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">suite2p_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">block_end</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">n_planes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">resolution</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">spks_path</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.25</span><span class="p">,</span> <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;frame2ttl&#39;</span><span class="p">,</span> <span class="n">correct_positions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_two_photon_spikes</span><span class="p">(</span>
+    <span class="n">experiment_info</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
+    <span class="n">data_dirs</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">suite2p_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">block_end</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">n_planes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">resolution</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">spks_path</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.25</span><span class="p">,</span>
+    <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;frame2ttl&quot;</span><span class="p">,</span>
+    <span class="n">correct_positions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
 
         <p>Load and time-align two-photon (suite2p) spike data.</p>
-<p>When <code>spks_path</code> is set, reads pre-aligned <code>spikes.npy</code> and sibling
-<code>pos.npy</code> and skips suite2p alignment.</p>
+<p>When <code>spks_path</code> is set, reads pre-aligned <code>spikes</code> and sibling <code>pos</code>
+caches in either NPY or Zarr format and skips suite2p alignment.</p>
 
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\time_alignment.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">35</span>
-<span class="normal">36</span>
-<span class="normal">37</span>
-<span class="normal">38</span>
-<span class="normal">39</span>
-<span class="normal">40</span>
-<span class="normal">41</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">41</span>
 <span class="normal">42</span>
 <span class="normal">43</span>
 <span class="normal">44</span>
@@ -1918,7 +2046,12 @@ Electrophysiology alignment is provided as a template for user implementation.</
 <span class="normal">81</span>
 <span class="normal">82</span>
 <span class="normal">83</span>
-<span class="normal">84</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_two_photon_spikes</span><span class="p">(</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_two_photon_spikes</span><span class="p">(</span>
     <span class="n">experiment_info</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
     <span class="n">data_dirs</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
     <span class="n">suite2p_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
@@ -1932,11 +2065,12 @@ Electrophysiology alignment is provided as a template for user implementation.</
     <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;frame2ttl&quot;</span><span class="p">,</span>
     <span class="n">correct_positions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Load and time-align two-photon (suite2p) spike data.</span>
 
-<span class="sd">    When ``spks_path`` is set, reads pre-aligned ``spikes.npy`` and sibling</span>
-<span class="sd">    ``pos.npy`` and skips suite2p alignment.</span>
+<span class="sd">    When ``spks_path`` is set, reads pre-aligned ``spikes`` and sibling ``pos``</span>
+<span class="sd">    caches in either NPY or Zarr format and skips suite2p alignment.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="kn">from</span><span class="w"> </span><span class="nn">.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">neural</span> <span class="k">as</span> <span class="n">neural_io</span>
 
@@ -1955,13 +2089,11 @@ Electrophysiology alignment is provided as a template for user implementation.</
         <span class="k">if</span> <span class="n">correct_positions</span><span class="p">:</span>
             <span class="n">neuron_pos</span> <span class="o">=</span> <span class="n">neural_io</span><span class="o">.</span><span class="n">correctNeuronPos</span><span class="p">(</span><span class="n">neuron_pos</span><span class="p">,</span> <span class="n">resolution</span><span class="p">,</span> <span class="n">n_planes</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="n">spikes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">spks_path</span><span class="p">,</span> <span class="n">mmap_mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
-        <span class="n">pos_path</span> <span class="o">=</span> <span class="n">spks_path</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;pos.npy&quot;</span>
-        <span class="n">neuron_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">pos_path</span><span class="p">)</span>
+        <span class="n">spikes</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">load_neural_cache_pair</span><span class="p">(</span><span class="n">spks_path</span><span class="o">.</span><span class="n">parent</span><span class="p">,</span> <span class="n">spks_path</span><span class="p">)</span>
         <span class="n">aligned_spikes</span> <span class="o">=</span> <span class="kc">None</span>
 
     <span class="k">if</span> <span class="n">spks_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">_save_aligned_outputs</span><span class="p">(</span><span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">save_dir</span><span class="p">)</span>
+        <span class="n">_save_aligned_outputs</span><span class="p">(</span><span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">save_dir</span><span class="p">,</span> <span class="n">output_format</span><span class="p">)</span>
 
     <span class="k">return</span> <span class="n">AlignedNeuralData</span><span class="p">(</span>
         <span class="n">spikes</span><span class="o">=</span><span class="n">spikes</span><span class="p">,</span>
@@ -1982,7 +2114,14 @@ Electrophysiology alignment is provided as a template for user implementation.</
 
 
 <a href="#waven.time_alignment.align_ephys_data" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">align_ephys_data</span><span class="p">(</span><span class="n">data_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">sampling_rate</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">align_ephys_data</span><span class="p">(</span>
+    <span class="n">data_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+    <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">sampling_rate</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -2115,12 +2254,7 @@ Electrophysiology alignment is provided as a template for user implementation.</
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\time_alignment.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 87</span>
-<span class="normal"> 88</span>
-<span class="normal"> 89</span>
-<span class="normal"> 90</span>
-<span class="normal"> 91</span>
-<span class="normal"> 92</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 92</span>
 <span class="normal"> 93</span>
 <span class="normal"> 94</span>
 <span class="normal"> 95</span>
@@ -2374,11 +2508,20 @@ Electrophysiology alignment is provided as a template for user implementation.</
 <span class="normal">343</span>
 <span class="normal">344</span>
 <span class="normal">345</span>
-<span class="normal">346</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">align_ephys_data</span><span class="p">(</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">align_ephys_data</span><span class="p">(</span>
     <span class="n">data_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
     <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
     <span class="n">sampling_rate</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
     <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
     <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span><span class="p">:</span>
 
@@ -2394,7 +2537,7 @@ Electrophysiology alignment is provided as a template for user implementation.</
 <span class="sd">    Returns:</span>
 <span class="sd">        Result produced by the operation.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="kn">import</span><span class="w"> </span><span class="nn">suite_ephys.DIO</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">DIO</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.suite_ephys</span><span class="w"> </span><span class="kn">import</span> <span class="n">DIO</span> <span class="k">as</span> <span class="n">DIO</span>
     <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
     <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
     <span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
@@ -2437,6 +2580,7 @@ Electrophysiology alignment is provided as a template for user implementation.</
         <span class="n">neuron_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n_neurons</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
         <span class="n">spikes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n_trials</span><span class="p">,</span> <span class="n">nb_frames</span><span class="p">,</span> <span class="n">n_neurons</span><span class="p">))</span>
 
+        <span class="n">unit_ids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">units</span><span class="o">.</span><span class="n">keys</span><span class="p">()),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">object</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">neuron_idx</span><span class="p">,</span> <span class="n">neuron_data</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">units</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
 
             <span class="n">position</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">neuron_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;position&#39;</span><span class="p">,</span> <span class="p">[]),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
@@ -2481,8 +2625,8 @@ Electrophysiology alignment is provided as a template for user implementation.</
 
                 <span class="n">spikes</span><span class="p">[</span><span class="n">trial_idx</span><span class="p">,</span> <span class="p">:,</span> <span class="n">neuron_idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">firing_rate_hz</span>
 
-        <span class="c1"># Return pure counts. Do not subtract timestamps here.</span>
-        <span class="k">return</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span>
+        <span class="c1"># Return frame-aligned firing rates in Hz. Do not subtract timestamps here.</span>
+        <span class="k">return</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">unit_ids</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">handle_dropped_frames</span><span class="p">(</span><span class="n">frame_edges</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
@@ -2623,16 +2767,17 @@ Electrophysiology alignment is provided as a template for user implementation.</
     <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span> <span class="o">=</span> <span class="n">get_possible_trial_edges</span><span class="p">(</span><span class="n">freq</span><span class="p">,</span> <span class="n">pd_time</span><span class="p">)</span> 
     <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span> <span class="o">=</span> <span class="n">validate_edges</span><span class="p">(</span><span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span><span class="p">,</span> <span class="n">STIMULUS_DURATION</span><span class="p">,</span> <span class="n">SAMPLING_RATE</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">)</span>
 
-    <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span> <span class="o">=</span> <span class="n">extract_pos_and_spikes</span><span class="p">(</span><span class="n">units</span><span class="p">,</span> <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span><span class="p">,</span> <span class="n">pd_time</span><span class="p">,</span> <span class="n">pd_state</span><span class="p">,</span> <span class="n">nb_frames</span><span class="p">)</span>
+    <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">unit_ids</span> <span class="o">=</span> <span class="n">extract_pos_and_spikes</span><span class="p">(</span><span class="n">units</span><span class="p">,</span> <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span><span class="p">,</span> <span class="n">pd_time</span><span class="p">,</span> <span class="n">pd_state</span><span class="p">,</span> <span class="n">nb_frames</span><span class="p">)</span>
 
     <span class="nb">print</span><span class="p">(</span><span class="n">neuron_pos</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
     <span class="nb">print</span><span class="p">(</span><span class="n">spikes</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
-    <span class="n">_save_aligned_outputs</span><span class="p">(</span><span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">save_dir</span> <span class="ow">or</span> <span class="n">data_dir</span><span class="p">)</span>
+    <span class="n">_save_aligned_outputs</span><span class="p">(</span><span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">save_dir</span> <span class="ow">or</span> <span class="n">data_dir</span><span class="p">,</span> <span class="n">output_format</span><span class="p">,</span> <span class="n">unit_ids</span><span class="o">=</span><span class="n">unit_ids</span><span class="p">)</span>
 
     <span class="k">return</span> <span class="n">AlignedNeuralData</span><span class="p">(</span>
         <span class="n">spikes</span><span class="o">=</span><span class="n">spikes</span><span class="p">,</span>
         <span class="n">neuron_pos</span><span class="o">=</span><span class="n">neuron_pos</span><span class="p">,</span>
         <span class="n">aligned_spikes</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">unit_ids</span><span class="o">=</span><span class="n">unit_ids</span><span class="p">,</span>
     <span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
@@ -2648,7 +2793,25 @@ Electrophysiology alignment is provided as a template for user implementation.</
 
 
 <a href="#waven.time_alignment.load_aligned_spikes" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_aligned_spikes</span><span class="p">(</span><span class="n">workflow</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">experiment_info</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">data_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">data_dir_strings</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">suite2p_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">block_end</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">n_planes</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">resolution</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span> <span class="n">sampling_rate</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span> <span class="n">spks_path</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.25</span><span class="p">,</span> <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;frame2ttl&#39;</span><span class="p">,</span> <span class="n">correct_positions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_aligned_spikes</span><span class="p">(</span>
+    <span class="n">workflow</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">experiment_info</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
+    <span class="n">data_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+    <span class="n">data_dir_strings</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">suite2p_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+    <span class="n">block_end</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">n_planes</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span>
+    <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">resolution</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span>
+    <span class="n">sampling_rate</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span>
+    <span class="n">spks_path</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.25</span><span class="p">,</span>
+    <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;frame2ttl&quot;</span><span class="p">,</span>
+    <span class="n">correct_positions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -2658,15 +2821,7 @@ Electrophysiology alignment is provided as a template for user implementation.</
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\time_alignment.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">359</span>
-<span class="normal">360</span>
-<span class="normal">361</span>
-<span class="normal">362</span>
-<span class="normal">363</span>
-<span class="normal">364</span>
-<span class="normal">365</span>
-<span class="normal">366</span>
-<span class="normal">367</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">367</span>
 <span class="normal">368</span>
 <span class="normal">369</span>
 <span class="normal">370</span>
@@ -2713,7 +2868,29 @@ Electrophysiology alignment is provided as a template for user implementation.</
 <span class="normal">411</span>
 <span class="normal">412</span>
 <span class="normal">413</span>
-<span class="normal">414</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_aligned_spikes</span><span class="p">(</span>
+<span class="normal">414</span>
+<span class="normal">415</span>
+<span class="normal">416</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span>
+<span class="normal">425</span>
+<span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_aligned_spikes</span><span class="p">(</span>
     <span class="n">workflow</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
     <span class="o">*</span><span class="p">,</span>
     <span class="n">experiment_info</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
@@ -2730,13 +2907,25 @@ Electrophysiology alignment is provided as a template for user implementation.</
     <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;frame2ttl&quot;</span><span class="p">,</span>
     <span class="n">correct_positions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Dispatch spike loading to the workflow-specific alignment routine.&quot;&quot;&quot;</span>
+    <span class="n">cache_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">save_dir</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">Path</span><span class="p">(</span><span class="n">save_dir</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">save_dir</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">workflow</span> <span class="o">==</span> <span class="n">WORKFLOW_2P</span> <span class="ow">and</span> <span class="n">data_dir_strings</span><span class="p">:</span>
+            <span class="n">cache_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">data_dir_strings</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">/</span> <span class="n">experiment_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">experiment_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="nb">str</span><span class="p">(</span><span class="n">experiment_info</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">cache_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">data_dir</span><span class="p">)</span>
+
     <span class="k">if</span> <span class="n">spks_path</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">spikes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">spks_path</span><span class="p">,</span> <span class="n">mmap_mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
-        <span class="n">pos_path</span> <span class="o">=</span> <span class="n">spks_path</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;pos.npy&quot;</span>
-        <span class="n">neuron_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">pos_path</span><span class="p">)</span>
+        <span class="n">spikes</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">load_neural_cache_pair</span><span class="p">(</span><span class="n">spks_path</span><span class="o">.</span><span class="n">parent</span><span class="p">,</span> <span class="n">spks_path</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">AlignedNeuralData</span><span class="p">(</span><span class="n">spikes</span><span class="o">=</span><span class="n">spikes</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="o">=</span><span class="n">neuron_pos</span><span class="p">)</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">spikes</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">load_neural_cache_pair</span><span class="p">(</span><span class="n">cache_dir</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">AlignedNeuralData</span><span class="p">(</span><span class="n">spikes</span><span class="o">=</span><span class="n">spikes</span><span class="p">,</span> <span class="n">neuron_pos</span><span class="o">=</span><span class="n">neuron_pos</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+        <span class="k">pass</span>
 
     <span class="k">if</span> <span class="n">workflow</span> <span class="o">==</span> <span class="n">WORKFLOW_2P</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">resolution</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">n_planes</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -2752,7 +2941,8 @@ Electrophysiology alignment is provided as a template for user implementation.</
             <span class="n">threshold</span><span class="o">=</span><span class="n">threshold</span><span class="p">,</span>
             <span class="n">method</span><span class="o">=</span><span class="n">method</span><span class="p">,</span>
             <span class="n">correct_positions</span><span class="o">=</span><span class="n">correct_positions</span><span class="p">,</span>
-            <span class="n">save_dir</span><span class="o">=</span><span class="n">save_dir</span><span class="p">,</span>
+            <span class="n">save_dir</span><span class="o">=</span><span class="n">cache_dir</span><span class="p">,</span>
+            <span class="n">output_format</span><span class="o">=</span><span class="n">output_format</span><span class="p">,</span>
         <span class="p">)</span>
 
     <span class="k">if</span> <span class="n">workflow</span> <span class="o">==</span> <span class="n">WORKFLOW_EPHYS</span><span class="p">:</span>
@@ -2762,7 +2952,8 @@ Electrophysiology alignment is provided as a template for user implementation.</
             <span class="n">data_dir</span><span class="p">,</span>
             <span class="n">nb_frames</span><span class="p">,</span>
             <span class="n">sampling_rate</span><span class="p">,</span>
-            <span class="n">save_dir</span><span class="o">=</span><span class="n">save_dir</span><span class="p">,</span>
+            <span class="n">save_dir</span><span class="o">=</span><span class="n">cache_dir</span><span class="p">,</span>
+            <span class="n">output_format</span><span class="o">=</span><span class="n">output_format</span><span class="p">,</span>
             <span class="n">experiment_info</span><span class="o">=</span><span class="n">experiment_info</span><span class="p">,</span>
             <span class="n">threshold</span><span class="o">=</span><span class="n">threshold</span><span class="p">,</span>
             <span class="n">method</span><span class="o">=</span><span class="n">method</span><span class="p">,</span>
@@ -2783,7 +2974,19 @@ Electrophysiology alignment is provided as a template for user implementation.</
 
 
 <a href="#waven.time_alignment.align_datas" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">align_datas</span><span class="p">(</span><span class="n">exp_info</span><span class="p">,</span> <span class="n">dirs</span><span class="p">,</span> <span class="n">spks</span><span class="p">,</span> <span class="n">Nb_frames</span><span class="p">,</span> <span class="n">nb_plane</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">plane</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">w</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">1.25</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="s1">&#39;frame2ttl&#39;</span><span class="p">,</span> <span class="n">exptype</span><span class="o">=</span><span class="s1">&#39;zebra&#39;</span><span class="p">,</span> <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">align_datas</span><span class="p">(</span>
+    <span class="n">exp_info</span><span class="p">,</span>
+    <span class="n">dirs</span><span class="p">,</span>
+    <span class="n">spks</span><span class="p">,</span>
+    <span class="n">Nb_frames</span><span class="p">,</span>
+    <span class="n">nb_plane</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+    <span class="n">plane</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+    <span class="n">w</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">threshold</span><span class="o">=</span><span class="mf">1.25</span><span class="p">,</span>
+    <span class="n">methods</span><span class="o">=</span><span class="s2">&quot;frame2ttl&quot;</span><span class="p">,</span>
+    <span class="n">exptype</span><span class="o">=</span><span class="s2">&quot;zebra&quot;</span><span class="p">,</span>
+    <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -3235,7 +3438,22 @@ interpolates z-scored spike traces onto <code>Nb_frames</code> bins per trial.</
 
 
 <a href="#waven.time_alignment.loadSPKMesoscope" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">loadSPKMesoscope</span><span class="p">(</span><span class="n">exp_info</span><span class="p">,</span> <span class="n">dirs</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">block_end</span><span class="p">,</span> <span class="n">Nb_plane</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">Nb_frames</span><span class="o">=</span><span class="mi">18000</span><span class="p">,</span> <span class="n">first</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">last</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">1.25</span><span class="p">,</span> <span class="n">plane</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;frame2ttl&#39;</span><span class="p">,</span> <span class="n">exptype</span><span class="o">=</span><span class="s1">&#39;zebra&#39;</span><span class="p">,</span> <span class="n">w</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">loadSPKMesoscope</span><span class="p">(</span>
+    <span class="n">exp_info</span><span class="p">,</span>
+    <span class="n">dirs</span><span class="p">,</span>
+    <span class="n">path</span><span class="p">,</span>
+    <span class="n">block_end</span><span class="p">,</span>
+    <span class="n">Nb_plane</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+    <span class="n">Nb_frames</span><span class="o">=</span><span class="mi">18000</span><span class="p">,</span>
+    <span class="n">first</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="n">last</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">threshold</span><span class="o">=</span><span class="mf">1.25</span><span class="p">,</span>
+    <span class="n">plane</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+    <span class="n">method</span><span class="o">=</span><span class="s2">&quot;frame2ttl&quot;</span><span class="p">,</span>
+    <span class="n">exptype</span><span class="o">=</span><span class="s2">&quot;zebra&quot;</span><span class="p">,</span>
+    <span class="n">w</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+    <span class="n">plotting</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">

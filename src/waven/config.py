@@ -20,18 +20,20 @@ DEFAULT_GABOR_PARAMS: Dict[str, str] = {
     "N_thetas": "8",
     "Sigmas": "[2, 3, 4, 5, 6, 8]",
     "Frequencies": "[0.015, 0.04, 0.07, 0.1]",
-    "Phases": "[0, 1.57079632679]",
+    # GUI values are degrees; conversion happens at the convolution boundary.
+    "Phases": "[0, 90]",
     "NX": "135",
     "NY": "54",
-    "Save Path": "outputs/gabor/gabors_library.npy",
+    "Save Path": "your_experiment/cache/gabor/full",
 }
 
 WORKFLOW_2P = "2p"
 WORKFLOW_EPHYS = "ephys"
 
 DEFAULT_COMMON_PARAMS: Dict[str, str] = {
+    "Project Root": "your_experiment",
     "Dir": "data",
-    "Path Directory": "outputs/wavelets",
+    "Path Directory": "your_experiment/cache/wavelets/coarse",
     "Experiment Info": "('SS002', '2024-07-23', 3)",
     "Block End": "0",
     "screen_x": "4096",
@@ -47,13 +49,12 @@ DEFAULT_COMMON_PARAMS: Dict[str, str] = {
     "Number of Frames": "18000",
     "Number of Trials to Keep": "3",
     "Movie Path": (
-        "data/stimuli/"
-        "perlin_stimulus_10min.mp4"
+        "your_experiment/input/stimulus_movie"
     ),
-    "Library Path": "outputs/gabor/gabors_library.npy",
-    "Spks Path": "None",
-    "Full Model Wavelet Path": "",
-    "Full Model Save Path": "",
+    "Library Path": "your_experiment/cache/gabor/full",
+    "Spks Path": "your_experiment/input/neural_cache",
+    "Full Model Wavelet Path": "your_experiment/cache/wavelets/full",
+    "Full Model Save Path": "your_experiment/output/models",
     "Plot Cache Path": "",
     "Recovery Cache Directory": "",
     "Train Trial Indices": "[0, 2]",
@@ -346,15 +347,26 @@ class GaborConfig:
             Result produced by the operation.
         """
         save_path = parse_path(_get(mapping, "Save Path"), "Save Path")
+
+        def library_path(value, kind):
+            """Resolve a configured library folder or legacy file to one artifact."""
+            if value is not None:
+                path = parse_path(value, f"{kind.title()} Library Path")
+                return path if path.suffix else path / f"gabor_library_{kind}.npy"
+            if save_path.suffix:
+                return sibling_path_with_suffix(save_path, f"_{kind}")
+            folder = save_path
+            if kind == "coarse" and save_path.name.lower() in {"full", "fine"}:
+                folder = save_path.parent / "coarse"
+            elif kind == "fine" and save_path.name.lower() == "coarse":
+                folder = save_path.parent / "full"
+            return folder / f"gabor_library_{kind}.npy"
+
         coarse_path = (
-            parse_path(_get(mapping, "Coarse Library Path"), "Coarse Library Path")
-            if _get(mapping, "Coarse Library Path") is not None
-            else sibling_path_with_suffix(save_path, "_coarse")
+            library_path(_get(mapping, "Coarse Library Path"), "coarse")
         )
         fine_path = (
-            parse_path(_get(mapping, "Fine Library Path"), "Fine Library Path")
-            if _get(mapping, "Fine Library Path") is not None
-            else sibling_path_with_suffix(save_path, "_fine")
+            library_path(_get(mapping, "Fine Library Path"), "fine")
         )
         return cls(
             n_thetas=_as_int(_get(mapping, "N_thetas"), "N_thetas"),
@@ -856,6 +868,13 @@ class PipelineConfig:
 
         merged_common = dict(DEFAULT_COMMON_PARAMS)
         merged_common.update(common_params)
+        for canonical_key in ("NX", "NY", "Sigmas", "Frequencies"):
+            if canonical_key not in common_params and canonical_key in gabor_params:
+                merged_common[canonical_key] = gabor_params[canonical_key]
+        if "Library Path" not in common_params:
+            library_folder = gabor_params.get("Fine Library Path") or gabor_params.get("Save Path")
+            if library_folder not in NONE_STRINGS and library_folder is not None:
+                merged_common["Library Path"] = library_folder
 
         merged_workflow = dict(
             DEFAULT_TWO_PHOTON_PARAMS

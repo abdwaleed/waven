@@ -69,7 +69,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -127,7 +127,31 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
     
   
 </form>
@@ -789,6 +813,10 @@
       
         
       
+        
+      
+        
+      
     
     
     
@@ -886,6 +914,62 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/pipeline-2p/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Two-Photon Pipeline Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/pipeline-ephys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ephys Pipeline Mindmap
   
 
     
@@ -1027,6 +1111,8 @@
       
         
       
+        
+      
     
     
     
@@ -1079,6 +1165,34 @@
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/project-layout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Layout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -1602,6 +1716,25 @@
 <h1 id="run-wavelet-decomposition">Run wavelet decomposition<a class="headerlink" href="#run-wavelet-decomposition" title="Permanent link">&para;</a></h1>
 <p>In the GUI, choose <strong>Analysis scale</strong> first, then click <strong>Run Wavelet
 Decomposition</strong>. The button changes its work according to the selected scale.</p>
+<p>Use <strong>Stimulus Downsample Cache</strong> when you want to make the movie cache as a
+separate step. This stage is required: wavelet decomposition reports a missing
+prerequisite instead of silently downsampling. Leave the mode on <code>legacy</code> to use
+the historical grid, or choose <code>precompute</code> to set a percentage. Both modes can
+write <code>.npy</code> or <code>.zarr</code>. <code>20%</code> is the historical coarse RF grid; <code>100%</code> keeps the
+configured <code>NX</code> by <code>NY</code> grid.</p>
+<p>Stage 2's <strong>Cache array format</strong> selector is always visible and controls the
+downsampled stimulus cache. Stage 4 has a separate full-wavelet output format,
+which appears only in full mode because the durable coarse RF cache has its
+established NPY representation.</p>
+<p>When Stage 4 starts, it searches for the exact selected cache first, then a
+shape-compatible sibling format, then legacy names such as
+<code>&lt;movie&gt;_coarse_downsampled.npy</code> and <code>&lt;movie&gt;_downsampled.npy</code> beside the movie
+or in the configured wavelet folder. The terminal reports the exact NPY/Zarr
+artifact reused. This lets projects created by older versions continue without
+duplicating a large stimulus cache.</p>
+<p>The stimulus movie itself lives in <code>input/stimulus_movie</code>. Generated wavelet
+caches are written under <code>cache/wavelets/coarse</code> or <code>cache/wavelets/full</code>, not
+next to the movie file.</p>
 <p>With <code>coarse</code>, it prepares:</p>
 <ul>
 <li>coarse downsampled stimulus movie;</li>
@@ -1630,7 +1763,11 @@ Decomposition</strong>. The button changes its work according to the selected sc
 <span class="p">)</span>
 </code></pre></div>
 <p>If a long run is interrupted, keep the same <strong>Analysis scale</strong> selected and run
-the GUI button again. Existing outputs are shape-validated and reused.</p>
+the GUI button again. Existing outputs are shape-validated and checked against a
+small parameter fingerprint sidecar before reuse. Changing the movie path,
+backend, grid percentage, <code>NX</code>/<code>NY</code>, orientations, sigmas, phases, frequencies,
+or output format causes the relevant step to regenerate instead of reporting
+"already complete."</p>
 <h2 id="outputs-and-shapes">Outputs and shapes<a class="headerlink" href="#outputs-and-shapes" title="Permanent link">&para;</a></h2>
 <p>The wavelet stage writes several large arrays. The names are historical, but the
 axis meanings are stable:</p>
@@ -1645,7 +1782,7 @@ axis meanings are stable:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>&lt;movie&gt;_coarse_downsampled.npy</code></td>
+<td><code>cache/wavelets/coarse/stimulus_coarse_downsampled_p020.npy</code> or selected <code>.zarr</code></td>
 <td><code>(n_frames, coarse_ny, coarse_nx)</code></td>
 <td><code>bool</code></td>
 <td>Cropped binary movie for coarse RF analysis. Image arrays keep row/column order.</td>
@@ -1669,10 +1806,10 @@ axis meanings are stable:</p>
 <td>Durable RF cache: real, imaginary, and combined coefficients.</td>
 </tr>
 <tr>
-<td><code>&lt;movie&gt;_downsampled.npy</code></td>
+<td><code>cache/wavelets/full/stimulus_full_downsampled_p100.npy</code> or selected <code>.zarr</code></td>
 <td><code>(n_frames, NY, NX)</code></td>
 <td><code>bool</code></td>
-<td>Full-grid binary movie for full-model wavelets.</td>
+<td>Full-grid or selected-percentage binary movie for full-model wavelets.</td>
 </tr>
 <tr>
 <td><code>dwt_videodata2_r.npy</code> or <code>.zarr</code></td>

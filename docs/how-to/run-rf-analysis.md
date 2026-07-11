@@ -66,7 +66,13 @@ The GUI does not silently delete low-quality neurons; it lowers their visual
 alpha so population structure remains visible while the quality mask is still
 obvious.
 
-OSI and gOSI are computed from the orientation tuning slice at the preferred
-position, size, and frequency. They should be read alongside repeatability and
-the raw tuning curve. A high selectivity value on a noisy, low-repeatability
-neuron is a hypothesis to inspect, not a conclusion by itself.
+OSI and gOSI use the RF **correlation** orientation tuning curve. The RF tensor
+selects each neuron's preferred position, size, and frequency, then the values
+over orientation at that feature slice are summarized. A high selectivity value
+on a noisy, low-repeatability neuron is a hypothesis to inspect, not a
+conclusion by itself.
+
+In two-photon mode, the **All neurons** tab shows the all-cell OSI/gOSI
+distributions only. In ephys mode, the GUI also overlays shank distributions
+when shank-like metadata are present and adds by-unit histograms, because unit
+grouping is an electrophysiology concept in this workflow.

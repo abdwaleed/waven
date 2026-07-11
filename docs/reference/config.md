@@ -9,7 +9,7 @@ boxes; `waven.config` parses those strings into validated dataclasses.
 | Class | Owns | Important derived values |
 | --- | --- | --- |
 | `GaborConfig` | filter-library axes and output paths | `theta_radians`, `sigmas_array`, `frequencies_array` |
-| `AnalysisConfig` | stimulus paths, neural-data paths, grid size, coverage, trial settings | `coarse_nx`, `coarse_ny`, `sigmas_deg`, `frames_per_minute` |
+| `AnalysisConfig` | stimulus paths, neural-data paths, coverage, trial settings | `sigmas_deg` |
 | `PipelineConfig` | paired `GaborConfig` and `AnalysisConfig` | `from_json()` with `{PROJECT_ROOT}` expansion |
 
 `{PROJECT_ROOT}` is replaced with `os.getcwd()` at load time. It is not the
@@ -43,7 +43,7 @@ accepted.
 | `Experiment Info` | `(subject_or_mouse_id, date_string, experiment_number)` |
 | `Visual Coverage` | `[azimuth_left, azimuth_right, elevation_top, elevation_bottom]` in visual degrees |
 | `Analysis Coverage` | same order as `Visual Coverage`, but for the analyzed crop |
-| `Phases` | radians; use `[0, 1.57079632679]` for 0 and pi/2 |
+| `Phases` | GUI degrees; use `[0, 90]` for quadrature phases. Conversion to radians occurs at filter construction. |
 | `Frequencies` | cycles per analysis pixel |
 | `Sigmas`, `Sigmas Full Model` | Gaussian envelope sizes in analysis pixels |
 | `Train Trial Indices`, `Test Trial Indices` | zero-based trial indices after trial retention |
@@ -52,12 +52,12 @@ accepted.
 
 | Field | Type | Unit | Affects |
 | --- | --- | --- | --- |
-| `NX`, `NY` | `int` | analysis pixels | fine libraries, full wavelets, downsampled movie |
+| movie dimensions + downsample percentage | metadata + percentage | pixels | derived Gabor grid, wavelets, and downsampled movie |
 | `N_thetas` | `int` | bins over 180 degrees | orientation axes and OSI/gOSI curves |
 | `Sigmas` | tuple of `float` | pixels | coarse library, coarse wavelets, RF tensor |
 | `Sigmas Full Model` | tuple of `float` | pixels | fine library, full wavelets |
 | `Frequencies` | tuple of `float` | cycles/pixel | fine library and full-model frequency axis |
-| `Number of Frames` | `int` | frames | upper bound for RF/model time axis |
+| movie frame count | metadata | frames | RF/model time axis and ephys alignment |
 | `Number of Trials to Keep` | `int` | trials | first axis of `spikes` |
 
 Changing any of these fields can invalidate previously generated libraries or

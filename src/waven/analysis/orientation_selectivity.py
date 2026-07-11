@@ -62,12 +62,14 @@ def orientation_selectivity_from_tuning(orientation_tuning, angles_deg=None):
     rates = np.asarray(orientation_tuning, dtype=float)
     if rates.ndim != 1:
         raise ValueError("orientation_tuning must be one-dimensional")
-    if rates.size > 1 and np.isclose(rates[0], rates[-1]):
-        rates = rates[:-1]
     if angles_deg is None:
         angles_deg = np.linspace(0, 180, rates.size, endpoint=False)
     else:
         angles_deg = np.asarray(angles_deg, dtype=float)
+        if angles_deg.size == rates.size and angles_deg.size > 1:
+            if np.isclose(angles_deg[0] % 180, angles_deg[-1] % 180):
+                angles_deg = angles_deg[:-1]
+                rates = rates[:-1]
         if angles_deg.size == rates.size + 1 and np.isclose(angles_deg[0] % 180, angles_deg[-1] % 180):
             angles_deg = angles_deg[:-1]
         if angles_deg.size != rates.size:
@@ -103,3 +105,111 @@ def selectivity_for_rfs(rfs, angles_deg=None):
         "osi": osi,
         "gosi": gosi,
     }
+
+
+def firing_rate_orientation_tuning(spikes, wavelets_complex, rfs, angles_deg=None):
+    """Compute non-negative firing-rate tuning curves at preferred RF features.
+
+    Args:
+        spikes: Trial-aligned neural responses with shape
+            ``(n_trials, n_frames, n_neurons)`` or an averaged response with
+            shape ``(n_frames, n_neurons)``. Ephys alignment stores firing rates
+            in Hz; two-photon values are the aligned non-negative activity
+            produced by the suite2p path.
+        wavelets_complex: Non-negative coarse wavelet energy with shape
+            ``(n_frames, nx, ny, n_orientations, n_sigmas)`` or
+            ``(n_frames, nx, ny, n_orientations, n_sigmas, n_frequencies)``.
+        rfs: RF tuple returned by receptive-field analysis. The preferred
+            feature indices in ``rfs[1]`` choose the x/y/sigma/frequency slice
+            used to turn frame-wise firing into orientation tuning.
+        angles_deg: Optional orientation bin centers in degrees.
+
+    Returns:
+        dict: ``angles_deg``, ``orientation_tuning``, ``osi``, and ``gosi``.
+            The tuning values are weighted mean firing rates, not RF
+            correlations.
+    """
+    responses = np.asarray(spikes, dtype=float)
+    trial_responses = responses if responses.ndim == 3 else None
+    if responses.ndim == 3:
+        responses = np.nanmean(responses, axis=0)
+    if responses.ndim != 2:
+        raise ValueError(f"Expected spikes with 2 or 3 dimensions, got {responses.shape}")
+    responses = np.nan_to_num(responses, nan=0.0, posinf=0.0, neginf=0.0)
+    responses = np.clip(responses, 0.0, None)
+
+    wavelets = wavelets_complex
+    wavelet_shape = tuple(getattr(wavelets, "shape", ()))
+    if len(wavelet_shape) not in {5, 6}:
+        raise ValueError(f"Expected wavelets with 5 or 6 dimensions, got {wavelet_shape}")
+
+    maxes = np.asarray(rfs[1], dtype=int)
+    n_frames = min(responses.shape[0], wavelet_shape[0])
+    n_neurons = min(responses.shape[1], maxes.shape[1])
+    n_orientations = wavelet_shape[3]
+    if angles_deg is None:
+        angles_deg = np.linspace(0, 180, n_orientations, endpoint=False)
+
+    osi = np.full(n_neurons, np.nan, dtype=float)
+    gosi = np.full(n_neurons, np.nan, dtype=float)
+    orientation_tuning = np.full((n_neurons, n_orientations), np.nan, dtype=float)
+    trial_orientation_tuning = None
+    if trial_responses is not None:
+        trial_orientation_tuning = np.full(
+            (trial_responses.shape[0], n_neurons, n_orientations), np.nan, dtype=float
+        )
+    for neuron_idx in range(n_neurons):
+        x, y, _o, size_idx, freq_idx = maxes[:5, neuron_idx]
+        if not (
+            0 <= x < wavelet_shape[1]
+            and 0 <= y < wavelet_shape[2]
+            and 0 <= size_idx < wavelet_shape[4]
+            and (len(wavelet_shape) == 5 or 0 <= freq_idx < wavelet_shape[5])
+        ):
+            continue
+        if len(wavelet_shape) == 5:
+            weights = np.asarray(wavelets[:n_frames, x, y, :, size_idx], dtype=float)
+        else:
+            weights = np.asarray(wavelets[:n_frames, x, y, :, size_idx, freq_idx], dtype=float)
+        weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
+        weights = np.clip(weights, 0.0, None)
+        rates = responses[:n_frames, neuron_idx]
+        denom = np.sum(weights, axis=0)
+        tuning = np.divide(
+            np.sum(weights * rates[:, None], axis=0),
+            denom,
+            out=np.zeros(n_orientations, dtype=float),
+            where=denom > 0,
+        )
+        orientation_tuning[neuron_idx] = tuning
+        if trial_orientation_tuning is not None:
+            trial_rates = np.clip(
+                np.nan_to_num(trial_responses[:, :n_frames, neuron_idx], nan=0.0),
+                0.0,
+                None,
+            )
+            trial_orientation_tuning[:, neuron_idx, :] = np.divide(
+                np.sum(weights[None, :, :] * trial_rates[:, :, None], axis=1),
+                denom[None, :],
+                out=np.zeros((trial_rates.shape[0], n_orientations), dtype=float),
+                where=denom[None, :] > 0,
+            )
+        osi[neuron_idx], gosi[neuron_idx] = orientation_selectivity_from_tuning(
+            tuning,
+            angles_deg,
+        )
+
+    result = {
+        "angles_deg": np.asarray(angles_deg, dtype=float),
+        "orientation_tuning": orientation_tuning,
+        "osi": osi,
+        "gosi": gosi,
+        "source": "firing_rate",
+    }
+    if trial_orientation_tuning is not None:
+        result["trial_orientation_tuning"] = trial_orientation_tuning
+        if trial_orientation_tuning.shape[0] > 1:
+            result["orientation_sem"] = np.nanstd(
+                trial_orientation_tuning, axis=0, ddof=1
+            ) / np.sqrt(trial_orientation_tuning.shape[0])
+    return result

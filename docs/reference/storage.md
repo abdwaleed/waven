@@ -22,4 +22,8 @@ The logical dtype remains `float32`.
 
 ::: waven.storage.array_store
 
+::: waven.storage.neural_cache
+
 ::: waven.storage.wavelet_zarr
+
+::: waven.project_layout

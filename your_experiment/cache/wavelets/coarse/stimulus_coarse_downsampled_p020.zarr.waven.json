@@ -1,0 +1,18 @@
+{
+  "fingerprint": "fd2c4635693753d16c97591176756714551a087da26a1860afaca39dcca75607",
+  "kind": "downsampled_video",
+  "params": {
+    "format": "zarr",
+    "grid": [
+      256,
+      144
+    ],
+    "scale": "coarse"
+  },
+  "shape": [
+    18000,
+    144,
+    256
+  ],
+  "version": 1
+}

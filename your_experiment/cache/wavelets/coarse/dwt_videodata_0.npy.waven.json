@@ -1,0 +1,13 @@
+{
+  "fingerprint": "6cfd10111ff1bb08b2179ddd39eac193b187c11367f0a302cc7e60f9d5cde6e4",
+  "kind": "coarse_wavelet_phase",
+  "params": {},
+  "shape": [
+    18000,
+    28,
+    22,
+    18,
+    4
+  ],
+  "version": 1
+}

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+import json
+from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -65,6 +66,17 @@ def find_neural_cache_pair(
         for pos_path in _candidate_paths(directory, "pos", spikes_path.suffix):
             if pos_path.exists():
                 return spikes_path, pos_path
+    if not directory.exists():
+        return None
+    array_paths = [
+        path
+        for path in sorted(directory.iterdir())
+        if path.suffix.lower() in {".npy", ".zarr"}
+    ]
+    spike_candidates = [path for path in array_paths if "spike" in path.stem.lower() or "spks" in path.stem.lower()]
+    pos_candidates = [path for path in array_paths if "pos" in path.stem.lower() or "position" in path.stem.lower()]
+    if len(spike_candidates) == 1 and len(pos_candidates) == 1:
+        return spike_candidates[0], pos_candidates[0]
     return None
 
 
@@ -127,6 +139,7 @@ def save_aligned_neural_cache(
     spikes: np.ndarray,
     save_dir: Optional[Path],
     output_format: str = "npy",
+    unit_ids: Optional[Sequence[object]] = None,
 ) -> Dict[str, Path]:
     """Persist aligned ``pos`` and ``spikes`` caches in NPY or Zarr format."""
     fmt = normalize_neural_cache_format(output_format)
@@ -141,13 +154,43 @@ def save_aligned_neural_cache(
     else:
         _save_zarr_array(pos_path, neuron_pos)
         _save_zarr_array(spikes_path, spikes)
-    return {"pos": pos_path, "spikes": spikes_path}
+    result = {"pos": pos_path, "spikes": spikes_path}
+    if unit_ids is not None:
+        unit_ids_path = output_dir / "unit_ids.json"
+        values = [value.item() if isinstance(value, np.generic) else value for value in unit_ids]
+        with unit_ids_path.open("w", encoding="utf-8") as handle:
+            json.dump(values, handle, indent=2, default=str)
+        result["unit_ids"] = unit_ids_path
+    return result
+
+
+def load_unit_ids(directory: Path, n_neurons: Optional[int] = None) -> Optional[np.ndarray]:
+    """Load preserved acquisition unit identifiers from a neural-cache folder.
+
+    Args:
+        directory: Folder containing ``unit_ids.json``.
+        n_neurons: Optional expected number of identifiers.
+
+    Returns:
+        One identifier per neuron, or ``None`` for an older cache without IDs.
+    """
+    path = Path(directory) / "unit_ids.json"
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as handle:
+        values = np.asarray(json.load(handle), dtype=object)
+    if n_neurons is not None and values.size != int(n_neurons):
+        raise ValueError(
+            f"unit_ids.json contains {values.size} IDs but the neural cache has {n_neurons} neurons."
+        )
+    return values
 
 
 __all__ = [
     "SUPPORTED_NEURAL_CACHE_FORMATS",
     "find_neural_cache_pair",
     "load_neural_cache_pair",
+    "load_unit_ids",
     "neural_cache_path",
     "normalize_neural_cache_format",
     "save_aligned_neural_cache",

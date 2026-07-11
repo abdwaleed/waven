@@ -24,6 +24,7 @@ class AlignedNeuralData:
     spikes: np.ndarray
     neuron_pos: np.ndarray
     aligned_spikes: Optional[np.ndarray] = None
+    unit_ids: Optional[np.ndarray] = None
 
 
 def _save_aligned_outputs(
@@ -31,9 +32,10 @@ def _save_aligned_outputs(
     spikes: np.ndarray,
     save_dir: Optional[Path],
     output_format: str = "npy",
+    unit_ids: Optional[Sequence[object]] = None,
 ) -> dict:
     """Persist aligned arrays beside the experiment data for later GUI reuse."""
-    return save_aligned_neural_cache(neuron_pos, spikes, save_dir, output_format)
+    return save_aligned_neural_cache(neuron_pos, spikes, save_dir, output_format, unit_ids=unit_ids)
 
 
 def load_two_photon_spikes(
@@ -93,6 +95,7 @@ def align_ephys_data(
     sampling_rate: float,
     save_dir: Optional[Path] = None,
     output_format: str = "npy",
+    stimulus_duration: Optional[float] = None,
     **kwargs: Any,
 ) -> AlignedNeuralData:
     
@@ -151,6 +154,7 @@ def align_ephys_data(
         neuron_pos = np.zeros((n_neurons, 3))
         spikes = np.zeros((n_trials, nb_frames, n_neurons))
 
+        unit_ids = np.asarray(list(units.keys()), dtype=object)
         for neuron_idx, neuron_data in enumerate(units.values()):
             
             position = np.asarray(neuron_data.get('position', []), dtype=float).ravel()
@@ -195,8 +199,8 @@ def align_ephys_data(
                 
                 spikes[trial_idx, :, neuron_idx] = firing_rate_hz
 
-        # Return pure counts. Do not subtract timestamps here.
-        return neuron_pos, spikes
+        # Return frame-aligned firing rates in Hz. Do not subtract timestamps here.
+        return neuron_pos, spikes, unit_ids
     
     def handle_dropped_frames(frame_edges: list, nb_frames: int) -> None:
         """
@@ -328,25 +332,27 @@ def align_ephys_data(
         SAMPLING_RATE = pkl_data['metadata']['sampling_frequencies'][0]
         units = pkl_data['units']
 
-    STIMULUS_DURATION = 10 * 60 # IN SECONDS
+    if stimulus_duration is None or stimulus_duration <= 0:
+        raise ValueError("Ephys alignment requires the stimulus movie duration from metadata.")
 
     dio_files = get_dio_files(data_dir)
     pd_time, pd_state = choose_correct_din_file(dio_files, 3)
     freq = get_frequency(pd_time, SAMPLING_RATE)
 
     start_times, end_times = get_possible_trial_edges(freq, pd_time) 
-    start_times, end_times = validate_edges(start_times, end_times, STIMULUS_DURATION, SAMPLING_RATE, 0.01)
+    start_times, end_times = validate_edges(start_times, end_times, stimulus_duration, SAMPLING_RATE, 0.01)
 
-    neuron_pos, spikes = extract_pos_and_spikes(units, start_times, end_times, pd_time, pd_state, nb_frames)
+    neuron_pos, spikes, unit_ids = extract_pos_and_spikes(units, start_times, end_times, pd_time, pd_state, nb_frames)
     
     print(neuron_pos.shape)
     print(spikes.shape)
-    _save_aligned_outputs(neuron_pos, spikes, save_dir or data_dir, output_format)
+    _save_aligned_outputs(neuron_pos, spikes, save_dir or data_dir, output_format, unit_ids=unit_ids)
 
     return AlignedNeuralData(
         spikes=spikes,
         neuron_pos=neuron_pos,
         aligned_spikes=None,
+        unit_ids=unit_ids,
     )
 
 # TEST EPHYS CODE
@@ -378,6 +384,7 @@ def load_aligned_spikes(
     correct_positions: bool = True,
     save_dir: Optional[Path] = None,
     output_format: str = "npy",
+    stimulus_duration: Optional[float] = None,
 ) -> AlignedNeuralData:
     """Dispatch spike loading to the workflow-specific alignment routine."""
     cache_dir = Path(".") if save_dir is None else Path(save_dir)
@@ -413,6 +420,7 @@ def load_aligned_spikes(
             correct_positions=correct_positions,
             save_dir=cache_dir,
             output_format=output_format,
+            stimulus_duration=stimulus_duration,
         )
 
     if workflow == WORKFLOW_EPHYS:

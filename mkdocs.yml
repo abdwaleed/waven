@@ -75,11 +75,14 @@ nav:
       - explanation/index.md
       - Pipeline Intuition: explanation/pipeline-intuition.md
       - Code Mindmap: explanation/code-mindmap.md
+      - Two-Photon Pipeline Mindmap: explanation/pipeline-2p.md
+      - Ephys Pipeline Mindmap: explanation/pipeline-ephys.md
       - Methods Transparency: explanation/methods-transparency.md
       - Orientation Selectivity: explanation/orientation-selectivity.md
       - File Lifecycle: explanation/file-lifecycle.md
   - Reference:
       - reference/index.md
+      - Project Layout: reference/project-layout.md
       - Configuration: reference/config.md
       - Pipeline: reference/pipeline.md
       - Wavelets: reference/wavelets.md

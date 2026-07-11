@@ -11,12 +11,11 @@ fits.
 | response matrix | `(n_frames, n_neurons)` | trial-averaged neural activity |
 | flattened stimulus | `(n_frames, n_features)` | wavelet tensor reshaped for correlation |
 | RF tensor | `(n_neurons, coarse_nx, coarse_ny, n_orientations, n_sigmas, n_frequencies)` | Pearson correlation per neuron-feature pair |
-| orientation tuning | `(n_orientations,)` | RF slice at preferred position, sigma, and frequency |
+| RF orientation tuning | `(n_orientations,)` | correlation slice at preferred position, sigma, and frequency |
 | OSI/gOSI arrays | `(n_neurons,)` | selectivity summaries for population plots |
 
-RF values are correlations, so they can be negative. Orientation selectivity
-utilities clean non-finite values and shift negative tuning curves before ratio
-metrics are calculated.
+RF values are correlations, so they can be negative. In the GUI, the correlation
+orientation slice at each neuron's preferred feature is the input to OSI/gOSI.
 
 ## Which module to read
 

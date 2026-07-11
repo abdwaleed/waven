@@ -69,7 +69,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -127,7 +127,31 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
     
   
 </form>
@@ -811,6 +835,10 @@
       
         
       
+        
+      
+        
+      
     
     
     
@@ -908,6 +936,62 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/pipeline-2p/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Two-Photon Pipeline Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/pipeline-ephys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ephys Pipeline Mindmap
   
 
     
@@ -1049,6 +1133,8 @@
       
         
       
+        
+      
     
     
     
@@ -1101,6 +1187,34 @@
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/project-layout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Layout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -1655,15 +1769,18 @@ python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </sp
 <code>pip install -e .</code> instead.</p>
 <h2 id="2-prepare-pipeline_configjson">2. Prepare <code>pipeline_config.json</code><a class="headerlink" href="#2-prepare-pipeline_configjson" title="Permanent link">&para;</a></h2>
 <p>Copy the provided <code>pipeline_config.json</code> and edit paths so they point to local
-files. The most important paths are:</p>
+folders. The GUI uses a strict folder layout under <code>Project Root</code>; file names
+inside the final folder usually do not matter when there is only one valid
+candidate.</p>
 <ul>
-<li><code>Movie Path</code>: stimulus movie, usually <code>.mp4</code>.</li>
-<li><code>Save Path</code>: default Gabor-library output path.</li>
-<li><code>Coarse Library Path</code> and <code>Fine Library Path</code>: explicit reusable library paths.</li>
-<li><code>Spks Path</code>: optional aligned <code>spikes.npy</code>; use <code>None</code> to run alignment.</li>
+<li><code>Project Root</code>: root folder containing <code>input/</code>, <code>cache/</code>, and <code>output/</code>.</li>
+<li><code>Movie Path</code>: folder containing one stimulus movie.</li>
+<li><code>Save Path</code>, <code>Coarse Library Path</code>, and <code>Fine Library Path</code>: Gabor cache folders.</li>
+<li><code>Spks Path</code>: folder containing or receiving aligned <code>spikes</code> and <code>pos</code> arrays.</li>
 <li><code>Full Model Wavelet Path</code>: folder containing or receiving full-model wavelets.</li>
-<li><code>Full Model Save Path</code>: folder for model outputs, plot cache, and exports.</li>
+<li><code>Full Model Save Path</code>: folder for model outputs.</li>
 </ul>
+<p>The standard layout is documented in <a href="../../reference/project-layout/">Project Layout</a>.</p>
 <p>Before launching the GUI, sanity-check the largest dimensions:</p>
 <table>
 <thead>

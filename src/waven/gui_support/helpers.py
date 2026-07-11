@@ -206,14 +206,16 @@ def _normalise_gabor_params(gabor_param):
         Result produced by the operation.
     """
     normalised = dict(gabor_param or {})
-    legacy_path = normalised.get("Save Path", "gabors_library.npy")
+    for key in ("N_thetas", "Sigmas", "Frequencies", "Phases", "NX", "NY", "Save Path"):
+        normalised.setdefault(key, "")
+    legacy_path = str(normalised.get("Save Path") or "").strip()
     normalised.setdefault(
         "Coarse Library Path",
-        _default_gabor_library_path(legacy_path, "_coarse"),
+        _default_gabor_library_path(legacy_path, "_coarse") if legacy_path else "",
     )
     normalised.setdefault(
         "Fine Library Path",
-        _default_gabor_library_path(legacy_path, "_fine"),
+        _default_gabor_library_path(legacy_path, "_fine") if legacy_path else "",
     )
     return normalised
 

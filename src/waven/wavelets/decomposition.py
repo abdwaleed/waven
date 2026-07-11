@@ -28,7 +28,13 @@ import torch.nn.functional as F
 from skimage.filters import gabor_kernel
 from tqdm import tqdm
 
-from ..runtime.performance import resolve_compute_device, video_downsample_chunk_size, wavelet_filter_chunk_size
+from ..runtime.performance import (
+    available_ram_bytes,
+    gpu_vram_bytes,
+    resolve_compute_device,
+    video_downsample_chunk_size,
+    wavelet_filter_chunk_size,
+)
 from ..runtime.task_control import check_cancelled, progress_message
 from .filters import has_enough_ram
 
@@ -190,6 +196,21 @@ def _conv_frame_chunk_size(num_frames):
     return max(1, min(int(num_frames), 128))
 
 
+def _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device, dtype_bytes=4):
+    """Return how many sigma/frequency groups to convolve together."""
+    spatial_pixels = max(1, int(nx) * int(ny))
+    per_group_bytes = int(frame_chunk_size) * spatial_pixels * int(n_orientations) * int(dtype_bytes)
+    if per_group_bytes <= 0:
+        return 1
+    if device == "cuda":
+        budget = int(gpu_vram_bytes() * 0.45)
+        if budget <= 0:
+            budget = int(available_ram_bytes() * 0.25)
+        return max(1, min(16, budget // per_group_bytes))
+    budget = int(available_ram_bytes() * 0.35)
+    return max(1, min(8, budget // per_group_bytes))
+
+
 def _center_pad_kernels(kernels):
     """Pad variable-sized Gabor kernels into one center-aligned bank."""
     max_h = max(kernel.shape[0] for kernel in kernels)
@@ -225,6 +246,27 @@ def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_ev
         response = F.conv2d(frame_tensor, kernel_tensor, padding=(pad_y, pad_x))
         yield start, end, response.permute(0, 3, 2, 1).cpu().numpy()
         del frame_tensor, response
+
+
+@torch.no_grad()
+def _conv2d_wavelet_group(videodata, kernels, device, frame_chunk_size, n_orientations, cancel_event=None):
+    """Yield grouped convolution responses as ``(start, end, chunk, n_groups)``."""
+    for start, end, response in _conv2d_wavelet_bank(
+        videodata,
+        kernels,
+        device,
+        frame_chunk_size,
+        cancel_event=cancel_event,
+    ):
+        group_count = int(response.shape[-1] // int(n_orientations))
+        reshaped = response.reshape(
+            response.shape[0],
+            response.shape[1],
+            response.shape[2],
+            group_count,
+            int(n_orientations),
+        )
+        yield start, end, np.moveaxis(reshaped, 3, 4)
 
 
 def convolution_kernel_cache_path(folder_path, kind):
@@ -384,6 +426,8 @@ def downsample_video_binary(
     chunk_size: Optional[int] = None,
     ratios=(1, 1),
     save_path=None,
+    output_format="npy",
+    zarr_chunks=None,
     cancel_event=None,
 ):
     """Downsample a binary stimulus movie to the analysis grid via disk streaming.
@@ -422,11 +466,44 @@ def downsample_video_binary(
     
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Reset video
     
+    output_format = str(output_format or "npy").lower()
+    if output_format not in {"npy", "zarr"}:
+        raise ValueError(f"Unsupported downsampled video output format: {output_format}")
+
     # Pre-allocate output directly on disk to save RAM
     if save_path is None:
-        save_path = path[:-4] + '_downsampled.npy'
+        save_path = path[:-4] + ('.zarr' if output_format == "zarr" else '_downsampled.npy')
     output_shape = (total_frames, shape[0], shape[1])
-    output_mmap = np.lib.format.open_memmap(save_path, mode='w+', dtype=bool, shape=output_shape)
+    if output_format == "zarr":
+        try:
+            import zarr
+            from numcodecs import Blosc
+        except ImportError as exc:
+            cap.release()
+            raise ImportError(
+                "Zarr downsampled video output requires the 'zarr' and 'numcodecs' packages. "
+                "Install project requirements or select 'npy'."
+            ) from exc
+        if zarr_chunks is None:
+            zarr_chunks = (min(total_frames, max(1, chunk_size)), shape[0], shape[1])
+        zarr_chunks = tuple(
+            min(int(dim), int(max(1, chunk)))
+            for dim, chunk in zip(output_shape, zarr_chunks)
+        )
+        compressor = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
+        output_mmap = _open_zarr_array(
+            zarr,
+            save_path,
+            mode="w",
+            shape=output_shape,
+            chunks=zarr_chunks,
+            dtype=bool,
+            compressor=compressor,
+        )
+        print(f"Writing downsampled binary video directly to Zarr: {save_path}")
+        print(f"Zarr chunks: {zarr_chunks}")
+    else:
+        output_mmap = np.lib.format.open_memmap(save_path, mode='w+', dtype=bool, shape=output_shape)
     
     frames_buffer = []
     frame_idx = 0
@@ -467,7 +544,8 @@ def downsample_video_binary(
         print(progress_message("Video downsample", frame_idx, total_frames, progress_start, unit="frames"))
         
     cap.release()
-    output_mmap.flush()
+    if hasattr(output_mmap, "flush"):
+        output_mmap.flush()
     del output_mmap
     gc.collect()
     print(f"Success! Saved optimized binary array to: {save_path}")
@@ -855,6 +933,7 @@ def waveletDecompositionConv(
     phase_offsets=None,
     kernel_cache_path=None,
     frame_chunk_size=None,
+    filter_group_size=None,
     cancel_event=None,
 ):
     """Decompose a movie using compact Gabor kernels and ``torch.conv2d``.
@@ -892,27 +971,54 @@ def waveletDecompositionConv(
 
     if frame_chunk_size is None:
         frame_chunk_size = _conv_frame_chunk_size(num_frames)
+    if filter_group_size is None:
+        filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
+    filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
+    print(f"Convolution backend device: {device}")
     print(f"Convolution backend frame chunk size: {frame_chunk_size}")
+    print(f"Convolution backend sigma group size: {filter_group_size}")
 
     start_time = time.time()
-    for s_idx, sigma in enumerate(sigmas):
+    total_groups = max(1, math.ceil(len(sigmas) / filter_group_size))
+    completed_groups = 0
+    for group_start in range(0, len(sigmas), filter_group_size):
         check_cancelled(cancel_event)
+        group_end = min(group_start + filter_group_size, len(sigmas))
+        group_sigmas = sigmas[group_start:group_end]
         if kernel_cache is not None:
-            kernels = kernel_cache[int(phase), s_idx, 0]
+            kernels = kernel_cache[int(phase), group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
         else:
             kernels = [
                 _gabor_kernel_for_conv(theta, sigma, phase_offset, coupled_frequency=True)
+                for sigma in group_sigmas
                 for theta in thetas
             ]
-        for start, end, response in _conv2d_wavelet_bank(
+        print(
+            f"Convolution coarse phase {phase}: sigma group "
+            f"{completed_groups + 1}/{total_groups} ({group_start + 1}-{group_end} of {len(sigmas)})"
+        )
+        chunk_start = time.time()
+        chunk_count = max(1, math.ceil(num_frames / frame_chunk_size))
+        for chunk_index, (start, end, response) in enumerate(_conv2d_wavelet_group(
             videodata,
             kernels,
             device,
             frame_chunk_size,
+            n_orientations,
             cancel_event=cancel_event,
-        ):
-            wt_final[start:end, :, :, :, s_idx] = response
-        print(progress_message(f"Convolution coarse phase {phase}", s_idx + 1, len(sigmas), start_time))
+        ), start=1):
+            wt_final[start:end, :, :, :, group_start:group_end] = response
+            print(
+                progress_message(
+                    f"Convolution coarse phase {phase} frames",
+                    chunk_index,
+                    chunk_count,
+                    chunk_start,
+                    unit="chunks",
+                )
+            )
+        completed_groups += 1
+        print(progress_message(f"Convolution coarse phase {phase}", completed_groups, total_groups, start_time, unit="groups"))
         gc.collect()
 
     if device == "cuda":
@@ -939,6 +1045,7 @@ def waveletDecompositionFullConv(
     zarr_chunks=None,
     kernel_cache_path=None,
     frame_chunk_size=None,
+    filter_group_size=None,
     cancel_event=None,
 ):
     """Decompose full-model wavelets with compact Gabor kernels and ``conv2d``.
@@ -1019,32 +1126,60 @@ def waveletDecompositionFullConv(
 
     if frame_chunk_size is None:
         frame_chunk_size = _conv_frame_chunk_size(num_frames)
+    combo_count = len(sigmas) * len(frequencies)
+    if filter_group_size is None:
+        filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
+    filter_group_size = max(1, min(int(filter_group_size), combo_count))
+    print(f"Convolution backend device: {device}")
     print(f"Convolution backend frame chunk size: {frame_chunk_size}")
+    print(f"Convolution backend sigma/frequency group size: {filter_group_size}")
 
-    total_steps = max(1, len(sigmas) * len(frequencies))
+    combinations = [(s_idx, f_idx) for s_idx in range(len(sigmas)) for f_idx in range(len(frequencies))]
+    total_steps = max(1, math.ceil(len(combinations) / filter_group_size))
     completed_steps = 0
     start_time = time.time()
-    for s_idx, sigma in enumerate(sigmas):
-        for f_idx, frequency in enumerate(frequencies):
-            check_cancelled(cancel_event)
-            if kernel_cache is not None:
-                kernels = kernel_cache[int(phase), s_idx, f_idx]
-            else:
-                kernels = [
-                    _gabor_kernel_for_conv(theta, sigma, phase_offset, frequency=frequency)
-                    for theta in thetas
-                ]
-            for start, end, response in _conv2d_wavelet_bank(
-                videodata,
-                kernels,
-                device,
-                frame_chunk_size,
-                cancel_event=cancel_event,
-            ):
-                wt_final[start:end, :, :, :, s_idx, f_idx] = response
-            completed_steps += 1
-            print(progress_message(f"Convolution full-model phase {phase}", completed_steps, total_steps, start_time))
-            gc.collect()
+    for group_start in range(0, len(combinations), filter_group_size):
+        check_cancelled(cancel_event)
+        combo_group = combinations[group_start:group_start + filter_group_size]
+        if kernel_cache is not None:
+            kernels = np.concatenate(
+                [kernel_cache[int(phase), s_idx, f_idx] for s_idx, f_idx in combo_group],
+                axis=0,
+            )
+        else:
+            kernels = [
+                _gabor_kernel_for_conv(theta, sigmas[s_idx], phase_offset, frequency=frequencies[f_idx])
+                for s_idx, f_idx in combo_group
+                for theta in thetas
+            ]
+        print(
+            f"Convolution full-model phase {phase}: sigma/frequency group "
+            f"{completed_steps + 1}/{total_steps} ({len(combo_group)} combinations)"
+        )
+        chunk_start = time.time()
+        chunk_count = max(1, math.ceil(num_frames / frame_chunk_size))
+        for chunk_index, (start, end, response) in enumerate(_conv2d_wavelet_group(
+            videodata,
+            kernels,
+            device,
+            frame_chunk_size,
+            n_orientations,
+            cancel_event=cancel_event,
+        ), start=1):
+            for local_idx, (s_idx, f_idx) in enumerate(combo_group):
+                wt_final[start:end, :, :, :, s_idx, f_idx] = response[..., local_idx]
+            print(
+                progress_message(
+                    f"Convolution full-model phase {phase} frames",
+                    chunk_index,
+                    chunk_count,
+                    chunk_start,
+                    unit="chunks",
+                )
+            )
+        completed_steps += 1
+        print(progress_message(f"Convolution full-model phase {phase}", completed_steps, total_steps, start_time, unit="groups"))
+        gc.collect()
 
     if device == "cuda":
         torch.cuda.empty_cache()
