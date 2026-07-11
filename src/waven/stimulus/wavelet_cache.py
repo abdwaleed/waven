@@ -7,6 +7,7 @@ This module owns the legacy ``dwt_videodata_*`` and
 """
 import math
 import os
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -23,7 +24,12 @@ import torch.nn.functional as F
 from skimage import transform
 
 from ..config import coarse_grid_dimensions
-from ..runtime.performance import coarse_wavelet_chunk_size_gpu_or_cpu, get_gpu_count, has_enough_ram
+from ..runtime.performance import (
+    available_ram_bytes,
+    coarse_wavelet_chunk_size_gpu_or_cpu,
+    get_gpu_count,
+    has_enough_ram,
+)
 from ..runtime.task_control import check_cancelled, progress_message
 from ..storage.array_store import load_array
 
@@ -97,6 +103,46 @@ def _expected_coarse_shape(nx0, ny0, no, ns, nf):
     """
     coarse_nx, coarse_ny = coarse_grid_dimensions(nx0, ny0)
     return coarse_nx, coarse_ny, (coarse_nx, coarse_ny, no, ns, nf)
+
+
+def _safe_coarse_chunk_size(requested, source_shape, target_shape, concurrent_workers):
+    """Bound a cache-merger chunk by estimated peak host memory.
+
+    Each chunk temporarily holds real, imaginary, and complex arrays, plus
+    conversion/interpolation copies.  A frame-count-only heuristic can request
+    thousands of large frames and freeze the operating system through paging.
+    """
+    source_elements = math.prod(source_shape[1:])
+    target_elements = math.prod(target_shape[1:])
+    bytes_per_frame = max(source_elements, target_elements) * np.dtype(np.float32).itemsize
+    # Three values plus temporary contiguous/resize copies; deliberately
+    # conservative because library implementations may allocate work buffers.
+    peak_bytes_per_frame = max(1, bytes_per_frame * 8)
+    workers = max(1, int(concurrent_workers))
+    available = available_ram_bytes()
+    # Never dedicate more than 8% of currently available RAM or 256 MiB to all
+    # in-flight chunks.  Keep a usable OS/UI reserve even on large machines.
+    total_budget = min(256 * 1024**2, max(64 * 1024**2, int(available * 0.08)))
+    safe = max(1, total_budget // workers // peak_bytes_per_frame)
+    chosen = max(1, min(int(requested), int(safe)))
+    if chosen < int(requested):
+        print(
+            f"Safety cap: reducing coarse-cache chunk from {requested} to {chosen} frames "
+            f"(estimated peak {peak_bytes_per_frame / 1024**2:.1f} MiB/frame, {workers} worker(s))."
+        )
+    return chosen
+
+
+def _require_cache_disk_space(path, required_bytes):
+    """Fail before writes can exhaust the volume hosting a coarse cache."""
+    free_bytes = shutil.disk_usage(path).free
+    required_with_headroom = int(required_bytes * 1.10)
+    if free_bytes < required_with_headroom:
+        raise OSError(
+            "Insufficient free disk space for the coarse wavelet cache: "
+            f"need at least {required_with_headroom / 1024**3:.2f} GiB including safety headroom, "
+            f"but only {free_bytes / 1024**3:.2f} GiB is available in {path}."
+        )
 
 
 def load_stimulus_simple_cell(
@@ -333,10 +379,17 @@ def coarseWavelet(
         w_r_cached = _coerce_legacy_coarse_wavelets(wavelets_downsampled[0])
         w_i_cached = _coerce_legacy_coarse_wavelets(wavelets_downsampled[1])
         w_c_cached = _coerce_legacy_coarse_wavelets(wavelets_downsampled[2])
-        _validate_legacy_coarse_shape(w_r_cached, nx, ny, no, ns, "Cached real wavelets")
-        _validate_legacy_coarse_shape(w_i_cached, nx, ny, no, ns, "Cached imaginary wavelets")
-        _validate_legacy_coarse_shape(w_c_cached, nx, ny, no, ns, "Cached complex wavelets")
-        return w_r_cached, w_i_cached, w_c_cached
+        try:
+            _validate_legacy_coarse_shape(w_r_cached, nx, ny, no, ns, "Cached real wavelets")
+            _validate_legacy_coarse_shape(w_i_cached, nx, ny, no, ns, "Cached imaginary wavelets")
+            _validate_legacy_coarse_shape(w_c_cached, nx, ny, no, ns, "Cached complex wavelets")
+            return w_r_cached, w_i_cached, w_c_cached
+        except ValueError as exc:
+            # The cache is derived, and may predate a grid-percentage change.
+            # Fall through to the normal writer below, which opens this path
+            # with mode="w+" and atomically replaces its incompatible content.
+            print(f"Cached coarse wavelets are incompatible; rebuilding: {exc}")
+            del wavelets_downsampled, w_r_cached, w_i_cached, w_c_cached
 
     print("Beginning downsampling...")
     wavelets_r, wavelets_i = load_stimulus_simple_cell(
@@ -347,9 +400,17 @@ def coarseWavelet(
     wavelets_i = _coerce_legacy_coarse_wavelets(wavelets_i)
     source_nx, source_ny = wavelets_r.shape[1:3]
     n_frames = wavelets_r.shape[0]
-    n_chunks = math.ceil(n_frames / chunk_size)
 
     target_shape_full = (n_frames, nx, ny, no, ns)
+    cache_bytes = 3 * math.prod(target_shape_full) * np.dtype(np.float32).itemsize
+    _require_cache_disk_space(path, cache_bytes)
+    chunk_size = _safe_coarse_chunk_size(
+        chunk_size,
+        wavelets_r.shape,
+        target_shape_full,
+        concurrent_workers=max(1, get_gpu_count()),
+    )
+    n_chunks = math.ceil(n_frames / chunk_size)
     bytes_per_array = math.prod(target_shape_full) * 4
     total_required = bytes_per_array * 3
     use_memmap = not has_enough_ram(total_required, safety_margin=1.20)

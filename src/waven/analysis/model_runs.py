@@ -280,7 +280,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                    wavelet_path='.',
                    savepath='outputs', n_min=5, tt=None,
                    memmapping=True, train_idx=None, test_idx=None, double_wavelet_model=False, lastmin=False,
-                   plotting=False, frames_per_minute=None,
+                   plotting=False, frames_per_minute=None, coarse_shape=None,
                    hz=None, show_sem_errorbars=False):
     """Function for run Full Model.
 
@@ -323,9 +323,9 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                 "run_Full_Model requires frames_per_minute or hz from the "
                 "configured stimulus frame rate."
             )
-        frames_per_minute = int(hz) * SECONDS_PER_MINUTE
+        frames_per_minute = int(round(float(hz) * SECONDS_PER_MINUTE))
     frames_per_minute = int(frames_per_minute)
-    hz = int(hz)
+    hz = float(hz) if hz is not None else frames_per_minute / SECONDS_PER_MINUTE
     train_idx = [int(i) for i in train_idx]
     test_idx = [int(i) for i in test_idx]
     if not train_idx or not test_idx:
@@ -393,7 +393,15 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             f"Real/imag full-model wavelets must share a shape, got "
             f"{wavelets_r.shape} and {wavelets_i.shape}."
         )
-    scale_x, scale_y = coarse_to_full_scale(nx_full, ny_full)
+    if coarse_shape is None:
+        # Preserve the historical scripted API while allowing the GUI to use
+        # arbitrary metadata-derived downsampling percentages.
+        scale_x, scale_y = coarse_to_full_scale(nx_full, ny_full)
+    else:
+        coarse_nx, coarse_ny = (int(coarse_shape[0]), int(coarse_shape[1]))
+        if coarse_nx <= 0 or coarse_ny <= 0:
+            raise ValueError(f"coarse_shape must contain positive dimensions, got {coarse_shape!r}")
+        scale_x, scale_y = nx_full / coarse_nx, ny_full / coarse_ny
     margin = 5
     corr_shape = (n_orientations, n_sigmas_w, n_frequencies)
     compute_device = "cuda" if torch.cuda.is_available() else "cpu"

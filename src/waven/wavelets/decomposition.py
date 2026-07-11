@@ -7,6 +7,7 @@ wavelet coefficient arrays to disk. Filter-bank construction lives in
 import gc
 import math
 import os
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -42,6 +43,44 @@ from .filters import has_enough_ram
 def _array_bytes(shape, dtype=np.float32):
     """Return exact bytes for an array shape/dtype pair."""
     return int(math.prod(tuple(int(v) for v in shape)) * np.dtype(dtype).itemsize)
+
+
+def _safe_work_array(shape, folder_path, name, dtype=np.float32):
+    """Allocate a temporary array in RAM only when OS headroom remains."""
+    required = _array_bytes(shape, dtype)
+    if has_enough_ram(required, safety_margin=1.50):
+        return np.empty(shape, dtype=dtype), None
+    os.makedirs(folder_path, exist_ok=True)
+    free = shutil.disk_usage(folder_path).free
+    if free < int(required * 1.10):
+        raise OSError(
+            f"Insufficient disk space for temporary {name}: need {required * 1.10 / 1024**3:.2f} GiB, "
+            f"available {free / 1024**3:.2f} GiB."
+        )
+    path = os.path.join(folder_path, f".{name}.waven-work.npy")
+    print(f"Using disk-backed temporary {name} ({required / 1024**3:.2f} GiB) to preserve RAM.")
+    return np.lib.format.open_memmap(path, mode="w+", dtype=dtype, shape=shape), path
+
+
+def _require_disk_space(folder_path, required_bytes, label):
+    """Preflight disk capacity before creating a large memory-mapped output."""
+    os.makedirs(folder_path, exist_ok=True)
+    free = shutil.disk_usage(folder_path).free
+    required = int(required_bytes * 1.10)
+    if free < required:
+        raise OSError(
+            f"Insufficient disk space for {label}: need {required / 1024**3:.2f} GiB including headroom, "
+            f"available {free / 1024**3:.2f} GiB."
+        )
+
+
+def _release_work_array(array, path):
+    """Flush and remove a disk-backed temporary workspace when complete."""
+    if hasattr(array, "flush"):
+        array.flush()
+    del array
+    if path and os.path.exists(path):
+        os.remove(path)
 
 
 def _maybe_load_into_ram(array, label):
@@ -720,11 +759,14 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path, ca
         use_mmap = False
         print(f"Using RAM output for coarse phase {phase} ({working_bytes / (1024**3):.2f} GB working set).")
     else:
+        _require_disk_space(folder_path, required_bytes, f"coarse wavelet phase {phase}")
         WT_final = np.lib.format.open_memmap(save_path, mode='w+', dtype=np.float32, shape=final_shape)
         use_mmap = True
         print(f"Using disk-backed output for coarse phase {phase}; RAM is below safe working set.")
 
-    temp_flat = np.empty((num_filters, T, 1), dtype=np.float32)
+    temp_flat, temp_flat_path = _safe_work_array(
+        (num_filters, T, 1), folder_path, f"coarse_phase_{phase}_projection"
+    )
     device = resolve_compute_device(prefer_gpu=True)
     video_tensor, video_flat, _, spatial_pixels = _prepare_video_flat(videodata, device)
 
@@ -749,13 +791,14 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path, ca
         
         gc.collect() 
 
-    del video_flat, video_tensor
+    del video_flat, video_tensor, spatial
+    _release_work_array(temp_flat, temp_flat_path)
     if device == "cuda":
         torch.cuda.empty_cache()
         
     if use_mmap:
         WT_final.flush()
-        del WT_final, temp_flat
+        del WT_final
         print(f"Success! Saved streamed disk array to {save_path}")
     else:
         print("Saving array to disk...", end="\n\n")
@@ -863,6 +906,7 @@ def waveletDecompositionFull(
         use_mmap = False
         print(f"Using RAM output for full-model phase {phase} ({working_bytes / (1024**3):.2f} GB working set).")
     else:
+        _require_disk_space(folder_path, required_bytes, f"full-model wavelet phase {phase}")
         wt_final = np.lib.format.open_memmap(
             save_path,
             mode="w+",
@@ -872,7 +916,10 @@ def waveletDecompositionFull(
         use_mmap = True
         print(f"Using disk-backed output for full-model phase {phase}; RAM is below safe working set.")
 
-    temp_flat = np.zeros((num_filters, num_frames, 1), dtype=np.float32)
+    temp_flat, temp_flat_path = _safe_work_array(
+        (num_filters, num_frames, 1), folder_path, f"full_phase_{phase}_projection"
+    )
+    temp_flat.fill(0)
     device = resolve_compute_device(prefer_gpu=True)
     video_tensor, video_flat, _, spatial_pixels = _prepare_video_flat(videodata, device)
 
@@ -908,7 +955,8 @@ def waveletDecompositionFull(
             print(progress_message(f"Full-model phase {phase}", completed_steps, total_steps, start_time))
             gc.collect()
 
-    del video_flat, video_tensor
+    del video_flat, video_tensor, spatial
+    _release_work_array(temp_flat, temp_flat_path)
     if device == "cuda":
         torch.cuda.empty_cache()
 
@@ -965,6 +1013,7 @@ def waveletDecompositionConv(
         use_mmap = False
         print(f"Using RAM output for convolution coarse phase {phase} ({required_bytes / (1024**3):.2f} GB).")
     else:
+        _require_disk_space(folder_path, required_bytes, f"convolution coarse wavelet phase {phase}")
         wt_final = np.lib.format.open_memmap(save_path, mode="w+", dtype=np.float32, shape=final_shape)
         use_mmap = True
         print(f"Using disk-backed output for convolution coarse phase {phase}; RAM is below safe working set.")
@@ -1120,6 +1169,7 @@ def waveletDecompositionFullConv(
         use_mmap = False
         print(f"Using RAM output for convolution full-model phase {phase} ({required_bytes / (1024**3):.2f} GB).")
     else:
+        _require_disk_space(folder_path, required_bytes, f"convolution full-model wavelet phase {phase}")
         wt_final = np.lib.format.open_memmap(save_path, mode="w+", dtype=np.float32, shape=final_shape)
         use_mmap = True
         print(f"Using disk-backed output for convolution full-model phase {phase}; RAM is below safe working set.")

@@ -37,9 +37,21 @@ def available_ram_bytes() -> int:
     return int(psutil.virtual_memory().available)
 
 
-def has_enough_ram(required_bytes: int, safety_margin: float = 1.20) -> bool:
-    """Return True when ``required_bytes * safety_margin`` fits in free RAM."""
-    return available_ram_bytes() > int(required_bytes * safety_margin)
+def has_enough_ram(
+    required_bytes: int,
+    safety_margin: float = 1.20,
+    os_reserve_fraction: float = 0.30,
+) -> bool:
+    """Return whether an allocation fits while retaining OS/UI headroom.
+
+    Treating all currently available RAM as application memory can make Windows
+    page aggressively or stop servicing the GUI.  The reserve is intentionally
+    retained for the desktop, file cache, driver allocations, and transient
+    copies made by NumPy/PyTorch.
+    """
+    reserve_fraction = min(max(float(os_reserve_fraction), 0.0), 0.80)
+    usable = int(available_ram_bytes() * (1.0 - reserve_fraction))
+    return usable > int(required_bytes * safety_margin)
 
 
 def cpu_worker_count(cap: Optional[int] = None) -> int:
@@ -113,7 +125,11 @@ def model_parallel_jobs() -> int:
         if vram_gb >= 12:
             return min(3, cpu_worker_count(cap=3))
         return min(2, cpu_worker_count(cap=2))
-    return cpu_worker_count()
+    # Per-neuron workers each build sizeable feature/correlation arrays.  Using
+    # every logical core can turn model fitting into a memory-pressure event and
+    # leave Windows unable to service the GUI.  Four workers still provides
+    # useful parallelism while reserving CPU and RAM for the operating system.
+    return min(4, cpu_worker_count(cap=4))
 
 
 def coarse_wavelet_chunk_size(default: int = 1000) -> int:

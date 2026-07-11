@@ -3085,8 +3085,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         print(f"Could not remove temporary scratch file {scratch_path}: {exc}")
 
             print(
-                f"Coarse RF grid derived from config: {coarse_nx} x {coarse_ny} "
-                f"({_selected_downsample_percent():.0f}% of {nx} x {ny} when precompute is selected)"
+                f"Coarse RF grid derived from movie metadata: {coarse_nx} x {coarse_ny} "
+                f"({_selected_downsample_percent():.0f}% of "
+                f"{_movie_metadata(movpath)['width']} x {_movie_metadata(movpath)['height']})"
             )
             print(f"Coarse wavelet files are ready: {wavelet_folder}")
             update_progress(100, "Coarse wavelet decomposition", "Coarse RF cache ready")
@@ -4108,13 +4109,36 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         )
         w_r = wavelets_downsampled[0]
         w_i = wavelets_downsampled[1]
+        expected_coarse_features = (
+            int(state["coarse_nx"]),
+            int(state["coarse_ny"]),
+            int(state["n_orientations"]),
+            len(state["sigmas"]),
+        )
+        if w_r.ndim != 5 or w_i.ndim != 5 or w_r.shape != w_i.shape or tuple(w_r.shape[1:]) != expected_coarse_features:
+            raise ValueError(
+                "The coarse model cache does not match the RF-analysis grid. "
+                f"Expected (time, {expected_coarse_features[0]}, {expected_coarse_features[1]}, "
+                f"{expected_coarse_features[2]}, {expected_coarse_features[3]}), got "
+                f"{w_r.shape} and {w_i.shape}. Re-run coarse wavelet decomposition and RF analysis."
+            )
         raw_best_params = np.array(state["rfs_gabor"][1])
         smoothed_best_params = smooth_best_positions(
             raw_best_params,
             state["neuron_pos"],
         )
+        for name, params in (("raw", raw_best_params), ("smoothed", smoothed_best_params)):
+            coords = np.asarray(params[:2, neuron_id], dtype=float)
+            limits = np.asarray(expected_coarse_features[:2], dtype=float) - 1
+            if not np.all(np.isfinite(coords)) or np.any(coords < 0) or np.any(coords > limits):
+                raise ValueError(
+                    f"{name.title()} RF coordinates {tuple(coords)} are outside the coarse wavelet grid "
+                    f"{tuple(expected_coarse_features[:2])}. Re-run coarse RF analysis for the current cache."
+                )
         movie_metadata = _movie_metadata()
-        dt1 = min(movie_metadata["frames"], state["spks"].shape[1])
+        dt1 = min(movie_metadata["frames"], state["spks"].shape[1], w_r.shape[0], w_i.shape[0])
+        if dt1 < 2:
+            raise ValueError("Run Model needs at least two frames shared by spikes and coarse wavelets.")
         frames_per_minute = int(round(movie_metadata["fps"] * 60))
 
         def call_model():
@@ -4187,6 +4211,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             raw_best_params,
             state["neuron_pos"],
         )
+        for name, params in (("raw", raw_best_params), ("smoothed", smoothed_best_params)):
+            coords = np.asarray(params[:2, neuron_id], dtype=float)
+            limits = np.asarray((state["coarse_nx"], state["coarse_ny"]), dtype=float) - 1
+            if not np.all(np.isfinite(coords)) or np.any(coords < 0) or np.any(coords > limits):
+                raise ValueError(
+                    f"{name.title()} RF coordinates {tuple(coords)} are outside the coarse RF grid "
+                    f"{tuple(limits.astype(int) + 1)}. Re-run coarse RF analysis for the current cache."
+                )
         sigmas_full = np.array(parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"))
         frequencies = np.array(parse_literal(gabor_entries["Frequencies"].get(), "Frequencies"))
         wavelet_path = _wavelet_folder("full")
@@ -4214,7 +4246,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 wavelet_path=gui_trailing_sep(wavelet_path),
                 savepath=gui_trailing_sep(save_path),
                 n_min=5,
-                tt=[0, min(state["nb_frames"], state["spks"].shape[1])],
+                tt=[0, min(movie_metadata["frames"], state["nb_frames"], state["spks"].shape[1])],
                 memmapping=True,
                 train_idx=split_settings["train_idx"],
                 test_idx=split_settings["test_idx"],
@@ -4222,6 +4254,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 lastmin=split_settings["lastmin"],
                 plotting=True,
                 frames_per_minute=frames_per_minute,
+                coarse_shape=(state["coarse_nx"], state["coarse_ny"]),
                 hz=movie_metadata["fps"],
                 show_sem_errorbars=_sem_enabled(),
             )
