@@ -1,103 +1,81 @@
 # First GUI analysis
 
-This tutorial runs the interactive application from a configuration file and
-produces the first coarse receptive-field plots.
+This tutorial follows the GUI in its required order. The essential idea is
+simple: the stimulus movie defines the timing and spatial grid for the whole
+session, so it is prepared before neural alignment or Gabor work.
 
-## 1. Install and activate the environment
+## 1. Configure folders
 
-```bash
-conda env create --solver libmamba -f environment.yml
-conda activate waven
-python -m pip install -e ".[docs]"
-```
+Set `Project Root`, `Movie Path`, neural-data paths, and output folders in
+`pipeline_config.json` or the GUI. `Movie Path` is a folder containing one
+stimulus movie. The project layout is documented in
+[Project Layout](../reference/project-layout.md).
 
-If you do not need documentation tooling on the analysis machine, use
-`pip install -e .` instead.
+Do not enter stimulus width, height, frame count, or FPS. They are read from
+the movie. Do not enter `NX` or `NY`; one downsampling percentage determines
+the shared analysis grid.
 
-## 2. Prepare `pipeline_config.json`
+## 2. Stimulus & Metadata
 
-Copy the provided `pipeline_config.json` and edit paths so they point to local
-folders. The GUI uses a strict folder layout under `Project Root`; file names
-inside the final folder usually do not matter when there is only one valid
-candidate.
+Open **1 Stimulus & Metadata**, select the movie folder, choose the percentage,
+and click **Prepare Stimulus Cache**. This reads and validates:
 
-- `Project Root`: root folder containing `input/`, `cache/`, and `output/`.
-- `Movie Path`: folder containing one stimulus movie.
-- `Save Path`, `Coarse Library Path`, and `Fine Library Path`: Gabor cache folders.
-- `Spks Path`: folder containing or receiving aligned `spikes` and `pos` arrays.
-- `Full Model Wavelet Path`: folder containing or receiving full-model wavelets.
-- `Full Model Save Path`: folder for model outputs.
+- original width and height;
+- frame count;
+- frames per second;
+- duration (`frames / FPS`).
 
-The standard layout is documented in [Project Layout](../reference/project-layout.md).
+It then writes the binary downsampled movie with shape `(time, y, x)`. The GUI
+uses this metadata-derived frame count for neural-cache alignment and the
+duration to validate ephys photodiode trial boundaries. This is why **Session
+Setup** is intentionally unavailable for neural cache creation until this step
+succeeds.
 
-Before launching the GUI, sanity-check the largest dimensions:
+## 3. Session Setup
 
-| Quantity | Where to check | Why it matters |
+Open **2 Session Setup** and choose the neural source.
+
+- **Fresh / raw data** builds an aligned `spikes`/`pos` cache. For ephys,
+  `spikes` is frame-bin firing rate in Hz: spike count divided by the actual
+  photodiode-defined bin duration.
+- **Continue / existing cache** validates an existing compatible cache pair.
+
+The resulting neural array has shape `(trials, frames, neurons)`.
+
+## 4. Gabor and wavelet products
+
+In **3 Gabor**, select Legacy or Convolution.
+
+- Legacy creates coarse and fine flattened Gabor libraries.
+- Convolution creates compact coarse and fine kernel caches instead.
+
+In **4 Wavelet Products**, prepare only the products you need:
+
+| Action | Used by | Product |
 | --- | --- | --- |
-| `Number of Frames` | movie/config | Multiplies every wavelet output. |
-| `NX`, `NY` | config | Full-model arrays grow with `NX * NY`; libraries grow roughly with `(NX * NY)^2`. |
-| `N_thetas` | config | Adds orientation bins to libraries, wavelets, RF tensors, and OSI/gOSI curves. |
-| `Sigmas Full Model` | config | Adds size bins to full-model wavelets. |
-| `Frequencies` | config | Adds frequency bins to fine libraries and full-model wavelets. |
+| Prepare Coarse RF Power Cache | Run Coarse RF Analysis | `coarse_rf_power.zarr` |
+| Prepare Run Model Phase Caches | Run Model | `coarse_model_real.zarr`, `coarse_model_imag.zarr` |
+| Prepare Run Full Model Phase Caches | Run Full Model | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` |
 
-For a first run, it is reasonable to start with the coarse path and inspect RFs
-before committing disk space to a large full-model wavelet set.
+All large internal products are chunked Zarr arrays. They are streamed from
+disk rather than eagerly loaded into memory.
 
-## 3. Launch the GUI
+## 5. Analyze
 
-```python
-from pathlib import Path
+Click **Run Coarse RF Analysis**. RF maps and displayed orientation/size curves
+are correlation-based diagnostics. The OSI and gOSI distributions are different:
+they use firing-rate orientation tuning from the aligned `spikes` cache, weighted
+by the preferred wavelet feature. Individual orientation and size correlation
+curves show 95% confidence intervals only.
 
-import waven
+After RF analysis, **Run Model (Coarse RF)** requires the named coarse-model
+phase pair. **Run Full Model** requires the named full-model phase pair and
+uses the coarse RF feature seeds for local refinement.
 
-config = waven.PipelineConfig.from_json(Path("pipeline_config.json"))
-waven.gui.run(
-    config.analysis.to_gui_mapping(),
-    config.gabor.to_gui_mapping(),
-    workflow=config.workflow,
-)
-```
+## Resuming safely
 
-## 4. Build libraries
-
-Choose **Analysis scale** in the session configuration before pressing the large
-action buttons. The same buttons change their target:
-
-| Scale | Button sequence | Result |
-| --- | --- | --- |
-| `coarse` | **Build Gabor Library (Coarse RF)**, then **Run Wavelet Decomposition (Coarse RF)** | coarse library, coarse phases, durable RF cache |
-| `full` | **Build Gabor Library (Full model)**, then **Run Wavelet Decomposition (Full model)** | fine library and full-model real/imaginary wavelets |
-
-Long tasks are resumable. If the application stops after a completed stage, run
-the same button again; existing outputs are shape-checked and reused.
-
-The status text beside the button reports the current stage, such as
-downsampling, real phase, imaginary phase, or durable cache creation. If a task
-fails, rerunning the button should skip completed compatible files and continue
-from the next missing or invalid artifact.
-
-## 5. Run coarse RF analysis
-
-Click **Run Coarse RF Analysis**. The **All neurons** tab will show:
-
-- neuron layout;
-- population retinotopy maps;
-- OSI and gOSI distributions by neuron/shank;
-- OSI and gOSI histograms by unit or spatial fallback group.
-
-The **Individual neuron** tab shows the selected neuron's spike train, receptive
-field, feature tuning curves, and OSI/gOSI in the orientation panel title.
-
-When judging the first plots, read them in this order:
-
-1. Use repeatability and skewness to identify neurons worth trusting.
-2. Check whether population retinotopy changes smoothly across anatomy.
-3. Inspect individual RFs before trusting a population histogram.
-4. Compare OSI/gOSI with the raw orientation tuning curve.
-
-This order helps separate a real orientation preference from a noisy neuron that
-happened to produce a sharp correlation peak.
-
-After RF analysis, **Run Model Plots** also follows the selected scale:
-`coarse` runs the simple coarse model, while `full` runs the full model using
-the full wavelets and the coarse RF feature seeds.
+Every cache is validated by shape and a parameter fingerprint. Re-running an
+action reuses a compatible completed product and regenerates a stale one. If a
+run fails, read the reported artifact name and shape; do not substitute a cache
+made with a different movie, percentage, backend, orientation count, sigma
+list, phase list, or frequency list.

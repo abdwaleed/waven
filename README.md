@@ -66,6 +66,16 @@ https://docs.google.com/presentation/d/1nEv07CzCwYUoozucwwqi6qgS_t0jBy7KwqHKKoh2
 
 **Tutorial**
 
+> **Current GUI workflow.** The video is the source of truth for width, height,
+> frame count, FPS, and duration. The GUI accepts one downsampling percentage;
+> it does not accept `NX`, `NY`, a stimulus FPS, or a hardcoded duration. Gabor
+> phases are entered in degrees. The current Wavelets tab prepares separate
+> disk-backed Zarr products for Coarse RF power, Run Model real/imaginary
+> phases, and Run Full Model real/imaginary phases. See
+> `docs/how-to/run-wavelet-decomposition.md` for the current files, shapes, and
+> backend-specific behavior. The legacy configuration example below is kept
+> only as historical scripted-pipeline context.
+
 Setting up the parameters**
 
 ```python

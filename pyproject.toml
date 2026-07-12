@@ -25,6 +25,7 @@ dependencies = [
     "torch>=2.1.2",
     "tensorly",
     "zarr",
+    "numcodecs",
     "numexpr",
     "tqdm",
     "psutil",

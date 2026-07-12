@@ -7,7 +7,7 @@ from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .array_store import load_array
+from .array_store import load_array, load_array_with_memory_fallback
 
 SUPPORTED_NEURAL_CACHE_FORMATS = {"npy", "zarr"}
 
@@ -94,8 +94,13 @@ def load_neural_cache_pair(
             f"(spikes.npy/spikes.zarr and pos.npy/pos.zarr) at {target}."
         )
     spikes_path, pos_path = pair
-    spikes = load_array(str(spikes_path), mmap_mode=mmap_mode)
-    neuron_pos = load_array(str(pos_path), mmap_mode=mmap_mode)
+    loader = load_array_with_memory_fallback if mmap_mode is None else load_array
+    if mmap_mode is None:
+        spikes = loader(str(spikes_path))
+        neuron_pos = loader(str(pos_path))
+    else:
+        spikes = loader(str(spikes_path), mmap_mode=mmap_mode)
+        neuron_pos = loader(str(pos_path), mmap_mode=mmap_mode)
     return spikes, neuron_pos, spikes_path, pos_path
 
 

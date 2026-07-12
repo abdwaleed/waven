@@ -440,7 +440,10 @@ def run_rf_analysis(
         wavelets.wavelets_complex.shape[0],
         spike_data.spikes.shape[1],
     )
-    stimulus = wavelets.wavelets_complex[:n_frames].reshape(n_frames, -1)
+    # Retain the structured disk-backed tensor.  PearsonCorrelationPinkNoise
+    # streams it in feature blocks, whereas flattening a Zarr cache materializes
+    # the entire wavelet product in RAM.
+    stimulus = wavelets.wavelets_complex
     response = np.mean(spike_data.spikes[:, :n_frames], axis=0)
     if wavelets.wavelets_complex.ndim == 6:
         rf_nf = wavelets.wavelets_complex.shape[5]
@@ -462,6 +465,7 @@ def run_rf_analysis(
         rf_frequencies,                # frequencies present in coarse cache
         n_orientations=gabor.n_thetas, 
         plotting=plotting,
+        n_time=n_frames,
     )
 
     if (

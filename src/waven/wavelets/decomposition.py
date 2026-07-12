@@ -57,7 +57,7 @@ def _safe_work_array(shape, folder_path, name, dtype=np.float32):
             f"Insufficient disk space for temporary {name}: need {required * 1.10 / 1024**3:.2f} GiB, "
             f"available {free / 1024**3:.2f} GiB."
         )
-    path = os.path.join(folder_path, f".{name}.waven-work.npy")
+    path = os.path.join(folder_path, f".{name}.waven-work.mmap")
     print(f"Using disk-backed temporary {name} ({required / 1024**3:.2f} GiB) to preserve RAM.")
     return np.lib.format.open_memmap(path, mode="w+", dtype=dtype, shape=shape), path
 
@@ -716,7 +716,17 @@ def waveletTransform3D(frame, L):
     return output.detach().cpu().numpy()
 
 
-def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path, cancel_event=None):
+def waveletDecomposition(
+    videodata,
+    phase,
+    sigmas,
+    folder_path,
+    library_path,
+    output_format="npy",
+    output_stem=None,
+    zarr_chunks=None,
+    cancel_event=None,
+):
     """Decompose a downsampled movie into Gabor wavelet coefficients.
 
     Chooses in-memory or memory-mapped output based on ``has_enough_ram``, then
@@ -748,13 +758,41 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path, ca
     
     required_bytes = _array_bytes(final_shape, np.float32)
     
-    save_path = os.path.join(folder_path, f'dwt_videodata_{phase}.npy')
+    output_format = str(output_format or "npy").lower()
+    if output_format not in {"npy", "zarr"}:
+        raise ValueError(f"Unsupported coarse wavelet output format: {output_format}")
+    output_stem = output_stem or f"dwt_videodata_{phase}"
+    save_path = os.path.join(folder_path, f"{output_stem}.{output_format}")
     
     temp_bytes = _array_bytes((num_filters, T, 1), np.float32)
     working_bytes = required_bytes + temp_bytes
 
+    # Zarr is always disk-backed. Its bounded chunks preserve RAM headroom
+    # while allowing independent RF/model products to be streamed safely.
+    if output_format == "zarr":
+        try:
+            import zarr
+            from numcodecs import Blosc
+        except ImportError as exc:
+            raise ImportError(
+                "Zarr coarse-wavelet output requires the 'zarr' and 'numcodecs' packages."
+            ) from exc
+        _require_disk_space(folder_path, required_bytes, f"coarse wavelet phase {phase}")
+        if zarr_chunks is None:
+            zarr_chunks = (min(T, 128), min(prefix_shape[0], 16), min(prefix_shape[1], 16), prefix_shape[2], len(sigmas))
+        zarr_chunks = tuple(
+            min(int(dim), max(1, int(chunk)))
+            for dim, chunk in zip(final_shape, zarr_chunks)
+        )
+        wt_final = _open_zarr_array(
+            zarr, save_path, mode="w", shape=final_shape, chunks=zarr_chunks,
+            dtype=np.float32,
+            compressor=Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE),
+        )
+        use_mmap = False
+        print(f"Writing coarse phase {phase} directly to Zarr: {save_path}")
     # Prefer RAM for compute and use disk-backed output only when memory is tight.
-    if has_enough_ram(working_bytes, safety_margin=1.20):
+    elif has_enough_ram(working_bytes, safety_margin=1.20):
         WT_final = np.zeros(final_shape, dtype=np.float32)
         use_mmap = False
         print(f"Using RAM output for coarse phase {phase} ({working_bytes / (1024**3):.2f} GB working set).")
@@ -796,7 +834,9 @@ def waveletDecomposition(videodata, phase, sigmas, folder_path, library_path, ca
     if device == "cuda":
         torch.cuda.empty_cache()
         
-    if use_mmap:
+    if output_format == "zarr":
+        print(f"Success! Saved coarse Zarr array to {save_path}")
+    elif use_mmap:
         WT_final.flush()
         del WT_final
         print(f"Success! Saved streamed disk array to {save_path}")
@@ -982,13 +1022,16 @@ def waveletDecompositionConv(
     kernel_cache_path=None,
     frame_chunk_size=None,
     filter_group_size=None,
+    output_format="npy",
+    output_stem=None,
+    zarr_chunks=None,
     cancel_event=None,
 ):
     """Decompose a movie using compact Gabor kernels and ``torch.conv2d``.
 
     This is the coarse RF convolution backend. It mirrors the legacy coarse
-    library path by using sigma-coupled frequencies and writing
-    ``dwt_videodata_{phase}.npy`` with shape
+    library path by using sigma-coupled frequencies and writing a named
+    NPY or Zarr array with shape
     ``(time, nx, ny, n_orientations, n_sigmas)``.
     """
     device = resolve_compute_device(prefer_gpu=True)
@@ -1005,10 +1048,36 @@ def waveletDecompositionConv(
         phase_offsets,
     ) if kernel_cache_path else None
     final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
-    save_path = os.path.join(folder_path, f"dwt_videodata_{phase}.npy")
+    output_format = str(output_format or "npy").lower()
+    if output_format not in {"npy", "zarr"}:
+        raise ValueError(f"Unsupported coarse wavelet output format: {output_format}")
+    output_stem = output_stem or f"dwt_videodata_{phase}"
+    save_path = os.path.join(folder_path, f"{output_stem}.{output_format}")
     required_bytes = _array_bytes(final_shape, np.float32)
 
-    if has_enough_ram(required_bytes, safety_margin=1.20):
+    if output_format == "zarr":
+        try:
+            import zarr
+            from numcodecs import Blosc
+        except ImportError as exc:
+            raise ImportError(
+                "Zarr coarse-wavelet output requires the 'zarr' and 'numcodecs' packages."
+            ) from exc
+        _require_disk_space(folder_path, required_bytes, f"convolution coarse wavelet phase {phase}")
+        if zarr_chunks is None:
+            zarr_chunks = (min(num_frames, 128), min(nx, 16), min(ny, 16), int(n_orientations), len(sigmas))
+        zarr_chunks = tuple(
+            min(int(dim), max(1, int(chunk)))
+            for dim, chunk in zip(final_shape, zarr_chunks)
+        )
+        wt_final = _open_zarr_array(
+            zarr, save_path, mode="w", shape=final_shape, chunks=zarr_chunks,
+            dtype=np.float32,
+            compressor=Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE),
+        )
+        use_mmap = False
+        print(f"Writing convolution coarse phase {phase} directly to Zarr: {save_path}")
+    elif has_enough_ram(required_bytes, safety_margin=1.20):
         wt_final = np.zeros(final_shape, dtype=np.float32)
         use_mmap = False
         print(f"Using RAM output for convolution coarse phase {phase} ({required_bytes / (1024**3):.2f} GB).")
@@ -1072,7 +1141,9 @@ def waveletDecompositionConv(
 
     if device == "cuda":
         torch.cuda.empty_cache()
-    if use_mmap:
+    if output_format == "zarr":
+        print(f"Success! Saved convolution coarse Zarr array to {save_path}")
+    elif use_mmap:
         wt_final.flush()
         del wt_final
         print(f"Success! Saved streamed convolution coarse array to {save_path}")

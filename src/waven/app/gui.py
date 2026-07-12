@@ -162,7 +162,7 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     """
     global _RF_IMPORTS_READY
     global compute_skewness_neurons, PearsonCorrelationPinkNoise, PlotTuningCurve
-    global repetability_trial3, firing_rate_orientation_tuning, orientation_selectivity_from_tuning, selectivity_for_rfs
+    global repetability_trial3, firing_rate_orientation_tuning
     if _RF_IMPORTS_READY:
         return
     _ensure_plot_imports()
@@ -176,8 +176,6 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     )
     from ..analysis.orientation_selectivity import (
         firing_rate_orientation_tuning as _firing_rate_orientation_tuning,
-        orientation_selectivity_from_tuning as _orientation_selectivity_from_tuning,
-        selectivity_for_rfs as _selectivity_for_rfs,
     )
 
     compute_skewness_neurons = _compute_skewness_neurons
@@ -185,8 +183,6 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     PlotTuningCurve = _PlotTuningCurve
     repetability_trial3 = _repetability_trial3
     firing_rate_orientation_tuning = _firing_rate_orientation_tuning
-    orientation_selectivity_from_tuning = _orientation_selectivity_from_tuning
-    selectivity_for_rfs = _selectivity_for_rfs
     _RF_IMPORTS_READY = True
 
 
@@ -884,15 +880,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 action_map = {
                     "Neural cache creation": "neural",
                     "Stimulus video downsampling": "downsample",
-                    "Gabor library construction": "gabor",
-                    "Wavelet decomposition": "wavelet",
+                    "Gabor asset preparation": "gabor_all",
+                    "Prepare Coarse RF wavelets": "wavelet:coarse_rf",
+                    "Prepare Run Model wavelets": "wavelet:model",
+                    "Prepare Run Full Model wavelets": "wavelet:full_model",
                     "Coarse receptive-field analysis": "rf",
                 }
                 action = action_map.get(completed_name)
                 if action:
-                    if action in {"downsample", "gabor", "wavelet"}:
+                    if action == "downsample":
                         action = f"{action}:{_selected_analysis_scale()}"
-                    completed_actions.add(action)
+                        completed_actions.add(action)
+                    elif action == "gabor_all":
+                        completed_actions.update({"gabor:coarse", "gabor:full"})
+                    else:
+                        completed_actions.add(action)
         task_state["name"] = None
         task_state["start"] = None
         task_state["detail"] = None
@@ -979,83 +981,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     figure_export_records = []
     active_recovery_dir = {"path": None}
 
-    def _sem_enabled():
-        """Function for sem enabled.
-
-        Returns:
-            Result produced by the operation.
-        """
-        try:
-            return bool(show_sem_var.get())
-        except Exception:
-            return False
-
-    def _sem_over_trials(trials):
-        """Function for sem over trials.
-
-        Args:
-            trials: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
-        trials = np.asarray(trials, dtype=float)
-        if trials.ndim < 2 or trials.shape[0] <= 1:
-            return None
-        return np.nanstd(trials, axis=0, ddof=1) / np.sqrt(trials.shape[0])
-
-    def _plot_trace_with_optional_sem(ax, trials, x=None, color='k', label=None):
-        """Function for plot trace with optional sem.
-
-        Args:
-            ax: Input value for this operation.
-            trials: Input value for this operation.
-            x: Input value for this operation.
-            color: Input value for this operation.
-            label: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
-        trials = np.asarray(trials, dtype=float)
-        if trials.ndim == 1:
-            mean = trials
-            n_trials = 1
-        else:
-            mean = np.nanmean(trials, axis=0)
-            n_trials = trials.shape[0]
-        if x is None:
-            x = np.arange(mean.shape[0])
-        ax.plot(x, mean, c=color, label=label)
-        sem = _sem_over_trials(trials)
-        if _sem_enabled() and sem is not None:
-            every = max(1, mean.shape[0] // 100)
-            ax.errorbar(
-                x,
-                mean,
-                yerr=sem,
-                fmt='none',
-                ecolor=color,
-                elinewidth=0.6,
-                capsize=1,
-                alpha=0.55,
-                errorevery=every,
-            )
-            return n_trials
-        return None
-
-    def _set_sem_caption(fig, n_trials):
-        """Function for set sem caption.
-
-        Args:
-            fig: Input value for this operation.
-            n_trials: Input value for this operation.
-        """
-        if n_trials and n_trials > 1:
-            fig._waven_caption = f"Error bars represent SEM over {n_trials} trials."
-        elif hasattr(fig, "_waven_caption"):
-            delattr(fig, "_waven_caption")
-
     def _field_value(entries, key, default=""):
         """Function for field value.
 
@@ -1084,8 +1009,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 return wavelet_format_var.get()
             if name == "downsample_format_var":
                 return downsample_format_var.get()
-            if name == "downsample_mode_var":
-                return downsample_mode_var.get()
             if name == "neural_cache_format_var":
                 return neural_cache_format_var.get()
         except Exception:
@@ -1171,7 +1094,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Resolve the selected stimulus movie from its folder field."""
         folder = _folder_from_entry(param_entries, "Movie Path", _project_layout().stimulus_movie_dir)
         movie = find_stimulus_movie(folder)
-        _check_movie_metadata_against_gui(movie)
         return str(movie)
 
     def _gabor_folder():
@@ -1275,12 +1197,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """
         fields = {
             "workflow": workflow,
-            "analysis_scale": _selected_analysis_scale(),
             "wavelet_backend": _selected_wavelet_backend(),
             "gabor_format": _safe_var_value("gabor_format_var", "npy"),
-            "wavelet_format": _safe_var_value("wavelet_format_var", "npy"),
             "neural_cache_format": _selected_neural_cache_format(),
-            "downsample_mode": _selected_downsample_mode(),
             "downsample_percent": _selected_downsample_percent(),
             "downsample_format": _selected_downsample_format(),
             "gabor": {key: _field_value(gabor_entries, key) for key in sorted(gabor_entries)},
@@ -2432,12 +2351,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         )
 
     def _selected_analysis_scale():
-        """Return the currently selected analysis scale."""
-        try:
-            value = analysis_scale_var.get()
-        except NameError:
-            return "coarse"
-        return value if value in {"coarse", "full"} else "coarse"
+        """Compatibility value for legacy callers; the GUI now uses one shared grid."""
+        return "coarse"
 
     def _selected_wavelet_backend():
         """Return the selected wavelet decomposition backend."""
@@ -2462,10 +2377,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             return "data_dir"
         return value if value in {"data_dir", "spks_path"} else "data_dir"
-
-    def _selected_downsample_mode():
-        """Return whether the downsample cache button should precompute a movie."""
-        return "precompute"
 
     def _selected_downsample_format():
         """Return the selected precomputed downsampled movie output format."""
@@ -2522,8 +2433,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         scale = scale or _selected_analysis_scale()
         output_format = output_format or _selected_downsample_format()
         percent = int(round(_selected_downsample_percent()))
-        if _selected_downsample_mode() == "legacy":
-            percent = 20 if scale == "coarse" else 100
         return str(conventional_downsample_path(_wavelet_folder(scale), scale, output_format, percent))
 
     def _downsample_cache_candidates(movie_path, scale, preferred_format=None):
@@ -2531,8 +2440,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         preferred_format = preferred_format or _selected_downsample_format()
         alternate_format = "zarr" if preferred_format == "npy" else "npy"
         percent = int(round(_selected_downsample_percent()))
-        if _selected_downsample_mode() == "legacy":
-            percent = 20 if scale == "coarse" else 100
         wavelet_folder = Path(_wavelet_folder(scale))
         movie = Path(movie_path)
         legacy_input_folder = _project_layout().input_dir
@@ -2540,6 +2447,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             conventional_downsample_path(wavelet_folder, scale, preferred_format, percent),
             conventional_downsample_path(wavelet_folder, scale, alternate_format, percent),
         ]
+        # Coarse and full-model products intentionally share the one metadata-
+        # derived stimulus grid.  A full-model run may therefore reuse the
+        # single cache prepared in Step 2 instead of creating a duplicate.
+        if scale == "full":
+            shared_folder = Path(_wavelet_folder("coarse"))
+            candidates.extend(
+                (
+                    conventional_downsample_path(shared_folder, "coarse", preferred_format, percent),
+                    conventional_downsample_path(shared_folder, "coarse", alternate_format, percent),
+                )
+            )
         for suffix in (".npy", ".zarr"):
             if scale == "coarse":
                 candidates.extend(
@@ -2584,7 +2502,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if metadata.get("kind") not in {None, "downsampled_video"}:
                     continue
                 params = metadata.get("params") or {}
-                if params.get("scale") not in {None, scale}:
+                if params.get("scale") not in {None, scale, "coarse"}:
                     continue
             actual_format = "zarr" if candidate.suffix.lower() == ".zarr" else "npy"
             print(
@@ -2744,7 +2662,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         update_progress(100, f"{description} complete")
 
     def create_both_gabor_libraries():
-        """Function for create both gabor libraries."""
+        """Prepare the coarse and full-model Gabor assets for the shared grid."""
+        if _selected_wavelet_backend() == "convolution":
+            _ensure_wavelet_imports("convolution kernel cache construction")
+            _ensure_convolution_kernel_cache("coarse")
+            _ensure_convolution_kernel_cache("fine")
+            update_progress(100, "Convolution kernel caches", "Coarse and full-model kernels ready")
+            return
         create_gabor("coarse")
         create_gabor("fine")
 
@@ -2765,6 +2689,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             movpath, scale, expected_shape, output_format
         )
         if reusable_path:
+            # Mark this prerequisite immediately.  This makes the next stage
+            # available even when the cache was created in an earlier session.
+            completed_actions.add("downsample:coarse")
             update_progress(100, "Stimulus downsample", f"Existing {reusable_format.upper()} cache ready")
             return True
 
@@ -2804,10 +2731,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             downsample_fingerprint,
             params={"scale": scale, "format": output_format, "grid": (target_nx, target_ny)},
         )
+        completed_actions.add("downsample:coarse")
         update_progress(100, "Stimulus downsample", "Downsampled movie ready")
         return True
 
-    def run_wavelet(scale=None):
+    def run_wavelet(product="coarse_rf"):
         """Function for run wavelet.
 
         Returns:
@@ -2815,7 +2743,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """
         _ensure_wavelet_imports("stimulus wavelet generation")
         _raise_if_cancelled()
-        scale = scale or _selected_analysis_scale()
+        product = str(product or "coarse_rf").lower()
+        if product not in {"coarse_rf", "model", "full_model"}:
+            raise ValueError(f"Unknown wavelet product: {product}")
+        scale = "full" if product == "full_model" else "coarse"
         backend = _selected_wavelet_backend()
         if scale not in {"coarse", "full"}:
             raise ValueError(f"Unknown wavelet decomposition scale: {scale}")
@@ -2827,7 +2758,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             print(f"Error: {exc}")
             return False
 
-        output_format = wavelet_format_var.get()
+        # Internal wavelet artifacts are always Zarr: they are large, hidden
+        # cache products and must stay bounded/disk-backed under heavy loads.
+        output_format = "zarr"
         is_zarr_wavelet = output_format == "zarr"
         downsample_output_format = _selected_downsample_format()
         wavelet_folder = _wavelet_folder("coarse")
@@ -2912,16 +2845,42 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             """
             return _coverage_ratios_for_values(visual_coverage, analysis_coverage)
 
-        def _load_downsampled_movie(path):
-            """Load a bool downsampled movie from NPY/Zarr and convert to +/-1."""
+        class _SignedBinaryMovie:
+            """Disk-backed binary movie that converts each requested frame block to +/-1."""
+
+            def __init__(self, source):
+                self._source = source
+                self.shape = tuple(int(dim) for dim in source.shape)
+
+            def __getitem__(self, item):
+                return np.asarray(self._source[item], dtype=np.int8) * 2 - 1
+
+        def _load_downsampled_movie(path, *, streaming=False):
+            """Load a binary movie safely, retaining disk backing for convolution."""
             from ..storage.array_store import load_array
 
             arr = load_array(path, mmap_mode="r")
+            if streaming:
+                # Convolution consumes frame chunks.  This adapter converts only
+                # the requested chunk, avoiding a full cache-sized allocation.
+                return _SignedBinaryMovie(arr)
+            from ..runtime.performance import has_enough_ram
+            required_bytes = int(np.prod(arr.shape, dtype=np.int64))
+            if not has_enough_ram(required_bytes, safety_margin=1.50):
+                raise MemoryError(
+                    "Legacy wavelet decomposition needs the signed stimulus movie in RAM "
+                    f"({required_bytes / 1024**3:.2f} GiB). Choose the convolution backend "
+                    "for disk-streamed execution or reduce the downsampling percentage."
+                )
             return np.asarray(arr, dtype=np.int8) * 2 - 1
 
-        coarse_cache_path = os.path.join(wavelet_folder, "dwt_downsampled_videodata.npy")
-        real_phase_path = os.path.join(wavelet_folder, "dwt_videodata_0.npy")
-        imag_phase_path = os.path.join(wavelet_folder, "dwt_videodata_1.npy")
+        coarse_power_path = os.path.join(wavelet_folder, "coarse_rf_power.zarr")
+        model_real_path = os.path.join(wavelet_folder, "coarse_model_real.zarr")
+        model_imag_path = os.path.join(wavelet_folder, "coarse_model_imag.zarr")
+        temp_real_path = os.path.join(wavelet_folder, ".coarse-rf-phase-real.zarr")
+        temp_imag_path = os.path.join(wavelet_folder, ".coarse-rf-phase-imag.zarr")
+        real_phase_path = model_real_path if product == "model" else temp_real_path
+        imag_phase_path = model_imag_path if product == "model" else temp_imag_path
         coarse_phase_shape = (
             expected_frames,
             coarse_nx,
@@ -2929,7 +2888,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             n_thetas,
             len(sigmas),
         )
-        coarse_cache_shape = (3,) + coarse_phase_shape
+        coarse_power_shape = coarse_phase_shape
         coarse_phase_fingerprint = _cache_fingerprint(
             {
                 "artifact": "coarse_wavelet_phase",
@@ -2938,27 +2897,79 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "downsample": coarse_downsample_fingerprint,
             }
         )
-        coarse_cache_fingerprint = _cache_fingerprint(
+        coarse_power_fingerprint = _cache_fingerprint(
             {
-                "artifact": "coarse_wavelet_cache",
+                "artifact": "coarse_rf_power",
                 "backend": backend,
-                "shape": coarse_cache_shape,
+                "shape": coarse_power_shape,
                 "phase": coarse_phase_fingerprint,
             }
         )
+
+        def _build_coarse_power_zarr(real_path, imag_path, power_path):
+            """Stream phase magnitudes into the RF-only Zarr product."""
+            from ..storage.array_store import load_array
+            try:
+                import zarr
+                from numcodecs import Blosc
+            except ImportError as exc:
+                raise ImportError("Coarse RF power cache requires zarr and numcodecs.") from exc
+            real = load_array(real_path, mmap_mode="r")
+            imag = load_array(imag_path, mmap_mode="r")
+            if tuple(real.shape) != coarse_phase_shape or tuple(imag.shape) != coarse_phase_shape:
+                raise ValueError(
+                    "Coarse phase dimensions do not match the movie-derived analysis grid: "
+                    f"expected {coarse_phase_shape}, got {real.shape} and {imag.shape}."
+                )
+            chunks = (min(expected_frames, 128), min(coarse_nx, 16), min(coarse_ny, 16), n_thetas, len(sigmas))
+            if os.path.exists(power_path):
+                shutil.rmtree(power_path)
+            zarr_kwargs = dict(
+                mode="w", shape=coarse_power_shape, chunks=chunks, dtype=np.float32,
+                compressor=Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE),
+            )
+            try:
+                power = zarr.open(power_path, **zarr_kwargs)
+            except TypeError:
+                compressor = zarr_kwargs.pop("compressor")
+                zarr_kwargs["compressors"] = [compressor]
+                power = zarr.open(power_path, **zarr_kwargs)
+            for t0 in range(0, expected_frames, chunks[0]):
+                _raise_if_cancelled()
+                t1 = min(expected_frames, t0 + chunks[0])
+                for x0 in range(0, coarse_nx, chunks[1]):
+                    x1 = min(coarse_nx, x0 + chunks[1])
+                    for y0 in range(0, coarse_ny, chunks[2]):
+                        y1 = min(coarse_ny, y0 + chunks[2])
+                        real_chunk = np.asarray(real[t0:t1, x0:x1, y0:y1, :, :], dtype=np.float32)
+                        imag_chunk = np.asarray(imag[t0:t1, x0:x1, y0:y1, :, :], dtype=np.float32)
+                        power[t0:t1, x0:x1, y0:y1, :, :] = real_chunk * real_chunk + imag_chunk * imag_chunk
+            del power, real, imag
+            gc.collect()
         if scale == "coarse":
             current_wavelet_dir[0] = wavelet_folder
-            coarse_cache_ready = _artifact_ready(
-                coarse_cache_path,
-                coarse_cache_shape,
-                coarse_cache_fingerprint,
-                kind="coarse_wavelet_cache",
+            requested_path = coarse_power_path if product == "coarse_rf" else model_real_path
+            requested_shape = coarse_power_shape if product == "coarse_rf" else coarse_phase_shape
+            requested_fingerprint = (
+                coarse_power_fingerprint if product == "coarse_rf"
+                else _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
             )
+            requested_kind = "coarse_rf_power" if product == "coarse_rf" else "coarse_model_phase"
+            coarse_cache_ready = _artifact_ready(
+                requested_path, requested_shape, requested_fingerprint, kind=requested_kind
+            )
+            if product == "model":
+                coarse_cache_ready = coarse_cache_ready and _artifact_ready(
+                    model_imag_path,
+                    coarse_phase_shape,
+                    _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint}),
+                    kind="coarse_model_phase",
+                )
 
             if coarse_cache_ready:
-                update_progress(80, "Coarse wavelet decomposition", "Reusing coarse RF cache")
-                print(f"Resume: found completed coarse RF wavelet cache, reusing {coarse_cache_path}")
-                _write_recovery_step("coarse_cache_reused", path=coarse_cache_path, shape=coarse_cache_shape)
+                update_progress(80, "Coarse wavelet decomposition", f"Reusing {product.replace('_', ' ')} cache")
+                print(f"Resume: found completed {product} wavelet product, reusing {requested_path}")
+                _write_recovery_step("coarse_product_reused", path=requested_path, shape=requested_shape)
             else:
                 update_progress(8, "Coarse wavelet decomposition", "Preparing coarse stimulus movie")
                 print("Step 1/4: Preparing coarse stimulus movie...")
@@ -2977,12 +2988,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         f"Check that Movie Path points to a readable video: {movpath}"
                     )
                 _raise_if_cancelled()
-                videodata = _load_downsampled_movie(coarse_downsample_path)
+                videodata = _load_downsampled_movie(
+                    coarse_downsample_path, streaming=(backend == "convolution")
+                )
 
                 update_progress(25, "Coarse wavelet decomposition", "Preparing coarse real phase")
                 print("Step 2/4: Preparing coarse real phase wavelets...")
                 real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
-                if _artifact_ready(real_phase_path, coarse_phase_shape, real_phase_fingerprint, kind="coarse_wavelet_phase"):
+                if _artifact_ready(real_phase_path, coarse_phase_shape, real_phase_fingerprint, kind="coarse_model_phase" if product == "model" else "coarse_rf_temporary_phase"):
                     print(f"Resume: found completed coarse real phase, reusing {real_phase_path}")
                     _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
                 else:
@@ -2996,6 +3009,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             n_orientations=n_thetas,
                             phase_offsets=phase_offsets,
                             kernel_cache_path=coarse_kernel_cache_path,
+                            output_format="zarr",
+                            output_stem=os.path.splitext(os.path.basename(real_phase_path))[0],
                             cancel_event=_current_cancel_event(),
                         )
                     else:
@@ -3005,15 +3020,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             sigmas,
                             wavelet_folder,
                             coarse_lib_path,
+                            output_format="zarr",
+                            output_stem=os.path.splitext(os.path.basename(real_phase_path))[0],
                             cancel_event=_current_cancel_event(),
                         )
-                    _write_artifact_metadata(real_phase_path, "coarse_wavelet_phase", coarse_phase_shape, real_phase_fingerprint)
+                    _write_artifact_metadata(real_phase_path, "coarse_model_phase" if product == "model" else "coarse_rf_temporary_phase", coarse_phase_shape, real_phase_fingerprint)
                     _write_recovery_step("coarse_phase_real_complete", path=real_phase_path)
 
                 update_progress(45, "Coarse wavelet decomposition", "Preparing coarse imaginary phase")
                 print("Step 3/4: Preparing coarse imaginary phase wavelets...")
                 imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
-                if _artifact_ready(imag_phase_path, coarse_phase_shape, imag_phase_fingerprint, kind="coarse_wavelet_phase"):
+                if _artifact_ready(imag_phase_path, coarse_phase_shape, imag_phase_fingerprint, kind="coarse_model_phase" if product == "model" else "coarse_rf_temporary_phase"):
                     print(f"Resume: found completed coarse imaginary phase, reusing {imag_phase_path}")
                     _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
                 else:
@@ -3027,6 +3044,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             n_orientations=n_thetas,
                             phase_offsets=phase_offsets,
                             kernel_cache_path=coarse_kernel_cache_path,
+                            output_format="zarr",
+                            output_stem=os.path.splitext(os.path.basename(imag_phase_path))[0],
                             cancel_event=_current_cancel_event(),
                         )
                     else:
@@ -3036,61 +3055,46 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             sigmas,
                             wavelet_folder,
                             coarse_lib_path,
+                            output_format="zarr",
+                            output_stem=os.path.splitext(os.path.basename(imag_phase_path))[0],
                             cancel_event=_current_cancel_event(),
                         )
-                    _write_artifact_metadata(imag_phase_path, "coarse_wavelet_phase", coarse_phase_shape, imag_phase_fingerprint)
+                    _write_artifact_metadata(imag_phase_path, "coarse_model_phase" if product == "model" else "coarse_rf_temporary_phase", coarse_phase_shape, imag_phase_fingerprint)
                     _write_recovery_step("coarse_phase_imaginary_complete", path=imag_phase_path)
 
-                update_progress(68, "Coarse wavelet decomposition", "Generating coarse RF cache")
-                print("Step 4/4: Generating coarse wavelet cache for RF analysis...")
-                if not os.path.exists(coarse_cache_path):
-                    _register_cancel_cleanup_path(coarse_cache_path)
-                for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
-                    scratch_path = os.path.join(wavelet_folder, scratch_name)
-                    if not os.path.exists(scratch_path):
-                        _register_cancel_cleanup_path(scratch_path)
-                coarseWavelet(
-                    wavelet_folder,
-                    False,
-                    nx0=coarse_nx,
-                    ny0=coarse_ny,
-                    no=n_thetas,
-                    ns=len(sigmas),
-                    nf=1,
-                    nx=coarse_nx,
-                    ny=coarse_ny,
-                    chunk_size=None,
-                    cancel_event=_current_cancel_event(),
-                )
+                update_progress(68, "Coarse wavelet decomposition", "Building the requested cache product")
+                print(f"Step 4/4: Building the {product.replace('_', ' ')} cache product...")
+                if product == "coarse_rf":
+                    _register_cancel_cleanup_path(coarse_power_path)
+                    _build_coarse_power_zarr(real_phase_path, imag_phase_path, coarse_power_path)
+                elif not _artifact_ready(model_imag_path, coarse_phase_shape, imag_phase_fingerprint, kind="coarse_model_phase"):
+                    raise ValueError("Run Model requires both named coarse model phase caches.")
                 _raise_if_cancelled()
-                if not _artifact_matches(coarse_cache_path, coarse_cache_shape):
-                    raise ValueError(f"Coarse cache was written with an unexpected shape: {coarse_cache_path}")
-                _write_artifact_metadata(coarse_cache_path, "coarse_wavelet_cache", coarse_cache_shape, coarse_cache_fingerprint)
-                _write_recovery_step("coarse_cache_complete", path=coarse_cache_path)
-                for intermediate_path in (real_phase_path, imag_phase_path):
-                    try:
-                        if os.path.exists(intermediate_path):
-                            os.remove(intermediate_path)
-                            print(f"Removed intermediate coarse phase file: {intermediate_path}")
-                    except Exception as exc:
-                        print(f"Could not remove intermediate file {intermediate_path}: {exc}")
-
-                for scratch_name in ("dwt_r_downsampled.mmap", "dwt_i_downsampled.mmap", "dwt_c_downsampled.mmap"):
-                    scratch_path = os.path.join(wavelet_folder, scratch_name)
-                    try:
-                        if os.path.exists(scratch_path):
-                            os.remove(scratch_path)
-                            print(f"Removed temporary coarse cache scratch file: {scratch_path}")
-                    except Exception as exc:
-                        print(f"Could not remove temporary scratch file {scratch_path}: {exc}")
+                if product == "coarse_rf":
+                    if not _artifact_matches(coarse_power_path, coarse_power_shape):
+                        raise ValueError(f"Coarse RF power cache was written with an unexpected shape: {coarse_power_path}")
+                    _write_artifact_metadata(coarse_power_path, "coarse_rf_power", coarse_power_shape, coarse_power_fingerprint)
+                    _write_recovery_step("coarse_rf_power_complete", path=coarse_power_path)
+                    for intermediate_path in (real_phase_path, imag_phase_path):
+                        try:
+                            if os.path.isdir(intermediate_path):
+                                shutil.rmtree(intermediate_path)
+                                metadata_path = _artifact_meta_path(intermediate_path)
+                                if os.path.exists(metadata_path):
+                                    os.remove(metadata_path)
+                                print(f"Removed RF-only temporary phase cache: {intermediate_path}")
+                        except Exception as exc:
+                            print(f"Could not remove temporary phase cache {intermediate_path}: {exc}")
+                else:
+                    _write_recovery_step("coarse_model_cache_complete", real=model_real_path, imag=model_imag_path)
 
             print(
                 f"Coarse RF grid derived from movie metadata: {coarse_nx} x {coarse_ny} "
                 f"({_selected_downsample_percent():.0f}% of "
                 f"{_movie_metadata(movpath)['width']} x {_movie_metadata(movpath)['height']})"
             )
-            print(f"Coarse wavelet files are ready: {wavelet_folder}")
-            update_progress(100, "Coarse wavelet decomposition", "Coarse RF cache ready")
+            print(f"Coarse {product.replace('_', ' ')} wavelet files are ready: {wavelet_folder}")
+            update_progress(100, "Coarse wavelet decomposition", f"{product.replace('_', ' ').title()} cache ready")
             return True
 
         if scale == "full":
@@ -3124,7 +3128,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 f"Check that Movie Path points to a readable video: {movpath}"
             )
         _raise_if_cancelled()
-        videodata = _load_downsampled_movie(full_downsample_path)
+        videodata = _load_downsampled_movie(
+            full_downsample_path, streaming=(backend == "convolution")
+        )
         full_model_shape = (
             videodata.shape[0],
             full_nx,
@@ -3134,9 +3140,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             max(1, len(frequencies)),
         )
         zarr_chunks = (
-            max(1, int(round(_movie_metadata(movpath)["fps"] * 60))),
-            1,
-            1,
+            min(expected_frames, 128),
+            min(full_nx, 16),
+            min(full_ny, 16),
             n_thetas,
             len(sigmas_full),
             max(1, len(frequencies)),
@@ -3392,6 +3398,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def create_neural_cache():
         """Create or validate the aligned ``pos`` and ``spikes`` cache pair."""
+        if "downsample:coarse" not in completed_actions:
+            raise RuntimeError(
+                "Prepare Stimulus & Metadata first. Neural alignment uses the selected movie's "
+                "metadata-derived frame count and duration."
+            )
         context = _neural_alignment_context()
         spks_text = param_entries["Spks Path"].get().strip()
         if _selected_neural_source() == "spks_path":
@@ -3463,7 +3474,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _ensure_rf_imports("coarse RF analysis")
         rf_extra = {
             "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
-            "show_sem_errorbars": _sem_enabled(),
         }
         cached = _get_cached_entry("coarse_rf", extra=rf_extra)
         if cached:
@@ -3591,12 +3601,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         parent_dir = current_wavelet_dir[0] or _wavelet_folder("coarse")
         try:
-            wavelets_downsampled = np.load(os.path.join(parent_dir, 'dwt_downsampled_videodata.npy'))
-            w_c_downsampled = wavelets_downsampled[2]
-            del wavelets_downsampled
-            gc.collect()
+            # Coarse RF owns only its magnitude/power product.  It stays
+            # disk-backed and correlation reads bounded feature blocks.
+            from ..storage.array_store import load_array
+            power_path = os.path.join(parent_dir, "coarse_rf_power.zarr")
+            w_c_downsampled = load_array(power_path, mmap_mode="r")
         except Exception as e:
-            print(f"Decomposition loading failed: {e}")
+            print(f"Coarse RF power cache loading failed: {e}")
             return False
             
         n_frames = min(nb_frames, w_c_downsampled.shape[0], spks.shape[1])
@@ -3608,17 +3619,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             rf_nf = 1
             rf_frequencies = frequencies[:1]
 
-        rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled[:n_frames].reshape(n_frames, -1),
+        # Pass the disk-backed wavelet tensor directly.  PearsonCorrelationPinkNoise
+        # streams spatial-feature blocks; flattening this Zarr selection here would
+        # allocate the entire coarse cache (several GiB for long recordings).
+        rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled,
                                                 np.mean(spks[:, :n_frames], axis=0),
                                                 neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
                                                 n_orientations=n_orientations,
                                                 plotting=False)
         update_progress(75, "Coarse receptive-field analysis", "Computing firing-rate OSI/gOSI")
-        # Selectivity is intentionally based on neural firing-rate responses.
-        # The RF correlation curve remains the only orientation curve displayed.
+        # ``spks`` is the aligned neural cache.  For ephys it is the
+        # frame-bin firing rate produced from spike counts / bin duration in
+        # sta.py-style alignment; it is never replaced by RF correlations.
+        # The wavelet energy only weights frames into orientation bins at each
+        # neuron's already-established preferred RF features.
         orientation_selectivity = firing_rate_orientation_tuning(
-            spks[:, :n_frames],
-            w_c_downsampled[:n_frames],
+            spks[:, :n_frames, :],
+            w_c_downsampled,
             rfs_gabor,
         )
         _write_recovery_step("coarse_rf_complete", wavelet_dir=parent_dir)
@@ -3725,6 +3742,41 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ax3_5 = fig3.add_subplot(gs[3, :])
             ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4, ax3_5]
 
+            def correlation_tuning_ci(feature_matrix, trial_responses):
+                """Return 95% CIs from trial-wise feature/response correlations."""
+                features = np.asarray(feature_matrix, dtype=float)
+                responses = np.asarray(trial_responses, dtype=float)
+                if features.ndim != 2 or responses.ndim != 2 or features.shape[0] != responses.shape[1]:
+                    return None, 0
+                feature_centered = features - np.nanmean(features, axis=0, keepdims=True)
+                feature_norm = np.sqrt(np.nansum(feature_centered ** 2, axis=0))
+                trial_curves = np.full((responses.shape[0], features.shape[1]), np.nan, dtype=float)
+                for trial_index, response in enumerate(responses):
+                    valid = np.isfinite(response)
+                    if valid.sum() < 2:
+                        continue
+                    centered_response = response[valid] - np.mean(response[valid])
+                    response_norm = np.sqrt(np.sum(centered_response ** 2))
+                    if response_norm == 0:
+                        continue
+                    centered_features = feature_centered[valid]
+                    norms = np.sqrt(np.sum(centered_features ** 2, axis=0))
+                    good = norms > 0
+                    trial_curves[trial_index, good] = (
+                        centered_response @ centered_features[:, good]
+                    ) / (response_norm * norms[good])
+                counts = np.sum(np.isfinite(trial_curves), axis=0)
+                if not np.any(counts >= 2):
+                    return None, int(np.max(counts))
+                ci = np.full(features.shape[1], np.nan, dtype=float)
+                valid_columns = counts >= 2
+                ci[valid_columns] = (
+                    1.96
+                    * np.nanstd(trial_curves[:, valid_columns], axis=0, ddof=1)
+                    / np.sqrt(counts[valid_columns])
+                )
+                return ci, int(np.nanmin(counts[valid_columns]))
+
             def draw_individual_neuron(neuron_id, switch_tab=True):
                 """Function for draw individual neuron.
 
@@ -3738,12 +3790,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     trial_spikes = spks[:, :, neuron_id]
                     spike_train = np.mean(trial_spikes, axis=0)
                     ax2.clear()
-                    sem_trials = _plot_trace_with_optional_sem(
-                        ax2,
-                        trial_spikes,
+                    ax2.plot(
+                        np.arange(spike_train.shape[0]),
+                        spike_train,
+                        c="k",
                         label=f"Neuron {neuron_id} trial-averaged activity",
                     )
-                    _set_sem_caption(fig2, sem_trials)
                     ax2.set_title("Trial-averaged Spike Train")
                     ax2.set_xlabel("Frame index")
                     ax2.set_ylabel("Activity (a.u.)")
@@ -3761,14 +3813,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     canvas2.draw()
 
                     rf2d, x_tuning, y_tuning, ori_tun, s_tuning, f_tuning = PlotTuningCurve(rfs_gabor, neuron_id, analysis_coverage, sigmas_deg, screen_ratio, frequencies, show=False)
+                    best_indices = np.asarray(rfs_gabor[1], dtype=int)[:, neuron_id]
+                    best_x, best_y, best_orientation, best_sigma = best_indices[:4]
+                    if w_c_downsampled.ndim == 6:
+                        best_frequency = best_indices[4]
+                        orientation_features = w_c_downsampled[:n_frames, best_x, best_y, :, best_sigma, best_frequency]
+                        size_features = w_c_downsampled[:n_frames, best_x, best_y, best_orientation, :, best_frequency]
+                    else:
+                        orientation_features = w_c_downsampled[:n_frames, best_x, best_y, :, best_sigma]
+                        size_features = w_c_downsampled[:n_frames, best_x, best_y, best_orientation, :]
+                    ori_ci, ori_ci_trials = correlation_tuning_ci(orientation_features, trial_spikes[:, :n_frames])
+                    size_ci, size_ci_trials = correlation_tuning_ci(size_features, trial_spikes[:, :n_frames])
                     rate_ori_tun = np.asarray(
                         analysis_state["orientation_selectivity"]["orientation_tuning"][neuron_id],
                         dtype=float,
                     )
-                    neuron_osi, neuron_gosi = orientation_selectivity_from_tuning(
-                        rate_ori_tun,
-                        analysis_state["orientation_selectivity"].get("angles_deg"),
-                    )
+                    neuron_osi = float(analysis_state["orientation_selectivity"]["osi"][neuron_id])
+                    neuron_gosi = float(analysis_state["orientation_selectivity"]["gosi"][neuron_id])
                     for extra_ax in [axis for axis in list(fig3.axes) if axis not in ax3]:
                         extra_ax.remove()
                     for ax in ax3: ax.clear()
@@ -3795,8 +3856,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     ax3[2].set_xticks([0, rf2d.shape[1]], [xM, xm])
                     ax3[2].set_xlabel("Azimuth (deg)")
                     ax3[2].set_ylabel("Correlation (a.u.)")
-                    ax3[3].plot(ori_tun, 'o-', c='k')
-                    ax3[3].set_title(f'Orientation (correlation OSI {neuron_osi:.3f}, gOSI {neuron_gosi:.3f})')
+                    ax3[3].errorbar(
+                        np.arange(len(ori_tun)), ori_tun, yerr=None if ori_ci is None else np.append(ori_ci, ori_ci[0]),
+                        fmt='o-', c='#2563EB', ecolor='#60A5FA', capsize=3,
+                        label=f'Correlation (95% CI; n={ori_ci_trials})' if ori_ci is not None else 'Correlation',
+                    )
+                    ax3[3].set_title(f'Orientation (firing-rate OSI {neuron_osi:.3f}, gOSI {neuron_gosi:.3f})')
                     n_ori = rfs_gabor[0].shape[3]
                     ax3[3].set_xticks(
                         [0, max(1, n_ori // 2), max(2, n_ori - 1)],
@@ -3804,11 +3869,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     )
                     ax3[3].set_xlabel("Orientation (deg)")
                     ax3[3].set_ylabel("Correlation (a.u.)")
-                    ax3[4].plot(s_tuning, 'o-', c='k')
+                    ax3[3].legend(fontsize=8)
+                    ax3[4].errorbar(
+                        np.arange(len(s_tuning)), s_tuning, yerr=size_ci,
+                        fmt='o-', c='#7C3AED', ecolor='#C4B5FD', capsize=3,
+                        label=f'Correlation (95% CI; n={size_ci_trials})' if size_ci is not None else 'Correlation',
+                    )
                     ax3[4].set_title('Size (deg)')
                     ax3[4].set_xticks([0, len(sigmas) - 1], [sigmas_deg[0], sigmas_deg[-1]])
                     ax3[4].set_xlabel("Size (deg)")
                     ax3[4].set_ylabel("Correlation (a.u.)")
+                    ax3[4].legend(fontsize=8)
                     has_frequency_axis = w_c_downsampled.ndim == 6 and rf_nf > 1 and len(f_tuning) > 1
                     if has_frequency_axis:
                         ax3[5].set_visible(True)
@@ -3828,11 +3899,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "x_tuning": x_tuning,
                             "y_tuning": y_tuning,
                             "orientation_correlation_tuning": ori_tun,
+                            "orientation_correlation_ci_95": ori_ci,
                             "orientation_firing_rate_tuning": rate_ori_tun,
                             "osi": neuron_osi,
                             "gosi": neuron_gosi,
                             "osi_source": "firing_rate",
                             "size_tuning": s_tuning,
+                            "size_correlation_ci_95": size_ci,
                             "frequency_tuning": f_tuning if has_frequency_axis else None,
                             "frequency_tuning_available": has_frequency_axis,
                             "best_params": np.asarray(rfs_gabor[1])[:, neuron_id],
@@ -4091,7 +4164,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         cache_extra = {
             "model": "run_Model",
             "neuron": neuron_id,
-            "show_sem_errorbars": _sem_enabled(),
             **split_settings,
         }
         cached = _get_cached_entry("run_model", neuron_id=neuron_id, extra=cache_extra)
@@ -4103,12 +4175,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
             return
         wavelet_dir = state["wavelet_dir"]
-        wavelets_downsampled = np.load(
-            os.path.join(wavelet_dir, "dwt_downsampled_videodata.npy"),
-            mmap_mode="r",
-        )
-        w_r = wavelets_downsampled[0]
-        w_i = wavelets_downsampled[1]
+        from ..storage.array_store import load_array
+        w_r = load_array(os.path.join(wavelet_dir, "coarse_model_real.zarr"), mmap_mode="r")
+        w_i = load_array(os.path.join(wavelet_dir, "coarse_model_imag.zarr"), mmap_mode="r")
         expected_coarse_features = (
             int(state["coarse_nx"]),
             int(state["coarse_ny"]),
@@ -4161,11 +4230,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 lastmin=split_settings["lastmin"],
                 plotting=True,
                 frames_per_minute=frames_per_minute,
-                show_sem_errorbars=_sem_enabled(),
             )
 
         result, figures = capture_new_figures(call_model)
-        del wavelets_downsampled
+        del w_r, w_i
         gc.collect()
         model_payload = _model_result_payload("run_Model", result, neuron_id)
         for fig in figures:
@@ -4195,7 +4263,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         cache_extra = {
             "model": "run_Full_Model",
             "neuron": neuron_id,
-            "show_sem_errorbars": _sem_enabled(),
             **split_settings,
         }
         cached = _get_cached_entry("run_full_model", neuron_id=neuron_id, extra=cache_extra)
@@ -4256,7 +4323,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 frames_per_minute=frames_per_minute,
                 coarse_shape=(state["coarse_nx"], state["coarse_ny"]),
                 hz=movie_metadata["fps"],
-                show_sem_errorbars=_sem_enabled(),
             )
 
         result, figures = capture_new_figures(call_full_model)
@@ -4359,12 +4425,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         state = {
             "workflow": workflow,
             "gui": {
-                "analysis_scale": _selected_analysis_scale(),
                 "wavelet_backend": _selected_wavelet_backend(),
-                "downsample_mode": _selected_downsample_mode(),
                 "downsample_percent": _selected_downsample_percent(),
                 "gabor_format": gabor_format_var.get(),
-                "wavelet_format": wavelet_format_var.get(),
                 "downsample_format": _selected_downsample_format(),
                 "neural_source": _selected_neural_source(),
                 "neural_cache_format": _selected_neural_cache_format(),
@@ -4408,15 +4471,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 set_workflow_from_panel(loaded_workflow)
             effective_workflow = loaded_workflow if loaded_workflow in (WORKFLOW_2P, WORKFLOW_EPHYS) else workflow
             gui_state = state.get("gui") or state.get("save_options") or {}
-            loaded_scale = gui_state.get("analysis_scale", state.get("analysis_scale"))
-            if loaded_scale in {"coarse", "full"}:
-                analysis_scale_var.set(loaded_scale)
-                set_analysis_scale_from_panel(loaded_scale)
             loaded_backend = gui_state.get("wavelet_backend", state.get("wavelet_backend"))
             if loaded_backend in {"legacy", "convolution"}:
                 wavelet_backend_var.set(loaded_backend)
                 set_wavelet_backend_from_panel(loaded_backend)
-            downsample_mode_var.set("precompute")
             loaded_percent = gui_state.get("downsample_percent", state.get("downsample_percent"))
             if loaded_percent is not None:
                 downsample_percent_var.set(float(loaded_percent))
@@ -4447,7 +4505,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     param_entries[key].insert(0, str(value))
             save_options = gui_state
             gabor_format_var.set(save_options.get("gabor_format", gabor_format_var.get()))
-            wavelet_format_var.set(save_options.get("wavelet_format", wavelet_format_var.get()))
             downsample_format = save_options.get("downsample_format")
             if downsample_format in {"npy", "zarr"}:
                 downsample_format_var.set(downsample_format)
@@ -4461,6 +4518,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             try:
                 _refresh_neural_source_controls()
                 _refresh_downsample_controls()
+                _sync_completed_actions_from_artifacts()
+                refresh_action_buttons()
             except NameError:
                 pass
             refresh_size_estimates()
@@ -4528,23 +4587,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 _set_entry_value(entry_widget, selected)
             refresh_size_estimates()
 
-    def _ask_yes_no(title, message):
-        """Show a yes/no popup safely from worker or UI threads."""
-        if threading.current_thread() is threading.main_thread():
-            return messagebox.askyesno(title, message)
-        result = {"value": False}
-        ready = threading.Event()
-
-        def _ask():
-            try:
-                result["value"] = messagebox.askyesno(title, message)
-            finally:
-                ready.set()
-
-        root.after(0, _ask)
-        ready.wait()
-        return result["value"]
-
     def _check_movie_metadata_against_gui(movie_path):
         """Compare lightweight movie metadata with GUI fields and offer updates."""
         try:
@@ -4563,45 +4605,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except Exception:
             return
 
-        candidates = {}
-        if frames > 0:
-            candidates["Number of Frames"] = str(frames)
-        if width > 0:
-            candidates["NX"] = str(width)
-        if height > 0:
-            candidates["NY"] = str(height)
-        if fps > 0:
-            rounded_fps = int(round(fps))
-            if abs(fps - rounded_fps) < 0.01:
-                candidates["Hz"] = str(rounded_fps)
-
-        mismatches = []
-        for key, metadata_value in candidates.items():
-            entries = gabor_entries if key in {"NX", "NY"} else param_entries
-            entry = entries.get(key)
-            if entry is None:
-                continue
-            current = entry.get().strip()
-            try:
-                same = float(current) == float(metadata_value)
-            except Exception:
-                same = current == metadata_value
-            if not same:
-                mismatches.append((key, current, metadata_value))
-        if not mismatches:
-            return
-
-        lines = [f"{key}: GUI has {current!r}, movie metadata says {metadata!r}" for key, current, metadata in mismatches]
-        message = (
-            "The selected stimulus movie metadata does not match the GUI fields.\n\n"
-            + "\n".join(lines)
-            + "\n\nUpdate the GUI fields to match the movie metadata?"
-        )
-        if _ask_yes_no("Movie Metadata Mismatch", message):
-            for key, _current, metadata_value in mismatches:
-                entries = gabor_entries if key in {"NX", "NY"} else param_entries
-                _set_entry_value(entries[key], metadata_value)
-            refresh_size_estimates()
+        if min(frames, width, height) > 0 and fps > 0:
+            print(
+                "Stimulus metadata is authoritative: "
+                f"{width} x {height} px, {frames} frames, {fps:.6g} fps."
+            )
 
     def _movie_frame_count(path, fallback):
         """Return actual movie frame count when the selected movie can be opened."""
@@ -4672,30 +4680,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 offsets,
                 frequencies,
             )
-            scale = _selected_analysis_scale()
             if gabor_format_var.get() == "zarr":
-                kind = "fine" if scale == "full" else "coarse"
-                exact = _folder_size_bytes(_zarr_output_path(_library_output_path(kind, gabor_entries["Save Path"].get())))
-                expected_bytes = fine_bytes if scale == "full" else coarse_bytes
-                expected_shape = fine_shape if scale == "full" else coarse_shape
-                if exact is not None:
-                    gabor_size_label.configure(
-                        text=f"{_scale_label(scale)} Gabor Zarr current size: {_format_bytes(exact)}"
-                    )
-                else:
-                    gabor_size_label.configure(
-                        text=(
-                            f"{_scale_label(scale)} Gabor Zarr size: compression-dependent; "
-                            f"NPY equivalent {_format_bytes(expected_bytes)} {expected_shape}"
-                        )
-                    )
-            else:
-                expected_bytes = fine_bytes if scale == "full" else coarse_bytes
-                expected_shape = fine_shape if scale == "full" else coarse_shape
                 gabor_size_label.configure(
                     text=(
-                        f"{_scale_label(scale)} Gabor NPY size: "
-                        f"{_format_bytes(expected_bytes)} {expected_shape}"
+                        "Legacy Gabor Zarr sizes are compression-dependent; NPY equivalents: "
+                        f"coarse {_format_bytes(coarse_bytes)} {coarse_shape}; "
+                        f"full {_format_bytes(fine_bytes)} {fine_shape}."
+                    )
+                )
+            else:
+                gabor_size_label.configure(
+                    text=(
+                        f"Legacy Gabor NPY sizes: coarse {_format_bytes(coarse_bytes)} {coarse_shape}; "
+                        f"full {_format_bytes(fine_bytes)} {fine_shape}"
                     )
                 )
         except Exception:
@@ -4724,47 +4721,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             coarse_nx, coarse_ny = _analysis_grid_dimensions(nx, ny, "coarse")
             full_nx, full_ny = _analysis_grid_dimensions(nx, ny, "full")
             bytes_per_float = np.dtype(np.float32).itemsize
-            coarse_phase_bytes = 2 * n_frames * coarse_nx * coarse_ny * n_thetas * n_sigmas * bytes_per_float
-            coarse_cache_bytes = 3 * n_frames * coarse_nx * coarse_ny * n_thetas * n_sigmas * bytes_per_float
+            coarse_phase_bytes = n_frames * coarse_nx * coarse_ny * n_thetas * n_sigmas * bytes_per_float
+            coarse_rf_bytes = coarse_phase_bytes
+            coarse_model_bytes = 2 * coarse_phase_bytes
             full_model_raw_bytes = 2 * n_frames * full_nx * full_ny * n_thetas * n_sigmas_full * n_frequencies * bytes_per_float
-            scale = _selected_analysis_scale()
-            if scale == "coarse":
-                wavelet_size_label.configure(
-                    text=(
-                        f"Coarse RF wavelet NPY size: {_format_bytes(coarse_cache_bytes)} "
-                        f"({n_frames} frames; temp phases +{_format_bytes(coarse_phase_bytes)})"
-                    )
+            backend = "convolution" if _selected_wavelet_backend() == "convolution" else "legacy"
+            wavelet_size_label.configure(
+                text=(
+                    f"{backend.title()} internal Zarr products (uncompressed equivalents): "
+                    f"Coarse RF power {_format_bytes(coarse_rf_bytes)}; "
+                    f"Run Model real + imaginary {_format_bytes(coarse_model_bytes)}; "
+                    f"Run Full Model real + imaginary {_format_bytes(full_model_raw_bytes)}. "
+                    "Zarr compression is data-dependent."
                 )
-            elif wavelet_format_var.get() == "zarr":
-                full_dir = _wavelet_folder("full")
-                if full_dir:
-                    exact_i = _folder_size_bytes(os.path.join(full_dir, "dwt_videodata2_i.zarr"))
-                    exact_r = _folder_size_bytes(os.path.join(full_dir, "dwt_videodata2_r.zarr"))
-                else:
-                    exact_i = exact_r = None
-                if exact_i is not None and exact_r is not None:
-                    full_model_bytes = exact_i + exact_r
-                    wavelet_size_label.configure(
-                        text=(
-                            f"Full-model wavelet current disk usage: {_format_bytes(full_model_bytes)} "
-                            "(Zarr real + imaginary phases)"
-                        )
-                    )
-                else:
-                    wavelet_size_label.configure(
-                        text=(
-                            "Full-model wavelet Zarr size: compression-dependent; "
-                            f"NPY equivalent {_format_bytes(full_model_raw_bytes)} "
-                            f"({n_frames} frames)"
-                        )
-                    )
-            else:
-                wavelet_size_label.configure(
-                    text=(
-                        f"Full-model wavelet NPY size: {_format_bytes(full_model_raw_bytes)} "
-                        f"({n_frames} frames)"
-                    )
-                )
+            )
         except Exception:
             wavelet_size_label.configure(text="Wavelet disk size: enter valid dimensions to calculate")
 
@@ -4774,8 +4744,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         estimate_wavelet_size()
 
     GABOR_ESTIMATE_KEYS = {
-        "NX",
-        "NY",
         "N_thetas",
         "Sigmas",
         "Sigmas Full Model",
@@ -4783,7 +4751,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "Frequencies",
         "Save Path",
     }
-    WAVELET_ESTIMATE_KEYS = {"Movie Path", "Number of Frames", "NX", "NY", "N_thetas", "Sigmas", "Sigmas Full Model", "Frequencies", "Full Model Wavelet Path"}
+    WAVELET_ESTIMATE_KEYS = {"Movie Path", "N_thetas", "Sigmas", "Sigmas Full Model", "Frequencies", "Full Model Wavelet Path"}
 
     def _on_config_entry_changed(key):
         """Invalidate only the completed stages that consume ``key``."""
@@ -4793,8 +4761,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         }:
             _invalidate_completed_actions("neural", "rf")
         if key in {
-            "Movie Path", "Number of Frames", "Visual Coverage", "Analysis Coverage",
-            "NX", "NY",
+            "Movie Path", "Visual Coverage", "Analysis Coverage",
         }:
             _invalidate_completed_actions("downsample", "wavelet", "rf")
         if key in {
@@ -5227,13 +5194,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     workflow_segment.pack(fill=tk.X)
     workflow_segment.set(workflow)
 
-    initial_scale = gui_options.get("analysis_scale", "coarse")
     initial_backend = gui_options.get("wavelet_backend", "legacy")
-    initial_downsample_mode = "precompute"
     initial_neural_source = gui_options.get("neural_source", "data_dir")
-    analysis_scale_var = tk.StringVar(value=initial_scale if initial_scale in {"coarse", "full"} else "coarse")
     wavelet_backend_var = tk.StringVar(value=initial_backend if initial_backend in {"legacy", "convolution"} else "legacy")
-    downsample_mode_var = tk.StringVar(value="precompute")
     initial_downsample_format = gui_options.get("downsample_format", "npy")
     downsample_format_var = tk.StringVar(value=initial_downsample_format if initial_downsample_format in {"npy", "zarr"} else "npy")
     downsample_percent_var = tk.DoubleVar(value=float(gui_options.get("downsample_percent", 20.0)))
@@ -5245,18 +5208,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     neural_cache_format_var = tk.StringVar(value=initial_neural_format if initial_neural_format in {"npy", "zarr"} else "npy")
 
     def refresh_scale_controls():
-        """Refresh labels and estimates for the selected analysis scale."""
-        scale = _selected_analysis_scale()
-        label = _scale_label(scale)
+        """Refresh shared-grid controls for the selected backend."""
         backend = _selected_wavelet_backend()
-        backend_label = "Convolution" if backend == "convolution" else "Legacy"
         try:
             if backend == "convolution":
-                btn_submit_gabor.configure(text=f"Prepare Convolution Kernels ({label})")
+                btn_submit_gabor.configure(text="Prepare Convolution Kernels (Coarse RF + Full Model)")
             else:
-                btn_submit_gabor.configure(text=f"Build Gabor Library ({label})")
-            btn_submit_wavelet.configure(text=f"Run {backend_label} Wavelet Decomposition ({label})")
-            btn_run_model_plots.configure(text=f"Run Model Plots ({label})")
+                btn_submit_gabor.configure(text="Prepare Gabor Assets (Coarse RF + Full Model)")
             # Legacy materializes a flattened library; convolution writes a
             # compact kernel cache, so library storage estimates do not apply.
             if backend == "legacy":
@@ -5278,13 +5236,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             pass
 
-    def set_analysis_scale_from_panel(value):
-        """Update the active coarse/full analysis scale."""
-        if value not in {"coarse", "full"}:
-            return
-        analysis_scale_var.set(value)
-        refresh_scale_controls()
-
     def set_wavelet_backend_from_panel(value):
         """Update the active legacy/convolution wavelet backend."""
         if value not in {"legacy", "convolution"}:
@@ -5293,32 +5244,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _invalidate_completed_actions("gabor", "wavelet", "rf")
         refresh_scale_controls()
 
-    scale_frame = ctk.CTkFrame(frame_session, fg_color="transparent")
-    scale_frame.pack(fill=tk.X, pady=(8, 8))
     ctk.CTkLabel(
-        scale_frame,
-        text="Analysis scale",
-        text_color=text_color,
-        font=ctk.CTkFont(size=12, weight="bold"),
-    ).pack(anchor="w", pady=(0, 4))
-    analysis_scale_segment = ctk.CTkSegmentedButton(
-        scale_frame,
-        values=["coarse", "full"],
-        variable=analysis_scale_var,
-        command=set_analysis_scale_from_panel,
-        height=28,
-        corner_radius=6,
-        border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
-        text_color_disabled="#9CA3AF",
-    )
-    analysis_scale_segment.pack(fill=tk.X)
-    analysis_scale_segment.set(analysis_scale_var.get())
+        frame_session,
+        text="One metadata-derived analysis grid is shared by Coarse RF, Run Model, and Run Full Model.",
+        text_color=muted_text,
+        wraplength=330,
+        justify="left",
+    ).pack(fill=tk.X, pady=(8, 2))
 
     backend_frame = ctk.CTkFrame(frame_session, fg_color="transparent")
     backend_frame.pack(fill=tk.X, pady=(8, 8))
@@ -5373,10 +5305,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         segmented_button_selected_hover_color="#1D4ED8",
     )
     stage_tabs.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-    stage_setup = stage_tabs.add("1 Setup")
-    stage_downsample = stage_tabs.add("2 Stimulus")
+    stage_downsample = stage_tabs.add("1 Stimulus & Metadata")
+    stage_setup = stage_tabs.add("2 Session Setup")
     stage_gabor = stage_tabs.add("3 Gabor")
-    stage_wavelet = stage_tabs.add("4 Wavelets")
+    stage_wavelet = stage_tabs.add("4 Wavelet Products")
     stage_analysis = stage_tabs.add("5 Analysis")
     stage_export = stage_tabs.add("6 Export")
 
@@ -5395,7 +5327,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     gabor_dimensions_label = ctk.CTkLabel(
         frame_gabor,
-        text="Stimulus grid: select a movie in Step 2",
+        text="Stimulus grid: select a movie in Step 1",
         text_color=muted_text,
     )
     gabor_dimensions_label.grid(row=len(editable_gabor_params), column=0, columnspan=2, sticky="w", pady=(6, 0))
@@ -5404,12 +5336,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     gabor_format_var = tk.StringVar(value=initial_gabor_format if initial_gabor_format in {"npy", "zarr"} else "npy")
     btn_submit_gabor = ctk.CTkButton(
         frame_gabor,
-        text="Build Gabor Library (Coarse RF)",
+        text="Prepare Gabor Assets (Coarse RF + Full Model)",
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
         hover_color="#1D4ED8",
-        command=run_in_thread(create_selected_gabor_library, "Gabor library construction"),
+        command=run_in_thread(create_both_gabor_libraries, "Gabor asset preparation"),
     )
     btn_submit_gabor.grid(row=len(editable_gabor_params)+1, column=0, columnspan=2, pady=(15, 0), sticky="ew")
 
@@ -5470,14 +5402,36 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     wavelet_format_var = tk.StringVar(value=initial_wavelet_format if initial_wavelet_format in {"npy", "zarr"} else "zarr")
     btn_submit_wavelet = ctk.CTkButton(
         frame_processing,
-        text="Run Wavelet Decomposition (Coarse RF)",
+        text="Prepare Coarse RF Power Cache",
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
         hover_color="#1D4ED8",
-        command=run_in_thread(run_wavelet, "Wavelet decomposition"),
+        command=run_in_thread(lambda: run_wavelet("coarse_rf"), "Prepare Coarse RF wavelets"),
     )
     btn_submit_wavelet.pack(fill=tk.X, pady=3)
+
+    btn_prepare_model_wavelets = ctk.CTkButton(
+        frame_processing,
+        text="Prepare Run Model Phase Caches",
+        height=34,
+        corner_radius=6,
+        fg_color="#374151",
+        hover_color="#111827",
+        command=run_in_thread(lambda: run_wavelet("model"), "Prepare Run Model wavelets"),
+    )
+    btn_prepare_model_wavelets.pack(fill=tk.X, pady=3)
+
+    btn_prepare_full_model_wavelets = ctk.CTkButton(
+        frame_processing,
+        text="Prepare Run Full Model Phase Caches",
+        height=34,
+        corner_radius=6,
+        fg_color="#374151",
+        hover_color="#111827",
+        command=run_in_thread(lambda: run_wavelet("full_model"), "Prepare Run Full Model wavelets"),
+    )
+    btn_prepare_full_model_wavelets.pack(fill=tk.X, pady=3)
 
     format_frame_wavelet = ctk.CTkFrame(frame_processing, fg_color="transparent")
     format_frame_wavelet.pack(anchor="w", pady=(10, 0))
@@ -5548,8 +5502,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "Acquisition & Timing": [
             "Number of Planes",
             "Sampling Rate (samples / sec)",
-            "Hz",
-            "Number of Frames",
             "Train Trial Indices",
             "Test Trial Indices",
             "Use Last Minute Holdout",
@@ -5756,58 +5708,32 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_downsample.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
     frame_downsample.columnconfigure(1, weight=1)
 
-    downsample_mode_frame = ctk.CTkFrame(frame_downsample, fg_color="transparent")
     add_config_row(
         frame_downsample, "Movie Path", param_defaults.get("Movie Path", ""),
         param_entries, 0, frame_color, ANALYSIS_LABELS,
     )
-    downsample_mode_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 8))
-    ctk.CTkLabel(downsample_mode_frame, text="Mode:", text_color=muted_text).pack(side=tk.LEFT)
 
     downsample_percent_label = ctk.CTkLabel(frame_downsample, text="", text_color=muted_text)
 
     def _refresh_downsample_controls(_value=None):
         """Refresh downsample-control state and labels."""
-        mode = _selected_downsample_mode()
         percent = _selected_downsample_percent()
         if _value is not None:
-            scale = _selected_analysis_scale()
-            completed_actions.difference_update({f"downsample:{scale}", f"wavelet:{scale}", "rf"})
+            completed_actions.difference_update({
+                "downsample:coarse", "wavelet:coarse_rf", "wavelet:model", "wavelet:full_model", "rf",
+            })
         try:
-            state = "normal" if mode == "precompute" else "disabled"
-            downsample_slider.configure(state=state)
+            downsample_slider.configure(state="normal")
             downsample_format_segment.configure(state="normal")
             btn_downsample_video.configure(
                 text="Prepare Stimulus Cache"
             )
-            if mode == "precompute":
-                downsample_percent_label.configure(text=f"Grid scale: {percent:.0f}%")
-            else:
-                downsample_percent_label.configure(text="Legacy grid: 20% coarse or 100% full")
+            downsample_percent_label.configure(text=f"Downsampling percentage: {percent:.0f}%")
             refresh_size_estimates()
         except Exception:
             pass
 
-    downsample_mode_segment = ctk.CTkSegmentedButton(
-        downsample_mode_frame,
-        values=["legacy", "precompute"],
-        variable=downsample_mode_var,
-        command=_refresh_downsample_controls,
-        height=26,
-        corner_radius=6,
-        border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
-        text_color_disabled="#9CA3AF",
-    )
-    downsample_mode_segment.pack(side=tk.LEFT, padx=(10, 0))
-    downsample_mode_segment.set(downsample_mode_var.get())
-
-    downsample_percent_label.grid(row=2, column=0, sticky="w", pady=(4, 2))
+    downsample_percent_label.grid(row=1, column=0, sticky="w", pady=(8, 2))
     downsample_slider = ctk.CTkSlider(
         frame_downsample,
         from_=0,
@@ -5817,10 +5743,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         command=_refresh_downsample_controls,
         height=18,
     )
-    downsample_slider.grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=(4, 2))
+    downsample_slider.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(8, 2))
 
     downsample_format_frame = ctk.CTkFrame(frame_downsample, fg_color="transparent")
-    downsample_format_frame.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    downsample_format_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
     ctk.CTkLabel(
         downsample_format_frame,
         text="Cache array format:",
@@ -5855,36 +5781,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#1D4ED8",
         command=run_in_thread(create_downsampled_video_cache, "Stimulus video downsampling"),
     )
-    btn_downsample_video.grid(row=4, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    btn_downsample_video.grid(row=3, column=0, columnspan=2, pady=(12, 0), sticky="ew")
     _refresh_downsample_controls()
 
     # --- Neural & RF analysis ---
     frame_analysis = ttk.LabelFrame(stage_analysis, text="Neural & RF Analysis", padding=15)
     frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-
-    show_sem_var = tk.BooleanVar(value=False)
-    sem_wrap = ttk.Frame(frame_analysis, style="TFrame")
-    sem_wrap.pack(fill=tk.X, pady=(0, 10))
-    ctk.CTkLabel(
-        sem_wrap,
-        text="Error bars",
-        text_color=text_color,
-        font=ctk.CTkFont(size=12, weight="bold"),
-    ).pack(side=tk.LEFT, padx=(0, 10))
-    ctk.CTkRadioButton(
-        sem_wrap,
-        text="Off",
-        variable=show_sem_var,
-        value=False,
-        text_color=text_color,
-    ).pack(side=tk.LEFT, padx=(0, 12))
-    ctk.CTkRadioButton(
-        sem_wrap,
-        text="SEM",
-        variable=show_sem_var,
-        value=True,
-        text_color=text_color,
-    ).pack(side=tk.LEFT)
 
     btn_submit_plot = ctk.CTkButton(
         frame_analysis,
@@ -5925,14 +5827,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     btn_run_model_plots = ctk.CTkButton(
         frame_analysis,
-        text="Run Model Plots (Coarse RF)",
+        text="Run Model (Coarse RF)",
         height=34,
         corner_radius=6,
         fg_color="#374151",
         hover_color="#111827",
-        command=run_in_thread(plot_selected_model_outputs, "model plot capture"),
+        command=run_in_thread(plot_run_model_outputs, "Run Model"),
     )
     btn_run_model_plots.pack(fill=tk.X, pady=(8, 0))
+
+    btn_run_full_model_plots = ctk.CTkButton(
+        frame_analysis,
+        text="Run Full Model",
+        height=34,
+        corner_radius=6,
+        fg_color="#374151",
+        hover_color="#111827",
+        command=run_in_thread(plot_run_full_model_outputs, "Run Full Model"),
+    )
+    btn_run_full_model_plots.pack(fill=tk.X, pady=(8, 0))
 
     # --- Export ---
     frame_export = ttk.LabelFrame(stage_export, text="Export", padding=15)
@@ -6008,9 +5921,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         btn_downsample_video,
         btn_submit_gabor,
         btn_submit_wavelet,
+        btn_prepare_model_wavelets,
+        btn_prepare_full_model_wavelets,
         btn_submit_plot,
         btn_runRF,
         btn_run_model_plots,
+        btn_run_full_model_plots,
         btn_export_all_results,
         btn_export_all_neurons,
         btn_export_individual_neuron,
@@ -6019,14 +5935,96 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         btn_load_state,
     ]
 
+    def _sync_completed_actions_from_artifacts():
+        """Unlock stages whose validated artifacts already exist on disk."""
+        try:
+            movpath = _find_movie_path()
+            nx, ny = _stimulus_grid_dimensions("coarse", movpath)
+            expected_movie_shape = (_movie_metadata(movpath)["frames"], ny, nx)
+            cache_path, _cache_format = _find_compatible_downsample_cache(
+                movpath, "coarse", expected_movie_shape, _selected_downsample_format()
+            )
+            if cache_path:
+                completed_actions.add("downsample:coarse")
+        except Exception:
+            # The movie may not be selected yet; that is the normal initial state.
+            pass
+
+        try:
+            neural_dir = _folder_from_entry(
+                param_entries, "Spks Path", _project_layout().neural_cache_dir
+            )
+            cache_pair = find_neural_cache_pair(neural_dir)
+            if cache_pair is not None:
+                spikes, _positions, spikes_path, _positions_path = load_neural_cache_pair(
+                    neural_dir, mmap_mode="r"
+                )
+                if spikes.ndim == 3:
+                    movpath = _find_movie_path()
+                    expected_frames = _movie_metadata(movpath)["frames"]
+                    if spikes.shape[1] == expected_frames:
+                        completed_actions.add("neural")
+                    else:
+                        print(
+                            "Existing neural cache was not used for prerequisites: "
+                            f"{spikes_path} has {spikes.shape[1]} frames; movie has {expected_frames}."
+                        )
+        except Exception:
+            pass
+
+        try:
+            if _selected_wavelet_backend() == "legacy":
+                if _find_gabor_library("coarse"):
+                    completed_actions.add("gabor:coarse")
+                if _find_gabor_library("fine"):
+                    completed_actions.add("gabor:full")
+            else:
+                kernel_dir = _project_layout().gabor_kernel_dir
+                if os.path.exists(os.path.join(kernel_dir, "gabor_kernels_coarse_conv.npz")):
+                    completed_actions.add("gabor:coarse")
+                if os.path.exists(os.path.join(kernel_dir, "gabor_kernels_fine_conv.npz")):
+                    completed_actions.add("gabor:full")
+        except Exception:
+            pass
+
+        try:
+            movpath = _find_movie_path()
+            frames = _movie_metadata(movpath)["frames"]
+            nx, ny = _stimulus_grid_dimensions("coarse", movpath)
+            n_orientations = int(gabor_entries["N_thetas"].get())
+            n_sigmas = len(parse_literal(gabor_entries["Sigmas"].get(), "Sigmas"))
+            coarse_shape = (frames, nx, ny, n_orientations, n_sigmas)
+            wavelet_dir = _wavelet_folder("coarse")
+            if _artifact_matches(os.path.join(wavelet_dir, "coarse_rf_power.zarr"), coarse_shape):
+                completed_actions.add("wavelet:coarse_rf")
+            if (
+                _artifact_matches(os.path.join(wavelet_dir, "coarse_model_real.zarr"), coarse_shape)
+                and _artifact_matches(os.path.join(wavelet_dir, "coarse_model_imag.zarr"), coarse_shape)
+            ):
+                completed_actions.add("wavelet:model")
+            full_sigmas = parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model")
+            frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+            full_shape = (frames, nx, ny, n_orientations, len(full_sigmas), max(1, len(frequencies)))
+            full_dir = _wavelet_folder("full")
+            if (
+                _artifact_matches(os.path.join(full_dir, "dwt_videodata2_r.zarr"), full_shape)
+                and _artifact_matches(os.path.join(full_dir, "dwt_videodata2_i.zarr"), full_shape)
+            ):
+                completed_actions.add("wavelet:full_model")
+        except Exception:
+            pass
+
     def refresh_action_buttons(advance_from=None):
         """Apply stage prerequisites and advance to the next chronological tab."""
-        scale = _selected_analysis_scale()
         prerequisites = {
-            btn_submit_wavelet: {f"downsample:{scale}", f"gabor:{scale}"},
-            btn_submit_plot: {"neural", "wavelet:coarse"},
+            btn_create_neural_cache: {"downsample:coarse"},
+            btn_submit_wavelet: {"downsample:coarse", "gabor:coarse"},
+            btn_prepare_model_wavelets: {"downsample:coarse", "gabor:coarse"},
+            btn_prepare_full_model_wavelets: {"downsample:coarse", "gabor:full"},
+            btn_submit_plot: {"neural", "wavelet:coarse_rf"},
             btn_runRF: {"rf"},
-            btn_run_model_plots: {"rf"} | ({"wavelet:full"} if scale == "full" else set()),
+            btn_run_model_plots: {"rf", "wavelet:model"},
+            btn_run_full_model_plots: {"rf", "wavelet:full_model"},
             btn_export_all_results: {"rf"},
             btn_export_all_neurons: {"rf"},
             btn_export_individual_neuron: {"rf"},
@@ -6035,9 +6033,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         for button, required in prerequisites.items():
             button.configure(state=tk.NORMAL if required.issubset(completed_actions) else tk.DISABLED)
         next_tabs = {
-            "Stimulus video downsampling": "3 Gabor",
-            "Gabor library construction": "4 Wavelets",
-            "Wavelet decomposition": "5 Analysis",
+            "Stimulus video downsampling": "2 Session Setup",
+            "Neural cache creation": "3 Gabor",
+            "Gabor asset preparation": "4 Wavelet Products",
+            "Prepare Coarse RF wavelets": "5 Analysis",
             "Coarse receptive-field analysis": "6 Export",
         }
         if advance_from in next_tabs:
@@ -6049,26 +6048,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             widget.grid() if visible else widget.grid_remove()
 
     def _refresh_scale_field_visibility():
-        """Expose only folders and parameters used by the selected scale."""
-        scale = _selected_analysis_scale()
+        """Expose the parameters used by the shared-grid workflow."""
         for key, row_widgets in gabor_row_widgets.items():
             if key == "Save Path":
                 visible = False
-            elif key == "Coarse Library Path":
-                visible = scale == "coarse"
-            elif key == "Fine Library Path":
-                visible = scale == "full"
             else:
                 visible = True
             _set_grid_row_visible(row_widgets, visible)
-        _set_grid_row_visible(coarse_wavelet_path_row, scale == "coarse")
-        _set_grid_row_visible(full_wavelet_path_row, scale == "full")
-        _set_grid_row_visible(full_sigmas_row, scale == "full")
-        _set_grid_row_visible(output_path_rows["Full Model Save Path"], scale == "full")
+        _set_grid_row_visible(coarse_wavelet_path_row, True)
+        _set_grid_row_visible(full_wavelet_path_row, True)
+        _set_grid_row_visible(full_sigmas_row, True)
+        _set_grid_row_visible(output_path_rows["Full Model Save Path"], True)
         # The selector must remain visible whenever decomposition is available.
         format_frame_wavelet.pack(anchor="w", pady=(10, 0), before=wavelet_size_label)
 
     refresh_scale_controls()
+    _sync_completed_actions_from_artifacts()
     refresh_action_buttons()
 
     for section in (frame_session, stage_tabs, frame_controls):

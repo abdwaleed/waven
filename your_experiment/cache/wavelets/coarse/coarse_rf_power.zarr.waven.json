@@ -1,0 +1,13 @@
+{
+  "fingerprint": "b00745aa4a384d3dfdb90b1c01faa1ca9341c2156d8723287f42793a8eb8074d",
+  "kind": "coarse_rf_power",
+  "params": {},
+  "shape": [
+    18000,
+    137,
+    77,
+    18,
+    4
+  ],
+  "version": 1
+}

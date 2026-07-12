@@ -1,74 +1,62 @@
 # Orientation selectivity
 
-`waven` measures OSI and gOSI from the **correlation orientation tuning curve**
-at each neuron's best receptive-field location, size, and frequency. This is an
-important distinction: the GUI no longer derives selectivity from a separate
-firing-rate tuning curve.
+The GUI calculates OSI and gOSI from the neuron's **frame-aligned firing
+rate**, never from RF correlation values. For ephys, the `spikes` cache is made
+by counting spikes in every photodiode-defined movie-frame bin and dividing by
+the actual bin duration in seconds. Thus its values are firing rates in Hz.
 
-The coarse RF analysis first searches a correlation tensor for each neuron’s
-preferred position, filter size, frequency, and orientation. It then holds the
-preferred non-orientation features fixed and reads the correlation values over
-all orientation bins:
+Correlation still has one important role: coarse RF analysis uses it to choose
+each neuron's preferred position, size, and spatial-frequency feature. Once
+those feature indices are known, the selectivity calculation takes the
+non-negative wavelet energy at that feature as an orientation-specific frame
+weight and computes:
 
 ```text
-correlation_tuning[orientation] =
-  RF[neuron, best_x, best_y, orientation, best_sigma, best_frequency]
+rate_tuning[orientation] =
+  sum(frame_weight * firing_rate) / sum(frame_weight)
 ```
 
-In plain language, this asks: *when the stimulus is represented by this
-neuron's best spatial feature, how strongly does the neural response correlate
-with each orientation?* Using the same correlation space for RF discovery,
-tuning, OSI, and gOSI makes the result internally consistent.
+This asks: *at frames containing each orientation at the neuron's preferred RF
+feature, how strongly did the neuron fire?* The correlation tensor is not used
+as `R(theta)` in either index.
 
 ## OSI
 
-The orientation selectivity index compares the preferred orientation with the
-orientation nearest 90 degrees away:
+The orientation selectivity index compares the firing rate at the preferred
+orientation with that at the orientation nearest 90 degrees away:
 
 ```text
 OSI = (R_pref - R_orth) / (R_pref + R_orth)
 ```
 
-An OSI near zero indicates similar correlation at preferred and orthogonal
-orientations. An OSI near one indicates a much stronger preferred-orientation
-correlation. Because classic OSI depends on two bins, it is easy to interpret
-but can be sensitive to noise in either bin.
+An OSI near zero means similar firing at preferred and orthogonal orientations;
+an OSI near one means a strongly preferred orientation.
 
 ## gOSI
 
-Global OSI uses the full curve rather than only two bins:
+Global OSI uses all firing-rate orientation bins:
 
 ```text
 gOSI = abs(sum(R(theta) * exp(2j * theta))) / sum(R(theta))
 ```
 
-The doubled angle makes 0 and 180 degrees represent the same orientation axis.
-gOSI near zero means correlations are broad or balanced across orientations;
-gOSI near one means they concentrate around one axis. It is often a steadier
-population summary because every orientation bin contributes.
+The doubled angle treats 0 and 180 degrees as the same orientation axis. A
+larger gOSI means the firing-rate response is more concentrated around one
+orientation axis.
 
-## GUI distributions and table of contents
+## Population displays
 
-The **All neurons** view renders separate OSI and gOSI panels. Each includes a
-blue histogram, red Gaussian KDE, green mean line, purple dashed median line,
-and a legend. The table printed beneath each plot contains:
+The **All neurons** view renders separate OSI and gOSI panels with a KDE, mean,
+median, and legend. Its descriptive table lists total units, mean, median,
+mode, standard deviation, variance, range, quartiles, skewness, kurtosis, and
+high/medium/low selectivity categories. Counts use finite firing-rate-derived
+indices in the plotted population.
 
-```text
-OSI/gOSI DISTRIBUTION STATISTICS
-Sample Size: Total units
-Central Tendency: Mean, Median, Mode
-Spread: Std Dev, Variance, Range
-Distribution: Min, Q1 (25%), Q2 (50%), Q3 (75%), Max
-Shape: Skewness, Kurtosis
-Selectivity Categories: High (>0.5), Medium (0.3–0.5), Low (<0.3)
-```
+## Individual-neuron curves and uncertainty
 
-Counts and percentages are calculated from finite values in the plotted
-population. The quality-mask overlay is still available where a mask exists.
-For ephys grouping, unique acquisition IDs are not treated as population
-groups—doing so creates a misleading `n=1` panel for every neuron. The GUI
-instead falls back to a shared spatial/unit grouping when IDs are unique.
-
-These summaries are descriptive, not a significance test. Always inspect the
-correlation tuning curve and the number of units supporting a group before
-interpreting small between-group differences.
+The individual-neuron **Orientation Tuning Curve** and **Size Tuning Curve**
+remain correlation curves for inspecting the RF fit. They alone show 95% CI
+bars, computed from trial-wise correlations as
+`1.96 * sample_std / sqrt(number_of_valid_trials)`. Those correlation curves
+and their CIs do not determine OSI/gOSI: the title and exported OSI/gOSI values
+come from the separate firing-rate tuning calculation above.

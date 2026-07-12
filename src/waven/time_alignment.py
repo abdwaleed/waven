@@ -432,6 +432,7 @@ def load_aligned_spikes(
             sampling_rate,
             save_dir=cache_dir,
             output_format=output_format,
+            stimulus_duration=stimulus_duration,
             experiment_info=experiment_info,
             threshold=threshold,
             method=method,

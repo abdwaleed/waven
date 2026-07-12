@@ -1,61 +1,47 @@
 # waven documentation
 
-`waven` analyzes neural responses to visual stimuli with Gabor-wavelet features.
-It supports a GUI workflow for exploratory analysis and a scriptable Python
-pipeline for reproducible runs.
+`waven` analyzes neural responses to visual stimuli with Gabor-wavelet
+features. The GUI is organized around one principle: stimulus metadata comes
+first and provides the dimensions, frame count, timing, and duration used by
+every downstream stage.
 
-The documentation is organized with the Divio structure:
+## Recommended GUI path
 
-- **Tutorials** walk through complete workflows for new users.
-- **How-to guides** solve focused tasks such as installing the package, building
-  Gabor libraries, or exporting plots.
-- **Explanation** pages describe the intuition behind the stimulus transform,
-  receptive-field search, model fitting, and file lifecycle.
-- **Reference** pages are generated from Google-style docstrings with
-  `mkdocstrings`.
+1. **Stimulus & Metadata** — select the movie, choose a downsampling
+   percentage, and prepare the stimulus cache.
+2. **Session Setup** — create or validate the aligned neural `spikes`/`pos`
+   cache. Ephys `spikes` values are frame-bin firing rates in Hz.
+3. **Gabor** — create legacy libraries or convolution kernel caches.
+4. **Wavelet Products** — make only the named Zarr product required by Coarse
+   RF, Run Model, or Run Full Model.
+5. **Analysis** — run coarse RF, then either model path.
 
 ## Core data model
 
-Most analysis stages share a small set of array conventions:
+| Object | Shape | Meaning |
+| --- | --- | --- |
+| aligned neural responses | `(trials, frames, neurons)` | Ephys frame-bin firing rate in Hz; other workflows store aligned non-negative activity. |
+| downsampled movie | `(frames, y, x)` | Binary stimulus image sequence. |
+| Coarse RF power | `(frames, x, y, orientations, sigmas)` | Zarr product used only for receptive-field correlation. |
+| Run Model real/imaginary phases | `(frames, x, y, orientations, sigmas)` each | Separate Zarr pair for the coarse model. |
+| Run Full Model real/imaginary phases | `(frames, x, y, orientations, full_sigmas, frequencies)` each | Separate Zarr pair for local refinement. |
+| RF tensor | `(neurons, x, y, orientations, sigmas, frequencies)` | Pearson-correlation RF diagnostic tensor. |
 
-| Object | Shape | dtype | Meaning |
-| --- | --- | --- | --- |
-| `spikes` | `(n_trials, n_frames, n_neurons)` | floating numeric | Neural activity aligned to stimulus frames. Axis 1 is always the stimulus-frame axis used for correlations and models. |
-| `neuron_pos` | `(n_neurons, 2)` or `(n_neurons, 3)` | floating numeric | Anatomical positions. Two-photon data usually stores imaging-plane coordinates; electrophysiology data can include shank/depth metadata. |
-| downsampled movie | `(n_frames, ny, nx)` | `bool` | Binary stimulus after cropping to `Analysis Coverage` and resizing to the analysis grid. Movie files keep image order as row, column. |
-| Gabor library | coarse: `(nx, ny, n_orientations, n_sigmas, n_phases, nx * ny)` | `float16` | Spatial filters flattened over pixels. Libraries are large but reusable when the grid and feature axes match. |
-| fine Gabor library | `(NX, NY, n_orientations, n_sigmas, n_frequencies, n_phases, NX * NY)` | `float16` | Full-model filter bank when frequencies are independent from size. |
-| coarse wavelet cache | `(3, n_frames, nx, ny, n_orientations, n_sigmas)` | `float32` | Durable cache containing real phase, imaginary phase, and combined energy-like coefficients. |
-| full wavelets | `(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)` | `float32` | Full-resolution wavelet arrays for nonlinear model fitting; written separately for real and imaginary phases. |
-| RF tensor | `(n_neurons, nx, ny, n_orientations, n_sigmas, n_frequencies)` | `float32` or `float64` | Pearson-correlation receptive fields. Tuning curves are slices through this tensor around each neuron's preferred feature. |
+Movie arrays use image order `(y, x)` while Gabor/RF arrays use feature order
+`(x, y)`. Width and height always originate from movie metadata; no manual
+`NX`, `NY`, stimulus FPS, or duration is used by the GUI.
 
-The docs use uppercase `NX`/`NY` for the full analysis grid from the
-configuration and lowercase `nx`/`ny` for a concrete array after any coarse
-downsampling. Movie arrays use image order `(y, x)`, while Gabor and RF tensors
-use feature order `(x, y)`. When a shape looks transposed, check which family the
-array belongs to before assuming it is wrong.
+## Reading selectivity
 
-For uncompressed arrays, size is approximately:
+RF maps and individual tuning displays use correlation to make the preferred
+feature understandable. OSI/gOSI use the separate firing-rate tuning extracted
+from the aligned neural cache—not correlation amplitudes. See
+[Orientation Selectivity](explanation/orientation-selectivity.md).
 
-```text
-number_of_values * dtype_bytes
-```
+## Documentation map
 
-For example, a full wavelet phase with
-`n_frames=54000`, `NX=135`, `NY=54`, `n_orientations=8`, `n_sigmas=6`, and
-`n_frequencies=4` contains about 75.6 billion `float32` values, or roughly
-302 GB before filesystem and compression effects. This is why `waven` reuses
-existing files, shape-validates caches, and supports Zarr for full-model
-wavelets.
-
-## Recommended first path
-
-1. Read [Install waven](how-to/install.md).
-2. Follow [First GUI Analysis](tutorials/first-gui-analysis.md).
-3. Review [Pipeline Intuition](explanation/pipeline-intuition.md).
-4. Use the [Reference](reference/index.md) when extending code or writing scripts.
-
-!!! note
-    Authored documentation lives in `docs/`. The rendered static site is written
-    to `site/`, and the previous Sphinx `source/` tree has been retired in favor
-    of MkDocs plus `mkdocstrings`.
+- [First GUI Analysis](tutorials/first-gui-analysis.md)
+- [Prepare Wavelet Products](how-to/run-wavelet-decomposition.md)
+- [GUI Reference](reference/gui.md)
+- [Project Layout](reference/project-layout.md)
+- [Pipeline Intuition](explanation/pipeline-intuition.md)

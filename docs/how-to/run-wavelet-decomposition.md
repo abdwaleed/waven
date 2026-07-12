@@ -1,121 +1,68 @@
-# Run wavelet decomposition
+# Prepare wavelet products
 
-In the GUI, choose **Analysis scale** first, then click **Run Wavelet
-Decomposition**. The button changes its work according to the selected scale.
+The GUI uses one analysis grid for the whole session. It reads the stimulus
+movie metadata (width, height, frame count, FPS, and duration) in **Stimulus &
+Metadata** and applies the selected percentage to both image dimensions. There are no
+manual `NX`, `NY`, stimulus-FPS, or separate coarse/full-grid settings.
 
-Use **Stimulus Downsample Cache** when you want to make the movie cache as a
-separate step. This stage is required: wavelet decomposition reports a missing
-prerequisite instead of silently downsampling. The percentage slider is the only
-spatial-size control: it is applied to width and height read from the movie
-metadata. `20%` approximates the historical coarse grid and `100%` preserves
-the source-movie dimensions.
+This stage is also the prerequisite for **Session Setup** neural alignment.
+Ephys alignment refuses to guess the stimulus duration: it receives the exact
+metadata duration from the selected movie after this stage is completed.
 
-Stage 2's **Cache array format** selector controls the downsampled stimulus
-cache. Stage 4's **Wavelet storage format** selector is always visible beside
-the decomposition action and provides a mutually exclusive `.npy`/`.zarr`
-choice. The durable coarse RF cache remains an established NPY artifact;
-full-model phase arrays use the chosen Stage 4 storage format.
+First click **Prepare Stimulus Cache** in **1 Stimulus & Metadata**. It writes one binary movie cache with
+image order `(time, y, x)`. The three buttons in **4 Wavelet Products** then prepare
+independent, Zarr-backed products for their consumers:
 
-When Stage 4 starts, it searches for the exact selected cache first, then a
-shape-compatible sibling format, then legacy names such as
-`<movie>_coarse_downsampled.npy` and `<movie>_downsampled.npy` beside the movie
-or in the configured wavelet folder. The terminal reports the exact NPY/Zarr
-artifact reused. This lets projects created by older versions continue without
-duplicating a large stimulus cache.
-
-The stimulus movie itself lives in `input/stimulus_movie`. Generated wavelet
-caches are written under `cache/wavelets/coarse` or `cache/wavelets/full`, not
-next to the movie file.
-
-With `coarse`, it prepares:
-
-- coarse downsampled stimulus movie;
-- coarse real phase wavelets;
-- coarse imaginary phase wavelets;
-- durable coarse RF cache.
-
-With `full`, it prepares:
-
-- full-resolution downsampled stimulus movie;
-- full-model real and imaginary wavelets as `.npy` or `.zarr`.
-
-The same work can be run from Python:
-
-```python
-import waven
-
-config = waven.PipelineConfig.from_json("pipeline_config.json")
-
-waven.prepare_stimulus_wavelets(
-    config.analysis,
-    library_path=config.gabor.coarse_save_path,
-)
-waven.prepare_full_model_wavelets(
-    config.analysis,
-    config.gabor,
-    library_path=config.gabor.fine_save_path,
-)
-```
-
-If a long run is interrupted, keep the same **Analysis scale** selected and run
-the GUI button again. Existing outputs are shape-validated and checked against a
-small parameter fingerprint sidecar before reuse. Changing the movie path,
-backend, grid percentage, `NX`/`NY`, orientations, sigmas, phases, frequencies,
-or output format causes the relevant step to regenerate instead of reporting
-"already complete."
-
-## Outputs and shapes
-
-The wavelet stage writes several large arrays. The names are historical, but the
-axis meanings are stable:
-
-| Output | Shape | dtype | Notes |
+| Button | Consumer | Durable artifact(s) | Shape |
 | --- | --- | --- | --- |
-| `cache/wavelets/coarse/stimulus_coarse_downsampled_p020.npy` or selected `.zarr` | `(n_frames, coarse_ny, coarse_nx)` | `bool` | Cropped binary movie for coarse RF analysis. Image arrays keep row/column order. |
-| `dwt_videodata_0.npy` | `(n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` | `float32` | Coarse real-phase coefficients. |
-| `dwt_videodata_1.npy` | `(n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` | `float32` | Coarse imaginary-phase coefficients. |
-| `dwt_downsampled_videodata.npy` | `(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` | `float32` | Durable RF cache: real, imaginary, and combined coefficients. |
-| `cache/wavelets/full/stimulus_full_downsampled_p100.npy` or selected `.zarr` | `(n_frames, NY, NX)` | `bool` | Full-grid or selected-percentage binary movie for full-model wavelets. |
-| `dwt_videodata2_r.npy` or `.zarr` | `(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)` | `float32` | Full-model real phase. |
-| `dwt_videodata2_i.npy` or `.zarr` | `(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)` | `float32` | Full-model imaginary phase. |
+| **Prepare Coarse RF Power Cache** | Run Coarse RF Analysis | `coarse_rf_power.zarr` | `(time, x, y, orientation, sigma)` |
+| **Prepare Run Model Phase Caches** | Run Model (Coarse RF) | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | `(time, x, y, orientation, sigma)` each |
+| **Prepare Run Full Model Phase Caches** | Run Full Model | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | `(time, x, y, orientation, sigma_full, frequency)` each |
 
-The downsampled movie axes are `(frame, y, x)` because they are image arrays.
-The wavelet axes are `(frame, x, y, feature...)` because they follow the Gabor
-library convention. This difference is expected.
+This split is intentional. Coarse RF correlates neural activity with wavelet
+power; it does not need to keep real and imaginary model phases. Run Model
+uses only its named real/imaginary pair. Run Full Model uses its own
+higher-feature-count pair while taking the preferred coarse RF locations as
+seeds. Preparing one product therefore does not create the combined three-plane
+`dwt_downsampled_videodata.npy` cache used by older releases.
 
-## Memory and disk intuition
+## Backend-specific behavior
 
-Downsampled movies are compact because they are boolean:
+**Legacy** needs the flattened Gabor libraries. **Prepare Gabor Assets** builds
+the coarse coupled library and the fine independent-frequency library before
+the relevant phase product is made. Its displayed size estimate refers to those
+libraries.
+
+**Convolution** does not materialize those flattened libraries. The same button
+instead creates compact coarse and fine kernel caches. The Wavelet Products tab still
+shows the same three consumer-oriented buttons, but its size estimate describes
+the Zarr phase/power products rather than a legacy library.
+
+## Axis convention and safety
+
+The downsampled movie is `(time, y, x)` because it is an image sequence. Every
+wavelet product is `(time, x, y, ...)` because it follows the Gabor feature
+convention. The GUI derives both from the same metadata-based grid and validates
+the full expected shape before reuse. A stale artifact with a different movie,
+percentage, backend, orientation count, sigma list, phase list, or frequency
+list is regenerated rather than passed downstream.
+
+Internal wavelet artifacts are Zarr. They are chunked and streamed so a large
+product remains disk-backed; the application never promotes an entire product
+to RAM merely because it is being reused. The terminal reports the exact
+artifact, logical shape, and resume decision. Temporary RF phases are Zarr too
+and are removed after `coarse_rf_power.zarr` is safely completed.
+
+## Disk intuition
+
+For a float32 coarse product, the uncompressed logical size is
 
 ```text
-movie_bytes = n_frames * ny * nx * 1
+time * x * y * orientations * sigmas * 4 bytes
 ```
 
-Wavelets are dense `float32`, so every value is 4 bytes. A full-model phase uses:
-
-```text
-full_phase_bytes =
-  n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies * 4
-```
-
-The real and imaginary phases are separate, so keeping both as `.npy` requires
-twice that amount. Zarr stores the same logical array in chunks and can compress
-repeated structure. It is usually easier to resume, inspect, and move in pieces,
-but the uncompressed logical shape is unchanged.
-
-## Resume points
-
-The GUI checks completed artifacts before doing expensive work again. A rerun
-can resume after:
-
-- coarse movie downsampling;
-- coarse real phase;
-- coarse imaginary phase;
-- durable coarse cache creation;
-- full-grid movie downsampling;
-- full real phase;
-- full imaginary phase.
-
-If a file exists with the wrong shape, regenerate it rather than using it. A
-same-name file from a different `NX`, `NY`, orientation, sigma, or frequency
-configuration can silently distort downstream plots if it is not rejected.
+`coarse_rf_power.zarr` stores one such product. Run Model stores two, and Run
+Full Model stores two products with an additional frequency axis. Zarr
+compression can reduce on-disk use, but planning should use the uncompressed
+equivalent shown by the GUI. Higher percentages grow both `x` and `y`, so disk
+growth is approximately quadratic in the percentage.

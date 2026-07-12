@@ -45,8 +45,8 @@ project tree without copying large source data.
 | `cache/gabor/coarse/` | Coarse RF Gabor library. | Generated names are deterministic, but loading accepts a single `.npy` or `.zarr` in the folder. |
 | `cache/gabor/full/` | Full-model/fine Gabor library. | Kept separate from coarse so arbitrary file names remain unambiguous. |
 | `cache/gabor/kernels/` | Compact convolution kernels. | Used by the convolution backend instead of giant flattened libraries. |
-| `cache/wavelets/coarse/` | Coarse downsample cache, phase scratch files, and `dwt_downsampled_videodata.npy`. | RF analysis reads this folder. |
-| `cache/wavelets/full/` | Full-model real and imaginary wavelet phases. | Full model reads this folder. |
+| `cache/wavelets/coarse/` | Stimulus cache, `coarse_rf_power.zarr`, and named coarse-model real/imaginary Zarr phases. | RF and Run Model each read only their own product. |
+| `cache/wavelets/full/` | `dwt_videodata2_r.zarr` and `dwt_videodata2_i.zarr`. | Run Full Model reads this folder. |
 
 Generated caches carry `.waven.json` sidecars where practical. These sidecars
 store shape and parameter fingerprints so reruns can decide whether a cache is
@@ -62,8 +62,8 @@ still compatible with the GUI inputs.
 
 ## Metadata sanity checks
 
-When the GUI resolves the stimulus movie, it reads only lightweight metadata:
-frame count, frame rate, width, and height. If those disagree with `Number of
-Frames`, `Hz`, `NX`, or `NY`, the GUI shows a Yes/No warning. Choosing **Yes**
-updates the GUI fields to match the movie metadata; choosing **No** leaves your
-typed values unchanged.
+When the GUI resolves the stimulus movie, it reads lightweight metadata: frame
+count, frame rate, width, height, and duration. These are authoritative. The
+user supplies only the downsampling percentage, from which the shared analysis
+grid is derived; there are no competing `NX`, `NY`, FPS, frame-count, or
+duration inputs to reconcile.

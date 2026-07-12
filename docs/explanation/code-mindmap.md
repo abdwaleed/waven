@@ -1,83 +1,53 @@
-# Code mindmap
+# Code and data flow
 
-This page maps the main user-facing inputs to the functions that consume them
-and the files or arrays they produce. It is meant as a bridge between the
-tutorials and the generated API reference.
-
-## End-to-end flow
-
-![Codebase Mindmap](../images/mindmap.svg)
+This page maps the current GUI workflow to the durable artifacts it creates.
 
 ```mermaid
 flowchart TD
-    Config["pipeline_config.json<br/>PipelineConfig"]
-    Movie["Stimulus movie<br/>(frames, screen_y, screen_x)"]
-    Neural["Neural data<br/>Suite2p or ephys"]
+    M["Stimulus movie metadata\nwidth, height, frames, FPS, duration"]
+    D["Stimulus cache\n(time, y, x)"]
+    N["Aligned neural cache\n(trials, frames, neurons)"]
+    G["Legacy libraries or convolution kernels"]
+    P["Coarse RF power.zarr"]
+    C["Coarse model real/imag.zarr"]
+    F["Full-model real/imag.zarr"]
+    R["Coarse RF analysis"]
+    SM["Run Model"]
+    FM["Run Full Model"]
 
-    GaborCfg["GaborConfig<br/>NX, NY, N_thetas, Sigmas, Frequencies"]
-    AnalysisCfg["AnalysisConfig<br/>paths, coverage, frames, trials"]
-
-    CoarseLib["create_coarse_gabor_library<br/>coarse Gabor library"]
-    FineLib["create_fine_gabor_library<br/>fine Gabor library"]
-
-    CoarseWave["prepare_stimulus_wavelets<br/>coarse movie, phases, cache"]
-    FullWave["prepare_full_model_wavelets<br/>full real and imaginary phases"]
-
-    Align["load_spikes_and_positions<br/>spikes and neuron_pos"]
-    RF["run_rf_analysis<br/>RF tensor, repeatability, OSI/gOSI"]
-    Simple["run_simple_model / run_Model<br/>coarse model plots"]
-    Full["run_full_model / run_Full_Model<br/>full model plots and metrics"]
-
-    Config --> GaborCfg
-    Config --> AnalysisCfg
-    GaborCfg --> CoarseLib
-    GaborCfg --> FineLib
-    Movie --> CoarseWave
-    Movie --> FullWave
-    AnalysisCfg --> CoarseWave
-    AnalysisCfg --> FullWave
-    CoarseLib --> CoarseWave
-    FineLib --> FullWave
-    Neural --> Align
-    AnalysisCfg --> Align
-    Align --> RF
-    CoarseWave --> RF
-    RF --> Simple
-    CoarseWave --> Simple
-    RF --> Full
-    FullWave --> Full
+    M --> D
+    M --> N
+    D --> G
+    G --> P
+    G --> C
+    G --> F
+    P --> R
+    N --> R
+    R --> SM
+    C --> SM
+    R --> FM
+    F --> FM
 ```
 
-## GUI scale selector
+## Artifact contracts
 
-The GUI has one `Analysis scale` selector:
-
-| Selected scale | Gabor button builds | Wavelet button writes | Model button runs |
+| GUI action | Input | Durable output | Consumer |
 | --- | --- | --- | --- |
-| `coarse` | coarse coupled library | coarse downsampled movie, real/imaginary phases, durable RF cache | `run_Model` simple/coarse model plots |
-| `full` | fine independent-frequency library | full-grid downsampled movie, full real/imaginary wavelets | `run_Full_Model` full model plots |
+| Prepare Stimulus Cache | movie metadata + percentage | `(time, y, x)` binary movie | alignment, Gabor, wavelets |
+| Create neural cache | raw neural data + movie frames/duration | `spikes`, `pos` | RF, OSI/gOSI, models |
+| Prepare Gabor Assets | shared movie-derived grid | legacy libraries or convolution kernels | matching wavelet action |
+| Prepare Coarse RF Power Cache | stimulus cache + coarse filters | `coarse_rf_power.zarr`, `(time, x, y, orientation, sigma)` | Coarse RF only |
+| Prepare Run Model Phase Caches | stimulus cache + coarse filters | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | Run Model only |
+| Prepare Run Full Model Phase Caches | stimulus cache + fine filters | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | Run Full Model only |
 
-`Run Coarse RF Analysis` remains explicitly coarse because it finds the
-preferred feature indices that both the coarse model and full model use as
-starting structure.
+The RF tensor is a correlation diagnostic. It chooses preferred features, but
+OSI/gOSI are calculated from the aligned neural responses in `spikes`, using
+wavelet energy only as a frame weight to form firing-rate orientation tuning.
 
-## Function contracts
+## Dimension ownership
 
-| Stage | Main function | Inputs | Outputs |
-| --- | --- | --- | --- |
-| configuration | `PipelineConfig.from_json()` | JSON path; optional `{PROJECT_ROOT}` placeholder | `PipelineConfig(gabor, analysis, workflow)` |
-| coarse library | `create_coarse_gabor_library()` | `GaborConfig` | `*_coarse.npy` or `.zarr`; shape `(coarse_nx, coarse_ny, n_orientations, n_sigmas, n_phases, coarse_nx * coarse_ny)` |
-| fine library | `create_fine_gabor_library()` | `GaborConfig`, `Sigmas Full Model` | `*_fine.npy` or `.zarr`; shape `(NX, NY, n_orientations, n_sigmas_total, n_frequencies, n_phases, NX * NY)` |
-| coarse wavelets | `prepare_stimulus_wavelets()` or GUI coarse wavelet path | movie, coverage, coarse library | `dwt_downsampled_videodata.npy`; shape `(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` |
-| full wavelets | `prepare_full_model_wavelets()` or GUI full wavelet path | movie, coverage, fine library | `dwt_videodata2_r/i.npy` or `.zarr`; shape `(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)` |
-| alignment | `load_spikes_and_positions()` | acquisition files or `Spks Path` | `spikes` `(n_trials, n_frames, n_neurons)` and `neuron_pos` |
-| RF analysis | `run_rf_analysis()` | `SpikeData`, coarse wavelet cache | RF tensor, preferred feature indices, repeatability, OSI/gOSI |
-| model plots | `run_simple_model()` or `run_full_model()` | RF result, spikes, selected wavelets | predictions, parameters, metrics, figures |
-
-## Mental model
-
-The coarse path is the fast screening path. It reduces the grid, computes the
-RF tensor, and gives interpretable retinotopy and tuning curves. The full path
-is the expensive modeling path. It keeps the configured grid and frequency axis,
-but it still relies on coarse RF analysis to decide which neurons and preferred
-features are worth modeling.
+The movie owns width, height, frame count, FPS, and duration. The user owns one
+downsampling percentage. The grid is derived as `round(width * percentage /
+100)` by `round(height * percentage / 100)`. Consequently, no GUI input can
+silently give a library, stimulus cache, RF tensor, or model product a different
+spatial meaning.

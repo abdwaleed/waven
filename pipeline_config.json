@@ -1,23 +1,18 @@
 {
   "workflow": "ephys",
   "gui": {
-    "analysis_scale": "coarse",
     "wavelet_backend": "convolution",
     "neural_source": "data_dir",
-    "downsample_mode": "legacy",
-    "downsample_percent": 20,
+    "downsample_percent": 10.7,
     "downsample_format": "npy",
     "neural_cache_format": "npy",
-    "gabor_format": "npy",
-    "wavelet_format": "zarr"
+    "gabor_format": "npy"
   },
   "gabor_param": {
     "N_thetas": "18",
     "Sigmas": "[2, 4, 8, 12]",
     "Frequencies": "[0.02, 0.06, 0.1]",
-    "Phases": "[0, 1.57079632679]",
-    "NX": "138",
-    "NY": "112",
+    "Phases": "[0, 90]",
     "Coarse Library Path": "{PROJECT_ROOT}/your_experiment/cache/gabor/coarse",
     "Fine Library Path": "{PROJECT_ROOT}/your_experiment/cache/gabor/full"
   },
@@ -25,8 +20,6 @@
     "Project Root": "{PROJECT_ROOT}/your_experiment",
     "Experiment Info": "('CnL43', '2026-05-23', 3)",
     "Block End": "0",
-    "Hz": "30",
-    "Number of Frames": "18000",
     "Train Trial Indices": "[0, 2]",
     "Test Trial Indices": "auto",
     "Use Last Minute Holdout": "False",
