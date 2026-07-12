@@ -358,7 +358,6 @@ def align_ephys_data(
 # TEST EPHYS CODE
 #import time
 #start_time = time.time()
-#align_ephys_data(r'C:\Users\Abdelrahman\Documents\VISUAL STUDIO CODE PROJECTS\surf\gabor-analysis\waven\your_experiment\input\ephys',
 #                 30 * 60 * 10,
 #                 30000)
 #end_time = time.time()

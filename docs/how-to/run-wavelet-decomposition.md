@@ -53,6 +53,29 @@ to RAM merely because it is being reused. The terminal reports the exact
 artifact, logical shape, and resume decision. Temporary RF phases are Zarr too
 and are removed after `coarse_rf_power.zarr` is safely completed.
 
+## Performance and responsiveness
+
+The convolution backend fuses the two real/imaginary phases when preparing
+**Coarse RF Power**. It performs one convolution bank per frame chunk and
+computes `real² + imaginary²` before writing the final power cache. This avoids
+the former duplicate movie read, transfer, and temporary phase products while
+preserving the same power definition and output shape. As with any reordered
+float32 GPU convolution, least-significant-bit roundoff may vary by hardware.
+
+For all three convolution products, Waven overlaps a bounded next-chunk read
+with the current GPU convolution and uses one bounded writer for completed
+chunks. The application never queues an unbounded number of frames. It also
+derives a conservative batch ceiling from currently free RAM/VRAM and adapts
+the first measured batches within that ceiling. At the end of the action, the
+terminal reports input, compute/transfer, and output throughput so a slow run
+can be attributed to decoding, GPU compute, or disk writes.
+
+On a multi-GPU workstation, batch-parallel convolution is available only when
+the advanced `WAVEN_MULTI_GPU=1` environment flag is set before launch. This is
+off by default because leaving a display or shared workload GPU saturated can
+reduce desktop responsiveness. If multi-GPU setup fails, the action continues
+on the primary GPU rather than failing the decomposition.
+
 ## Disk intuition
 
 For a float32 coarse product, the uncompressed logical size is

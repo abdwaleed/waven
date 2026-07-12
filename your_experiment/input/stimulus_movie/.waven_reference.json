@@ -1,4 +1,4 @@
 {
   "kind": "stimulus_movie",
-  "target": "C:\\Users\\Abdelrahman\\Documents\\VISUAL STUDIO CODE PROJECTS\\surf\\gabor-analysis\\waven_jul1\\experimental_data\\movie"
+  "relative_target": "../../../experimental_data/movie"
 }

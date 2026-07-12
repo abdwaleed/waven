@@ -8,13 +8,88 @@ call repeatedly (results are cached where profiling would be expensive).
 from __future__ import annotations
 
 import os
+import threading
+import time
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 import psutil
 import torch
 
 ComputeDevice = Literal["cuda", "cpu"]
+
+
+class OperationTelemetry:
+    """Low-overhead timing and throughput counters for one pipeline operation."""
+
+    def __init__(self, label: str):
+        self.label = str(label)
+        self.started = time.perf_counter()
+        self.seconds: Dict[str, float] = {}
+        self.bytes: Dict[str, int] = {}
+        self._lock = threading.Lock()
+        self._last_live_report = self.started
+
+    def add(self, stage: str, seconds: float = 0.0, byte_count: int = 0) -> None:
+        with self._lock:
+            self.seconds[stage] = self.seconds.get(stage, 0.0) + max(0.0, float(seconds))
+            self.bytes[stage] = self.bytes.get(stage, 0) + max(0, int(byte_count))
+
+    def _message(self, suffix: str = "") -> str:
+        total = max(time.perf_counter() - self.started, 1e-9)
+        with self._lock:
+            stages = sorted(self.seconds.items())
+            byte_counts = dict(self.bytes)
+        pieces = [f"{self.label}{suffix}: {total:.1f}s total"]
+        for stage, duration in stages:
+            rate = byte_counts.get(stage, 0) / max(duration, 1e-9) / 1024**2
+            rate_suffix = f", {rate:.1f} MiB/s" if byte_counts.get(stage, 0) else ""
+            pieces.append(f"{stage} {duration:.1f}s{rate_suffix}")
+        return " | ".join(pieces)
+
+    def maybe_report(self, interval_seconds: float = 10.0) -> None:
+        """Print a rate-limited live throughput snapshot for a long operation."""
+        now = time.perf_counter()
+        with self._lock:
+            if now - self._last_live_report < float(interval_seconds):
+                return
+            self._last_live_report = now
+        print(self._message(" (live)"))
+
+    def report(self) -> None:
+        print(self._message())
+
+
+def enabled_feature(name: str, default: bool = True) -> bool:
+    """Read a conservative runtime feature flag from ``WAVEN_<NAME>``."""
+    value = os.environ.get(f"WAVEN_{str(name).upper()}")
+    if value is None:
+        return bool(default)
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def compute_devices(allow_multi_gpu: bool = False):
+    """Return safe compute-device names; multi-GPU remains explicit opt-in."""
+    if not torch.cuda.is_available():
+        return ["cpu"]
+    if allow_multi_gpu and enabled_feature("MULTI_GPU", default=False):
+        devices = [f"cuda:{idx}" for idx in range(torch.cuda.device_count()) if gpu_available_vram_bytes(idx) > 0]
+        if len(devices) > 1:
+            return devices
+    return ["cuda:0"]
+
+
+def autotuned_frame_chunk_size(num_frames: int, nx: int, ny: int, n_channels: int = 1) -> int:
+    """Choose a bounded convolution batch from current free device memory."""
+    num_frames = max(1, int(num_frames))
+    pixels = max(1, int(nx) * int(ny))
+    if torch.cuda.is_available():
+        budget = max(1, int(gpu_available_vram_bytes() * 0.20))
+        # input, convolution workspace, output, and transfer headroom
+        estimate_per_frame = max(1, pixels * max(1, int(n_channels)) * 4 * 8)
+        return max(16, min(num_frames, 1024, budget // estimate_per_frame))
+    budget = max(1, int(available_ram_bytes() * 0.10))
+    return max(8, min(num_frames, 512, budget // max(1, pixels * 4 * 4)))
 
 
 def get_gpu_count() -> int:

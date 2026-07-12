@@ -7,7 +7,9 @@ wavelet coefficient arrays to disk. Filter-bank construction lives in
 import gc
 import math
 import os
+import queue
 import shutil
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -30,7 +32,11 @@ from skimage.filters import gabor_kernel
 from tqdm import tqdm
 
 from ..runtime.performance import (
+    OperationTelemetry,
     available_ram_bytes,
+    autotuned_frame_chunk_size,
+    compute_devices,
+    enabled_feature,
     gpu_available_vram_bytes,
     gpu_vram_bytes,
     resolve_compute_device,
@@ -44,6 +50,58 @@ from .filters import has_enough_ram
 def _array_bytes(shape, dtype=np.float32):
     """Return exact bytes for an array shape/dtype pair."""
     return int(math.prod(tuple(int(v) for v in shape)) * np.dtype(dtype).itemsize)
+
+
+class _AsyncSliceWriter:
+    """One bounded writer thread for disk-backed array slices.
+
+    A single writer preserves Zarr/memmap ordering guarantees while allowing
+    the CPU/GPU producer to start the next convolution chunk.  Queue capacity
+    bounds retained response buffers and therefore RAM use.
+    """
+
+    def __init__(self, telemetry=None, max_queue=2):
+        self.telemetry = telemetry
+        self.queue = queue.Queue(maxsize=max(1, int(max_queue)))
+        self.error = None
+        self._closed = False
+        self.thread = threading.Thread(target=self._run, name="waven-array-writer", daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        while True:
+            task = self.queue.get()
+            if task is None:
+                self.queue.task_done()
+                return
+            callback, payload, byte_count = task
+            try:
+                started = time.perf_counter()
+                callback(payload)
+                if self.telemetry is not None:
+                    self.telemetry.add("output", time.perf_counter() - started, byte_count)
+            except Exception as exc:
+                self.error = exc
+            finally:
+                self.queue.task_done()
+
+    def submit(self, callback, payload, byte_count):
+        if self._closed:
+            raise RuntimeError("Cannot submit to a closed array writer.")
+        if self.error is not None:
+            raise self.error
+        self.queue.put((callback, payload, int(byte_count)))
+
+    def close(self):
+        if self._closed:
+            if self.error is not None:
+                raise self.error
+            return
+        self._closed = True
+        self.queue.put(None)
+        self.thread.join()
+        if self.error is not None:
+            raise self.error
 
 
 def _safe_work_array(shape, folder_path, name, dtype=np.float32):
@@ -229,8 +287,10 @@ def _gabor_kernel_for_conv(angle, sigma, phase, frequency=None, coupled_frequenc
     return np.asarray(kernel.T, dtype=np.float32)
 
 
-def _conv_frame_chunk_size(num_frames):
+def _conv_frame_chunk_size(num_frames, nx=None, ny=None, n_channels=1):
     """Return a conservative frame chunk size for convolution decomposition."""
+    if nx is not None and ny is not None and enabled_feature("AUTOTUNE", default=True):
+        return autotuned_frame_chunk_size(num_frames, nx, ny, n_channels=n_channels)
     if resolve_compute_device(prefer_gpu=True) == "cuda":
         return max(1, min(int(num_frames), 256))
     return max(1, min(int(num_frames), 128))
@@ -272,26 +332,106 @@ def _center_pad_kernels(kernels):
 
 
 @torch.no_grad()
-def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_event=None):
+def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_event=None, telemetry=None):
     """Yield ``conv2d`` responses as ``(start, end, chunk, x, y, theta)`` chunks."""
     kernel_array = _center_pad_kernels(kernels)
-    kernel_tensor = torch.as_tensor(kernel_array[:, None, :, :], dtype=torch.float32, device=device)
     pad_y = int(kernel_array.shape[1] // 2)
     pad_x = int(kernel_array.shape[2] // 2)
+    kernel_tensor = torch.as_tensor(kernel_array[:, None, :, :], dtype=torch.float32, device=device)
+    multi_gpu_model = None
+    if str(device).startswith("cuda"):
+        devices = compute_devices(allow_multi_gpu=True)
+        if len(devices) > 1:
+            try:
+                device_ids = [int(name.split(":", 1)[1]) for name in devices]
+
+                class _KernelBank(torch.nn.Module):
+                    def __init__(self, weights, padding):
+                        super().__init__()
+                        self.register_buffer("weights", weights)
+                        self.padding = padding
+
+                    def forward(self, values):
+                        return F.conv2d(values, self.weights, padding=self.padding)
+
+                multi_gpu_model = torch.nn.DataParallel(
+                    _KernelBank(kernel_tensor, (pad_y, pad_x)), device_ids=device_ids, output_device=device_ids[0]
+                )
+                print(f"Convolution using {len(device_ids)} GPUs: {devices}")
+            except Exception as exc:
+                print(f"Multi-GPU convolution setup failed; using one GPU: {exc}")
+                multi_gpu_model = None
     num_frames = int(videodata.shape[0])
 
-    for start in range(0, num_frames, frame_chunk_size):
-        check_cancelled(cancel_event)
-        end = min(start + frame_chunk_size, num_frames)
+    def read_frames(start, end):
+        read_start = time.perf_counter()
         frames = np.asarray(videodata[start:end], dtype=np.float32)
-        frame_tensor = torch.as_tensor(frames[:, None, :, :], dtype=torch.float32, device=device)
-        response = F.conv2d(frame_tensor, kernel_tensor, padding=(pad_y, pad_x))
-        yield start, end, response.permute(0, 3, 2, 1).cpu().numpy()
-        del frame_tensor, response
+        return frames, time.perf_counter() - read_start
+
+    # Start below the resource-derived ceiling, then adapt after measuring real
+    # transfer/compute time.  The ceiling is never exceeded, which preserves
+    # the RAM/VRAM safety contract even on a busy desktop.
+    max_frame_chunk = max(1, int(frame_chunk_size))
+    adaptive = enabled_feature("AUTOTUNE", default=True)
+    active_frame_chunk = max(1, max_frame_chunk // 2) if adaptive else max_frame_chunk
+    prefetch = enabled_feature("PREFETCH", default=True) and num_frames > active_frame_chunk
+    executor = ThreadPoolExecutor(max_workers=1) if prefetch else None
+    future = None
+    future_end = None
+    try:
+        start = 0
+        while start < num_frames:
+            check_cancelled(cancel_event)
+            if executor is not None:
+                if future is None:
+                    future_end = min(start + active_frame_chunk, num_frames)
+                    future = executor.submit(read_frames, start, future_end)
+                frames, read_seconds = future.result()
+                end = int(future_end)
+                if end < num_frames:
+                    # The current measured size is used for the next read. Any
+                    # timing-based adjustment below applies to the following
+                    # chunk, so decoding still overlaps current GPU work.
+                    future_end = min(end + active_frame_chunk, num_frames)
+                    future = executor.submit(read_frames, end, future_end)
+                else:
+                    future = None
+                    future_end = None
+            else:
+                end = min(start + active_frame_chunk, num_frames)
+                frames, read_seconds = read_frames(start, end)
+            if telemetry is not None:
+                telemetry.add("input", read_seconds, frames.nbytes)
+            compute_start = time.perf_counter()
+            frame_tensor = torch.as_tensor(frames[:, None, :, :], dtype=torch.float32, device=device)
+            response = (
+                multi_gpu_model(frame_tensor)
+                if multi_gpu_model is not None
+                else F.conv2d(frame_tensor, kernel_tensor, padding=(pad_y, pad_x))
+            )
+            output = response.permute(0, 3, 2, 1).cpu().numpy()
+            compute_seconds = time.perf_counter() - compute_start
+            if telemetry is not None:
+                telemetry.add("gpu_compute_and_transfer", compute_seconds, output.nbytes)
+            if adaptive and end < num_frames:
+                # A short first-pass measurement keeps responsive systems from
+                # being underfed while reducing batch pressure on slower or
+                # already-busy machines. Individual frame results are
+                # independent, so this changes scheduling only, not values.
+                if compute_seconds < 0.35 and active_frame_chunk < max_frame_chunk:
+                    active_frame_chunk = min(max_frame_chunk, max(active_frame_chunk + 1, int(active_frame_chunk * 1.25)))
+                elif compute_seconds > 2.0 and active_frame_chunk > 8:
+                    active_frame_chunk = max(8, int(active_frame_chunk * 0.70))
+            yield start, end, output
+            del frame_tensor, response
+            start = end
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
 
 
 @torch.no_grad()
-def _conv2d_wavelet_group(videodata, kernels, device, frame_chunk_size, n_orientations, cancel_event=None):
+def _conv2d_wavelet_group(videodata, kernels, device, frame_chunk_size, n_orientations, cancel_event=None, telemetry=None):
     """Yield grouped convolution responses as ``(start, end, chunk, n_groups)``."""
     for start, end, response in _conv2d_wavelet_bank(
         videodata,
@@ -299,6 +439,7 @@ def _conv2d_wavelet_group(videodata, kernels, device, frame_chunk_size, n_orient
         device,
         frame_chunk_size,
         cancel_event=cancel_event,
+        telemetry=telemetry,
     ):
         group_count = int(response.shape[-1] // int(n_orientations))
         reshaped = response.reshape(
@@ -550,40 +691,63 @@ def downsample_video_binary(
     frames_buffer = []
     frame_idx = 0
     progress_start = time.time()
-    
-    print(f"Downsampling {total_frames} frames directly to disk...", end="\n\n")
-    while True:
-        check_cancelled(cancel_event)
-        ret, img = cap.read()
-        if not ret:
-            break
-            
-        frames_buffer.append(img[:, :, 0])
-        
-        if len(frames_buffer) == chunk_size:
-            # CAST TO FLOAT32 HERE to prevent scikit-image ValueError
-            chunk_arr = (np.stack(frames_buffer, axis=0) > 100).astype(np.float32)
-            chunk_cropped = chunk_arr[:, xi:xe, yi:ye]
-            chunk_resized = skimage.transform.resize(chunk_cropped, (chunk_size, shape[0], shape[1]), anti_aliasing=True)
-            
-            # Write chunk directly to disk
-            output_mmap[frame_idx : frame_idx + chunk_size] = chunk_resized >= 0.5
-            frame_idx += chunk_size
-            print(progress_message("Video downsample", frame_idx, total_frames, progress_start, unit="frames"))
-            frames_buffer.clear()
-            gc.collect()
-            
-    # Process remaining frames
-    check_cancelled(cancel_event)
-    if frames_buffer:
-        rem_size = len(frames_buffer)
-        # CAST TO FLOAT32 HERE as well
-        chunk_arr = (np.stack(frames_buffer, axis=0) > 100).astype(np.float32)
+    telemetry = OperationTelemetry("Video downsample")
+
+    def resize_binary_chunk(frames):
+        resize_start = time.perf_counter()
+        actual_len = len(frames)
+        chunk_arr = (np.stack(frames, axis=0) > 100).astype(np.float32)
         chunk_cropped = chunk_arr[:, xi:xe, yi:ye]
-        chunk_resized = skimage.transform.resize(chunk_cropped, (rem_size, shape[0], shape[1]), anti_aliasing=True)
-        output_mmap[frame_idx : frame_idx + rem_size] = chunk_resized >= 0.5
-        frame_idx += rem_size
+        resized = skimage.transform.resize(
+            chunk_cropped, (actual_len, shape[0], shape[1]), anti_aliasing=True
+        )
+        return resized >= 0.5, time.perf_counter() - resize_start
+
+    # One resize worker overlaps CPU interpolation with the serial OpenCV
+    # decoder.  The queue is bounded to two chunks, preserving RAM headroom and
+    # output order while preventing the UI/system from being overwhelmed.
+    pending = []
+    executor = ThreadPoolExecutor(max_workers=1) if enabled_feature("PREFETCH", default=True) else None
+
+    def write_next():
+        nonlocal frame_idx
+        frames, future = pending.pop(0)
+        if future is None:
+            resized, resize_seconds = resize_binary_chunk(frames)
+        else:
+            resized, resize_seconds = future.result()
+        write_start = time.perf_counter()
+        output_mmap[frame_idx:frame_idx + len(frames)] = resized
+        telemetry.add("resize", resize_seconds, resized.nbytes)
+        telemetry.add("output", time.perf_counter() - write_start, resized.nbytes)
+        telemetry.maybe_report()
+        frame_idx += len(frames)
         print(progress_message("Video downsample", frame_idx, total_frames, progress_start, unit="frames"))
+
+    print(f"Downsampling {total_frames} frames directly to disk...", end="\n\n")
+    try:
+        while True:
+            check_cancelled(cancel_event)
+            decode_start = time.perf_counter()
+            ret, img = cap.read()
+            telemetry.add("decode", time.perf_counter() - decode_start, img.nbytes if ret else 0)
+            if not ret:
+                break
+            frames_buffer.append(img[:, :, 0])
+            if len(frames_buffer) == chunk_size:
+                frames = frames_buffer
+                frames_buffer = []
+                pending.append((frames, executor.submit(resize_binary_chunk, frames) if executor else None))
+                if len(pending) >= 2:
+                    write_next()
+        check_cancelled(cancel_event)
+        if frames_buffer:
+            pending.append((frames_buffer, executor.submit(resize_binary_chunk, frames_buffer) if executor else None))
+        while pending:
+            write_next()
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
         
     cap.release()
     if hasattr(output_mmap, "flush"):
@@ -591,6 +755,7 @@ def downsample_video_binary(
     del output_mmap
     gc.collect()
     print(f"Success! Saved optimized binary array to: {save_path}")
+    telemetry.report()
 
 
 def _process_uint_chunk(frames_buffer, shape, actual_len):
@@ -1091,7 +1256,7 @@ def waveletDecompositionConv(
         print(f"Using disk-backed output for convolution coarse phase {phase}; RAM is below safe working set.")
 
     if frame_chunk_size is None:
-        frame_chunk_size = _conv_frame_chunk_size(num_frames)
+        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny)
     if filter_group_size is None:
         filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
     filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
@@ -1100,47 +1265,51 @@ def waveletDecompositionConv(
     print(f"Convolution backend sigma group size: {filter_group_size}")
 
     start_time = time.time()
+    telemetry = OperationTelemetry(f"Convolution coarse phase {phase}")
+    writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
     total_groups = max(1, math.ceil(len(sigmas) / filter_group_size))
-    completed_groups = 0
-    for group_start in range(0, len(sigmas), filter_group_size):
-        check_cancelled(cancel_event)
-        group_end = min(group_start + filter_group_size, len(sigmas))
-        group_sigmas = sigmas[group_start:group_end]
-        if kernel_cache is not None:
-            kernels = kernel_cache[int(phase), group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
-        else:
-            kernels = [
-                _gabor_kernel_for_conv(theta, sigma, phase_offset, coupled_frequency=True)
-                for sigma in group_sigmas
-                for theta in thetas
-            ]
-        print(
-            f"Convolution coarse phase {phase}: sigma group "
-            f"{completed_groups + 1}/{total_groups} ({group_start + 1}-{group_end} of {len(sigmas)})"
-        )
-        chunk_start = time.time()
-        chunk_count = max(1, math.ceil(num_frames / frame_chunk_size))
-        for chunk_index, (start, end, response) in enumerate(_conv2d_wavelet_group(
-            videodata,
-            kernels,
-            device,
-            frame_chunk_size,
-            n_orientations,
-            cancel_event=cancel_event,
-        ), start=1):
-            wt_final[start:end, :, :, :, group_start:group_end] = response
+    try:
+        completed_groups = 0
+        for group_start in range(0, len(sigmas), filter_group_size):
+            check_cancelled(cancel_event)
+            group_end = min(group_start + filter_group_size, len(sigmas))
+            group_sigmas = sigmas[group_start:group_end]
+            if kernel_cache is not None:
+                kernels = kernel_cache[int(phase), group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
+            else:
+                kernels = [
+                    _gabor_kernel_for_conv(theta, sigma, phase_offset, coupled_frequency=True)
+                    for sigma in group_sigmas
+                    for theta in thetas
+                ]
             print(
-                progress_message(
-                    f"Convolution coarse phase {phase} frames",
-                    chunk_index,
-                    chunk_count,
-                    chunk_start,
-                    unit="chunks",
-                )
+                f"Convolution coarse phase {phase}: sigma group "
+                f"{completed_groups + 1}/{total_groups} ({group_start + 1}-{group_end} of {len(sigmas)})"
             )
-        completed_groups += 1
-        print(progress_message(f"Convolution coarse phase {phase}", completed_groups, total_groups, start_time, unit="groups"))
-        gc.collect()
+            chunk_start = time.time()
+            for chunk_index, (start, end, response) in enumerate(_conv2d_wavelet_group(
+                videodata, kernels, device, frame_chunk_size, n_orientations,
+                cancel_event=cancel_event, telemetry=telemetry,
+            ), start=1):
+                def write_response(values, t0=start, t1=end, s0=group_start, s1=group_end):
+                    wt_final[t0:t1, :, :, :, s0:s1] = values
+                if writer is not None:
+                    writer.submit(write_response, response, response.nbytes)
+                else:
+                    write_start = time.perf_counter()
+                    write_response(response)
+                    telemetry.add("output", time.perf_counter() - write_start, response.nbytes)
+                print(progress_message(
+                    f"Convolution coarse phase {phase}", end, num_frames,
+                    chunk_start, unit="frames",
+                ))
+                telemetry.maybe_report()
+            completed_groups += 1
+            print(progress_message(f"Convolution coarse phase {phase}", completed_groups, total_groups, start_time, unit="groups"))
+            gc.collect()
+    finally:
+        if writer is not None:
+            writer.close()
 
     if device == "cuda":
         torch.cuda.empty_cache()
@@ -1154,6 +1323,7 @@ def waveletDecompositionConv(
         print("Saving convolution coarse array to disk...", end="\n\n")
         np.save(save_path, wt_final)
         print(f"Success! Saved convolution coarse array to {save_path}", end="\n\n")
+    telemetry.report()
 
 
 def waveletPowerDecompositionConv(
@@ -1163,9 +1333,9 @@ def waveletPowerDecompositionConv(
 ):
     """Write coarse wavelet power directly, without temporary phase caches.
 
-    Coarse RF needs only ``real**2 + imaginary**2``.  This path holds one
-    frame chunk from each phase and writes that result directly to Zarr, rather
-    than writing, rereading, and deleting two complete phase stores.
+    Coarse RF needs only ``real**2 + imaginary**2``. Real and imaginary
+    kernels are fused into one convolution bank, so each movie chunk is read
+    and transferred to the GPU once before the power product is written.
     """
     try:
         import zarr
@@ -1190,7 +1360,7 @@ def waveletPowerDecompositionConv(
         dtype=np.float32, compressor=Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE),
     )
     if frame_chunk_size is None:
-        frame_chunk_size = _conv_frame_chunk_size(num_frames)
+        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny, n_channels=2)
     if filter_group_size is None:
         # Two phase chunks coexist briefly, so halve the conservative default.
         filter_group_size = max(1, _conv_filter_group_size(
@@ -1199,8 +1369,11 @@ def waveletPowerDecompositionConv(
     filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
     print(f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, sigma group={filter_group_size}")
     start_time = time.time()
+    telemetry = OperationTelemetry("Direct coarse RF power")
+    writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
     total_groups = max(1, math.ceil(len(sigmas) / filter_group_size))
-    for group_number, group_start in enumerate(range(0, len(sigmas), filter_group_size), start=1):
+    try:
+      for group_number, group_start in enumerate(range(0, len(sigmas), filter_group_size), start=1):
         check_cancelled(cancel_event)
         group_end = min(group_start + filter_group_size, len(sigmas))
         if kernel_cache is not None:
@@ -1213,31 +1386,45 @@ def waveletPowerDecompositionConv(
                             for sigma in sigmas[group_start:group_end] for theta in thetas]
             imag_kernels = [_gabor_kernel_for_conv(theta, sigma, imag_phase, coupled_frequency=True)
                             for sigma in sigmas[group_start:group_end] for theta in thetas]
-        real_blocks = _conv2d_wavelet_group(
-            videodata, real_kernels, device, frame_chunk_size, n_orientations, cancel_event=cancel_event
-        )
-        imag_blocks = _conv2d_wavelet_group(
-            videodata, imag_kernels, device, frame_chunk_size, n_orientations, cancel_event=cancel_event
-        )
-        for chunk_index, (real_block, imag_block) in enumerate(zip(real_blocks, imag_blocks), start=1):
-            start, end, real_response = real_block
-            imag_start, imag_end, imag_response = imag_block
-            if (start, end) != (imag_start, imag_end):
-                raise RuntimeError("Real and imaginary convolution chunks lost frame alignment.")
-            power[start:end, :, :, :, group_start:group_end] = (
-                real_response * real_response + imag_response * imag_response
+        # Kernel order is [real sigma/theta groups, imaginary sigma/theta
+        # groups]. Split the output's group axis after one fused conv2d call.
+        fused_kernels = list(real_kernels) + list(imag_kernels)
+        for chunk_index, (start, end, raw_response) in enumerate(_conv2d_wavelet_bank(
+            videodata, fused_kernels, device, frame_chunk_size,
+            cancel_event=cancel_event, telemetry=telemetry,
+        ), start=1):
+            group_size = group_end - group_start
+            grouped = raw_response.reshape(
+                raw_response.shape[0], raw_response.shape[1], raw_response.shape[2],
+                group_size * 2, int(n_orientations),
             )
+            grouped = np.moveaxis(grouped, 3, 4)
+            real_response = grouped[..., :group_size]
+            imag_response = grouped[..., group_size:]
+            def write_power(payload, t0=start, t1=end, s0=group_start, s1=group_end):
+                real_values, imag_values = payload
+                power[t0:t1, :, :, :, s0:s1] = real_values * real_values + imag_values * imag_values
+            if writer is not None:
+                writer.submit(write_power, (real_response, imag_response), real_response.nbytes)
+            else:
+                write_start = time.perf_counter()
+                write_power((real_response, imag_response))
+                telemetry.add("output", time.perf_counter() - write_start, real_response.nbytes)
             if chunk_index % 8 == 0 or end == num_frames:
                 print(progress_message(
-                    "Direct coarse RF power frames", chunk_index,
-                    max(1, math.ceil(num_frames / frame_chunk_size)), start_time, unit="chunks",
+                    "Direct coarse RF power", end, num_frames, start_time, unit="frames",
                 ))
+            telemetry.maybe_report()
         print(progress_message("Direct coarse RF power", group_number, total_groups, start_time, unit="groups"))
         gc.collect()
+    finally:
+        if writer is not None:
+            writer.close()
     if device == "cuda":
         torch.cuda.empty_cache()
     del power
     print(f"Success! Saved direct coarse RF power Zarr array to {save_path}")
+    telemetry.report()
     return save_path
 
 
@@ -1334,7 +1521,7 @@ def waveletDecompositionFullConv(
         print(f"Using disk-backed output for convolution full-model phase {phase}; RAM is below safe working set.")
 
     if frame_chunk_size is None:
-        frame_chunk_size = _conv_frame_chunk_size(num_frames)
+        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny)
     combo_count = len(sigmas) * len(frequencies)
     if filter_group_size is None:
         filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
@@ -1347,7 +1534,10 @@ def waveletDecompositionFullConv(
     total_steps = max(1, math.ceil(len(combinations) / filter_group_size))
     completed_steps = 0
     start_time = time.time()
-    for group_start in range(0, len(combinations), filter_group_size):
+    telemetry = OperationTelemetry(f"Convolution full-model phase {phase}")
+    writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
+    try:
+      for group_start in range(0, len(combinations), filter_group_size):
         check_cancelled(cancel_event)
         combo_group = combinations[group_start:group_start + filter_group_size]
         if kernel_cache is not None:
@@ -1366,7 +1556,6 @@ def waveletDecompositionFullConv(
             f"{completed_steps + 1}/{total_steps} ({len(combo_group)} combinations)"
         )
         chunk_start = time.time()
-        chunk_count = max(1, math.ceil(num_frames / frame_chunk_size))
         for chunk_index, (start, end, response) in enumerate(_conv2d_wavelet_group(
             videodata,
             kernels,
@@ -1374,21 +1563,33 @@ def waveletDecompositionFullConv(
             frame_chunk_size,
             n_orientations,
             cancel_event=cancel_event,
+            telemetry=telemetry,
         ), start=1):
-            for local_idx, (s_idx, f_idx) in enumerate(combo_group):
-                wt_final[start:end, :, :, :, s_idx, f_idx] = response[..., local_idx]
+            def write_response(values, t0=start, t1=end, pairs=tuple(combo_group)):
+                for local_idx, (s_idx, f_idx) in enumerate(pairs):
+                    wt_final[t0:t1, :, :, :, s_idx, f_idx] = values[..., local_idx]
+            if writer is not None:
+                writer.submit(write_response, response, response.nbytes)
+            else:
+                write_start = time.perf_counter()
+                write_response(response)
+                telemetry.add("output", time.perf_counter() - write_start, response.nbytes)
             print(
                 progress_message(
-                    f"Convolution full-model phase {phase} frames",
-                    chunk_index,
-                    chunk_count,
+                    f"Convolution full-model phase {phase}",
+                    end,
+                    num_frames,
                     chunk_start,
-                    unit="chunks",
+                    unit="frames",
                 )
             )
+            telemetry.maybe_report()
         completed_steps += 1
         print(progress_message(f"Convolution full-model phase {phase}", completed_steps, total_steps, start_time, unit="groups"))
         gc.collect()
+    finally:
+        if writer is not None:
+            writer.close()
 
     if device == "cuda":
         torch.cuda.empty_cache()
@@ -1402,6 +1603,7 @@ def waveletDecompositionFullConv(
         print("Saving convolution full-model array to disk...", end="\n\n")
         np.save(save_path, wt_final)
         print(f"Success! Saved convolution full-model array to {save_path}", end="\n\n")
+    telemetry.report()
 
 
 def getTrueRF(idx, rfs, L):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
@@ -153,7 +154,11 @@ def write_reference(folder: str | Path, target: str | Path, kind: str) -> Path:
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     target_path = Path(target).expanduser()
-    payload = {"kind": kind, "target": str(target_path)}
+    try:
+        relative_target = os.path.relpath(str(target_path.resolve()), str(folder.resolve()))
+    except OSError:
+        relative_target = None
+    payload = {"kind": kind, "target": str(target_path), "relative_target": relative_target}
     reference_path = folder / REFERENCE_NAME
     reference_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return reference_path
@@ -170,6 +175,11 @@ def read_reference(folder: str | Path, kind: Optional[str] = None) -> Optional[P
         return None
     if kind is not None and payload.get("kind") not in {kind, None}:
         return None
+    relative_target = payload.get("relative_target")
+    if relative_target:
+        candidate = Path(folder) / str(relative_target)
+        if candidate.exists():
+            return candidate
     target = payload.get("target")
     return Path(target).expanduser() if target else None
 
@@ -178,7 +188,7 @@ def resolve_folder_reference(folder: str | Path, kind: Optional[str] = None) -> 
     """Resolve a layout folder to either itself or its referenced target."""
     folder = Path(folder)
     target = read_reference(folder, kind)
-    return target if target is not None else folder
+    return target if target is not None and target.exists() else folder
 
 
 def iter_artifacts(folder: str | Path, suffixes: Iterable[str]) -> Iterable[Path]:

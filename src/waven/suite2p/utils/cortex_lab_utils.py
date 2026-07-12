@@ -13,18 +13,10 @@ import os
 from datetime import datetime as dt
 
     
-dirs = [
-        # r'//znas.cortexlab.net/Subjects/',
-        # r'//zubjects.cortexlab.net/Subjects/',
-        # r'//zserver.cortexlab.net/Data/Subjects/',
-        # r'//zserver.cortexlab.net/Data/trodes/',
-        # r'//zserver.cortexlab.net/Data/expInfo/',
-        r'/mnt/z/',
-        r'/mnt/c/ali/data/',
-        r'/mnt/c/bulk/cortexlab/Subjects',
-        r'X:\Subjects',
-        r'Y:\Subjects']
-        # r'C:\ali\data\Subjects']
+# Dataset roots are environment-specific. Configure one or more paths with
+# WAVEN_SUBJECT_DIRS (separated by the platform path separator) rather than
+# shipping another user's mounted drives in source code.
+dirs = [path for path in os.environ.get('WAVEN_SUBJECT_DIRS', '').split(os.pathsep) if path]
 
 def expt_dirs():
     
@@ -181,4 +173,3 @@ def get_expt_tuple_from_df(exps_df, overall_id):
     date = row['date'].values[0]
     exp_num = int(row['num'].values[0])
     return(subject, date, exp_num)
-    

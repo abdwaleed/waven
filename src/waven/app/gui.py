@@ -5306,12 +5306,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 gabor_size_label.grid_remove()
             wavelet_format_segment.configure(state="normal")
             _refresh_scale_field_visibility()
-            metadata = _movie_metadata()
-            grid_width, grid_height = _stimulus_grid_dimensions()
-            gabor_dimensions_label.configure(
-                text=(f"Movie metadata: {metadata['width']} × {metadata['height']} px at "
-                      f"{metadata['fps']:.3g} fps  →  analysis grid {grid_width} × {grid_height} px")
-            )
+            try:
+                metadata = _movie_metadata()
+                grid_width, grid_height = _stimulus_grid_dimensions()
+                gabor_dimensions_label.configure(
+                    text=(f"Movie metadata: {metadata['width']} × {metadata['height']} px at "
+                          f"{metadata['fps']:.3g} fps  →  analysis grid {grid_width} × {grid_height} px")
+                )
+            except (FileNotFoundError, ValueError, OSError):
+                gabor_dimensions_label.configure(
+                    text="Select one stimulus movie in the Stimulus step to derive the analysis grid."
+                )
             refresh_action_buttons()
             refresh_size_estimates()
         except NameError:

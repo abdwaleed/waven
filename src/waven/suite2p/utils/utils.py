@@ -1,5 +1,7 @@
 """Utils module."""
 
+import os
+
 import numpy as n
 from scipy.ndimage import convolve1d
 from scipy.ndimage import gaussian_filter1d
@@ -841,7 +843,13 @@ def get_exp_data(job, full_spks,exp_idx, v_filt_sec = 0.25, v_abs=True):
     exp_tidxs = job.get_exp_frame_idxs(exp_idx)
     spks = full_spks[:,exp_tidxs[0]:exp_tidxs[1]]
     exp_info = (job.params['subject'], job.params['date'], exp_idx)
-    tl_ts, frame_ts, vs, sync_led_raw = load_timeline_info(*exp_info, dirs=['D:\\ExpData\\Subjects'], v_filt_sec=v_filt_sec, frame_counts=job.load_frame_counts())
+    configured_dirs = [path for path in os.environ.get('WAVEN_SUBJECT_DIRS', '').split(os.pathsep) if path]
+    if not configured_dirs:
+        raise ValueError(
+            "No Suite2p subject directory is configured. Set WAVEN_SUBJECT_DIRS "
+            "to one or more dataset roots before loading timeline information."
+        )
+    tl_ts, frame_ts, vs, sync_led_raw = load_timeline_info(*exp_info, dirs=configured_dirs, v_filt_sec=v_filt_sec, frame_counts=job.load_frame_counts())
     if v_abs: vs = n.abs(vs)
     n_frames = min(len(frame_ts), spks.shape[1])
     print(n_frames)
