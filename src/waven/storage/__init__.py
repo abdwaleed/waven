@@ -1,6 +1,7 @@
 """Storage adapters for NumPy, Zarr, and large wavelet arrays."""
 
 from .array_store import load_array
+from .binary_movie import SignedBinaryMovie
 from .neural_cache import (
     find_neural_cache_pair,
     load_neural_cache_pair,
@@ -16,4 +17,5 @@ __all__ = [
     "load_neural_cache_pair",
     "normalize_neural_cache_format",
     "save_aligned_neural_cache",
+    "SignedBinaryMovie",
 ]

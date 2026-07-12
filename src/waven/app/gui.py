@@ -67,6 +67,7 @@ from ..project_layout import (
     write_reference,
 )
 from ..storage.neural_cache import find_neural_cache_pair, load_neural_cache_pair, load_unit_ids
+from ..stimulus.metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
 _ANALYSIS_IMPORTS_READY = False
 _GABOR_IMPORTS_READY = False
 _WAVELET_IMPORTS_READY = False
@@ -2396,29 +2397,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _movie_metadata(path=None):
         """Return authoritative stimulus dimensions, frame count, and FPS."""
-        movie_path = path or _find_movie_path()
-        import cv2
-        cap = cv2.VideoCapture(str(movie_path))
-        try:
-            if not cap.isOpened():
-                raise ValueError(f"Could not open stimulus movie: {movie_path}")
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = float(cap.get(cv2.CAP_PROP_FPS))
-        finally:
-            cap.release()
-        if min(width, height, frames) <= 0 or fps <= 0:
-            raise ValueError(f"Stimulus movie metadata is incomplete: {movie_path}")
-        return {"width": width, "height": height, "frames": frames, "fps": fps,
-                "duration": frames / fps}
+        return read_movie_metadata(path or _find_movie_path())
 
     def _stimulus_grid_dimensions(scale=None, movie_path=None):
         """Derive analysis-grid dimensions solely from movie metadata and percentage."""
-        metadata = _movie_metadata(movie_path)
-        percent = _selected_downsample_percent()
-        return (max(1, int(round(metadata["width"] * percent / 100))),
-                max(1, int(round(metadata["height"] * percent / 100))))
+        return downsampled_grid_dimensions(
+            _movie_metadata(movie_path), _selected_downsample_percent()
+        )
 
     def _gabor_phase_offsets_radians():
         """The GUI accepts degrees; skimage convolution kernels require radians."""
@@ -2516,20 +2501,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _coverage_ratios_for_values(visual_coverage, analysis_coverage):
         """Return x/y coverage ratios used by video downsampling."""
-        if visual_coverage != analysis_coverage:
-            visual_coverage_arr = np.array(visual_coverage)
-            analysis_coverage_arr = np.array(analysis_coverage)
-            ratio_x = 1 - (
-                (visual_coverage_arr[0] - visual_coverage_arr[1])
-                - (analysis_coverage_arr[0] - analysis_coverage_arr[1])
-            ) / (visual_coverage_arr[0] - visual_coverage_arr[1])
-            ratio_y = 1 - (
-                (visual_coverage_arr[2] - visual_coverage_arr[3])
-                - (analysis_coverage_arr[2] - analysis_coverage_arr[3])
-            ) / (visual_coverage_arr[2] - visual_coverage_arr[3])
-        else:
-            ratio_x = ratio_y = 1
-        return ratio_x, ratio_y
+        return coverage_ratios(visual_coverage, analysis_coverage)
 
     def _scale_label(scale=None):
         """Return a short user-facing label for an analysis scale."""
@@ -2845,25 +2817,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             """
             return _coverage_ratios_for_values(visual_coverage, analysis_coverage)
 
-        class _SignedBinaryMovie:
-            """Disk-backed binary movie that converts each requested frame block to +/-1."""
-
-            def __init__(self, source):
-                self._source = source
-                self.shape = tuple(int(dim) for dim in source.shape)
-
-            def __getitem__(self, item):
-                return np.asarray(self._source[item], dtype=np.int8) * 2 - 1
-
         def _load_downsampled_movie(path, *, streaming=False):
             """Load a binary movie safely, retaining disk backing for convolution."""
             from ..storage.array_store import load_array
+            from ..storage.binary_movie import SignedBinaryMovie
 
             arr = load_array(path, mmap_mode="r")
             if streaming:
                 # Convolution consumes frame chunks.  This adapter converts only
                 # the requested chunk, avoiding a full cache-sized allocation.
-                return _SignedBinaryMovie(arr)
+                return SignedBinaryMovie(arr)
             from ..runtime.performance import has_enough_ram
             required_bytes = int(np.prod(arr.shape, dtype=np.int64))
             if not has_enough_ram(required_bytes, safety_margin=1.50):

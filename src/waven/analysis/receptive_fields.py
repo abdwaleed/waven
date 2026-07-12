@@ -1,6 +1,6 @@
 """Receptive-field correlation and low-level signal utilities."""
 from .common import *
-from ..runtime.performance import has_enough_ram
+from .rf_correlation import streaming_cross_correlation as _safe_chunked_cross_corr
 
 def wavelet_feature_dims(wavelets_r, sigmas=None, frequencies=None):
     """Infer spatial and feature dimensions from a full-model wavelet tensor."""
@@ -102,127 +102,6 @@ def max_by_index(idx, arr):
     where_format = tuple(np.array([dim]) for dim in unrav)
     return where_format, sub_arr.flat[flat_idx]
 
-
-def _safe_chunked_cross_corr(stim_flat, resp, chunk_size=None, n_time=None):
-    """Bounded-memory Pearson correlation for disk-backed stimulus features.
-
-    The stimulus matrix can be hundreds of GiB.  Stream feature blocks instead
-    of standardizing the entire matrix in RAM or copying it to the GPU.
-    """
-    stimulus_shape = tuple(int(dim) for dim in stim_flat.shape)
-    if len(stimulus_shape) < 2:
-        raise ValueError(
-            "RF correlation expects a time axis plus at least one feature axis; "
-            f"got shape {stimulus_shape}."
-        )
-    available_time = stimulus_shape[0]
-    n_time = available_time if n_time is None else int(n_time)
-    if n_time <= 0 or n_time > available_time:
-        raise ValueError(
-            f"Requested {n_time} RF frames, but stimulus provides {available_time}."
-        )
-    n_features = int(np.prod(stimulus_shape[1:], dtype=np.int64))
-    response = np.asarray(resp, dtype=np.float32)
-    if response.ndim != 2 or response.shape[0] != n_time:
-        raise ValueError(
-            "Stimulus/response time axes must match for RF correlation: "
-            f"stimulus {stim_flat.shape}, response {response.shape}."
-        )
-    if n_time < 2:
-        raise ValueError("RF correlation requires at least two shared stimulus frames.")
-    n_neurons = int(response.shape[1])
-
-    if chunk_size is None:
-        # Raw + normalized + GEMM work buffers, capped at 128 MiB.
-        bytes_per_feature = max(1, n_time * np.dtype(np.float32).itemsize * 4)
-        chunk_size = max(1, min(1024, (128 * 1024**2) // bytes_per_feature))
-    chunk_size = max(1, min(int(chunk_size), n_features))
-    print(
-        f"RF correlation streaming {n_features:,} features in {chunk_size:,}-feature blocks "
-        f"({n_time:,} frames × {n_neurons:,} neurons)."
-    )
-
-    response -= response.mean(axis=0, keepdims=True)
-    response /= np.maximum(response.std(axis=0, keepdims=True, ddof=1), 1e-9)
-    rfs_bytes = n_neurons * n_features * np.dtype(np.float32).itemsize
-    if not has_enough_ram(rfs_bytes, safety_margin=1.50):
-        raise MemoryError(
-            "RF result tensor cannot be held safely in RAM: "
-            f"requires {rfs_bytes / 1024**3:.2f} GiB. Reduce downsampling percentage, "
-            "orientation/sigma bins, or number of units before running RF analysis."
-        )
-    rfs = np.empty((n_neurons, n_features), dtype=np.float32)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    response_tensor = None
-    if device == "cuda":
-        try:
-            response_tensor = torch.as_tensor(response.T, dtype=torch.float32, device=device)
-        except RuntimeError as exc:
-            print(f"CUDA RF correlation setup failed; using CPU: {exc}")
-            torch.cuda.empty_cache()
-            device = "cpu"
-
-    if len(stimulus_shape) == 2:
-        # A conventional (time, feature) matrix can be sliced directly.
-        feature_blocks = (
-            (start, min(start + chunk_size, n_features), stim_flat[:n_time, start:min(start + chunk_size, n_features)])
-            for start in range(0, n_features, chunk_size)
-        )
-    else:
-        # Do not call ``reshape(time, -1)`` on a Zarr tensor: Zarr must first
-        # materialize the complete tensor, which is exactly the multi-GiB
-        # allocation this streaming path is meant to avoid.  Wavelet tensors
-        # are ordered (time, x, y, orientation, sigma[, frequency]); slicing
-        # x/y tiles preserves that C-order feature layout while keeping every
-        # loaded tile within the requested feature budget.
-        if len(stimulus_shape) < 4:
-            raise ValueError(
-                "Structured RF stimulus must have shape (time, x, y, features...); "
-                f"got {stimulus_shape}."
-            )
-        nx, ny = stimulus_shape[1], stimulus_shape[2]
-        features_per_pixel = int(np.prod(stimulus_shape[3:], dtype=np.int64))
-        pixels_per_block = max(1, chunk_size // max(1, features_per_pixel))
-
-        def structured_feature_blocks():
-            for x in range(nx):
-                for y_start in range(0, ny, pixels_per_block):
-                    y_end = min(y_start + pixels_per_block, ny)
-                    start = (x * ny + y_start) * features_per_pixel
-                    end = (x * ny + y_end) * features_per_pixel
-                    yield start, end, stim_flat[:n_time, x:x + 1, y_start:y_end, ...]
-
-        feature_blocks = structured_feature_blocks()
-
-    for block_index, (start, end, source_block) in enumerate(feature_blocks):
-        # ``source_block`` can be a writable memmap or a Zarr selection;
-        # force only this isolated block into RAM so standardization never
-        # mutates cached wavelet coefficients.
-        features = np.array(source_block, dtype=np.float32, copy=True).reshape(n_time, -1)
-        features -= features.mean(axis=0, keepdims=True)
-        features /= np.maximum(features.std(axis=0, keepdims=True, ddof=1), 1e-9)
-        if device == "cuda":
-            try:
-                feature_tensor = torch.as_tensor(features.T, dtype=torch.float32, device=device)
-                rfs[:, start:end] = (response_tensor @ feature_tensor.T / (n_time - 1)).cpu().numpy()
-                del feature_tensor
-            except RuntimeError as exc:
-                print(f"CUDA RF block {start}:{end} failed; switching remaining blocks to CPU: {exc}")
-                del response_tensor
-                response_tensor = None
-                torch.cuda.empty_cache()
-                device = "cpu"
-                rfs[:, start:end] = response.T @ features / (n_time - 1)
-        else:
-            rfs[:, start:end] = response.T @ features / (n_time - 1)
-        if block_index % 20 == 0 or end == n_features:
-            print(f"RF correlation features: {end:,}/{n_features:,}")
-        del features
-
-    if response_tensor is not None:
-        del response_tensor
-        torch.cuda.empty_cache()
-    return rfs
 
 def PearsonCorrelation(stim, resp, neuron_pos, nx, ny, plotting=True):
     """Correlate wavelet stimulus with responses and locate RF peaks per neuron."""

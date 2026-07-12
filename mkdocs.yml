@@ -75,6 +75,7 @@ nav:
       - explanation/index.md
       - Pipeline Intuition: explanation/pipeline-intuition.md
       - Code Mindmap: explanation/code-mindmap.md
+      - Code Organization: explanation/maintainability.md
       - Two-Photon Pipeline Mindmap: explanation/pipeline-2p.md
       - Ephys Pipeline Mindmap: explanation/pipeline-ephys.md
       - Methods Transparency: explanation/methods-transparency.md
