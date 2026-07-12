@@ -31,6 +31,7 @@ from tqdm import tqdm
 
 from ..runtime.performance import (
     available_ram_bytes,
+    gpu_available_vram_bytes,
     gpu_vram_bytes,
     resolve_compute_device,
     video_downsample_chunk_size,
@@ -242,10 +243,12 @@ def _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device, dt
     if per_group_bytes <= 0:
         return 1
     if device == "cuda":
-        budget = int(gpu_vram_bytes() * 0.45)
+        # Use free rather than total VRAM: the GUI, display driver, and prior
+        # tensors may already hold a substantial portion of the device.
+        budget = int(gpu_available_vram_bytes() * 0.45)
         if budget <= 0:
             budget = int(available_ram_bytes() * 0.25)
-        return max(1, min(16, budget // per_group_bytes))
+        return max(1, min(32, budget // per_group_bytes))
     budget = int(available_ram_bytes() * 0.35)
     return max(1, min(8, budget // per_group_bytes))
 
@@ -1151,6 +1154,91 @@ def waveletDecompositionConv(
         print("Saving convolution coarse array to disk...", end="\n\n")
         np.save(save_path, wt_final)
         print(f"Success! Saved convolution coarse array to {save_path}", end="\n\n")
+
+
+def waveletPowerDecompositionConv(
+    videodata, sigmas, folder_path, n_orientations, phase_offsets=None,
+    kernel_cache_path=None, frame_chunk_size=None, filter_group_size=None,
+    output_stem="coarse_rf_power", zarr_chunks=None, cancel_event=None,
+):
+    """Write coarse wavelet power directly, without temporary phase caches.
+
+    Coarse RF needs only ``real**2 + imaginary**2``.  This path holds one
+    frame chunk from each phase and writes that result directly to Zarr, rather
+    than writing, rereading, and deleting two complete phase stores.
+    """
+    try:
+        import zarr
+        from numcodecs import Blosc
+    except ImportError as exc:
+        raise ImportError("Direct coarse RF power requires zarr and numcodecs.") from exc
+    device = resolve_compute_device(prefer_gpu=True)
+    num_frames, ny, nx = videodata.shape
+    sigmas = np.asarray(sigmas, dtype=float)
+    thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
+    kernel_cache = _load_convolution_kernel_cache(
+        kernel_cache_path, "coarse", sigmas, [], n_orientations, phase_offsets,
+    ) if kernel_cache_path else None
+    final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
+    _require_disk_space(folder_path, _array_bytes(final_shape, np.float32), "coarse RF power cache")
+    if zarr_chunks is None:
+        zarr_chunks = (min(num_frames, 128), min(nx, 16), min(ny, 16), int(n_orientations), len(sigmas))
+    zarr_chunks = tuple(min(int(dim), max(1, int(chunk))) for dim, chunk in zip(final_shape, zarr_chunks))
+    save_path = os.path.join(folder_path, f"{output_stem}.zarr")
+    power = _open_zarr_array(
+        zarr, save_path, mode="w", shape=final_shape, chunks=zarr_chunks,
+        dtype=np.float32, compressor=Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE),
+    )
+    if frame_chunk_size is None:
+        frame_chunk_size = _conv_frame_chunk_size(num_frames)
+    if filter_group_size is None:
+        # Two phase chunks coexist briefly, so halve the conservative default.
+        filter_group_size = max(1, _conv_filter_group_size(
+            frame_chunk_size, nx, ny, n_orientations, device
+        ) // 2)
+    filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
+    print(f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, sigma group={filter_group_size}")
+    start_time = time.time()
+    total_groups = max(1, math.ceil(len(sigmas) / filter_group_size))
+    for group_number, group_start in enumerate(range(0, len(sigmas), filter_group_size), start=1):
+        check_cancelled(cancel_event)
+        group_end = min(group_start + filter_group_size, len(sigmas))
+        if kernel_cache is not None:
+            real_kernels = kernel_cache[0, group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
+            imag_kernels = kernel_cache[1, group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
+        else:
+            real_phase = _phase_offset_from_index(0, phase_offsets)
+            imag_phase = _phase_offset_from_index(1, phase_offsets)
+            real_kernels = [_gabor_kernel_for_conv(theta, sigma, real_phase, coupled_frequency=True)
+                            for sigma in sigmas[group_start:group_end] for theta in thetas]
+            imag_kernels = [_gabor_kernel_for_conv(theta, sigma, imag_phase, coupled_frequency=True)
+                            for sigma in sigmas[group_start:group_end] for theta in thetas]
+        real_blocks = _conv2d_wavelet_group(
+            videodata, real_kernels, device, frame_chunk_size, n_orientations, cancel_event=cancel_event
+        )
+        imag_blocks = _conv2d_wavelet_group(
+            videodata, imag_kernels, device, frame_chunk_size, n_orientations, cancel_event=cancel_event
+        )
+        for chunk_index, (real_block, imag_block) in enumerate(zip(real_blocks, imag_blocks), start=1):
+            start, end, real_response = real_block
+            imag_start, imag_end, imag_response = imag_block
+            if (start, end) != (imag_start, imag_end):
+                raise RuntimeError("Real and imaginary convolution chunks lost frame alignment.")
+            power[start:end, :, :, :, group_start:group_end] = (
+                real_response * real_response + imag_response * imag_response
+            )
+            if chunk_index % 8 == 0 or end == num_frames:
+                print(progress_message(
+                    "Direct coarse RF power frames", chunk_index,
+                    max(1, math.ceil(num_frames / frame_chunk_size)), start_time, unit="chunks",
+                ))
+        print(progress_message("Direct coarse RF power", group_number, total_groups, start_time, unit="groups"))
+        gc.collect()
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    del power
+    print(f"Success! Saved direct coarse RF power Zarr array to {save_path}")
+    return save_path
 
 
 def waveletDecompositionFullConv(

@@ -125,7 +125,7 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     global _WAVELET_IMPORTS_READY
     global coarseWavelet, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
     global build_convolution_kernel_cache, convolution_kernel_cache_path
-    global waveletDecompositionConv, waveletDecompositionFullConv
+    global waveletDecompositionConv, waveletPowerDecompositionConv, waveletDecompositionFullConv
     global video_downsample_chunk_size, convert_npy_to_zarr
     if _WAVELET_IMPORTS_READY:
         return
@@ -136,6 +136,7 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
         downsample_video_binary as _downsample_video_binary,
         waveletDecomposition as _waveletDecomposition,
         waveletDecompositionConv as _waveletDecompositionConv,
+        waveletPowerDecompositionConv as _waveletPowerDecompositionConv,
         waveletDecompositionFull as _waveletDecompositionFull,
         waveletDecompositionFullConv as _waveletDecompositionFullConv,
     )
@@ -148,6 +149,7 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     downsample_video_binary = _downsample_video_binary
     waveletDecomposition = _waveletDecomposition
     waveletDecompositionConv = _waveletDecompositionConv
+    waveletPowerDecompositionConv = _waveletPowerDecompositionConv
     waveletDecompositionFull = _waveletDecompositionFull
     waveletDecompositionFullConv = _waveletDecompositionFullConv
     video_downsample_chunk_size = _video_downsample_chunk_size
@@ -1590,7 +1592,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             Result produced by the operation.
         """
         bins = np.linspace(0, 1, 21)
-        fig, axes = plt.subplots(1, 2, figsize=(12, 6.8), constrained_layout=True)
+        # Give each distribution its own statistics panel.  Anchoring two long
+        # text blocks below a one-row figure caused them to overlap/squish the
+        # OSI and gOSI plots in the GUI and in exports.
+        fig, axes = plt.subplots(
+            2, 2, figsize=(13, 8.8), constrained_layout=True,
+            gridspec_kw={"height_ratios": [3.2, 1.5]},
+        )
+        plot_axes = axes[0]
+        stats_axes = axes[1]
         specs = [("osi", "OSI"), ("gosi", "gOSI")]
         shank_groups = None
         shank_labels = []
@@ -1598,7 +1608,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if show_shanks and neuron_pos is not None:
             shank_groups, shank_labels, shank_source = _grouping_for_selectivity(neuron_pos, preferred="shank")
         colors = ["#059669", "#D97706", "#7C3AED", "#DC2626", "#0891B2", "#BE185D", "#4B5563", "#65A30D"]
-        for ax, (key, label) in zip(axes, specs):
+        for ax, stats_ax, (key, label) in zip(plot_axes, stats_axes, specs):
             values, valid = _metric_values(selectivity, key)
             filtered, _ = _metric_values(selectivity, key, filter_mask=filter_mask)
             ax.hist(values, bins=bins, color="#2563EB", alpha=0.72, label=f"All neurons (n={values.size})")
@@ -1629,8 +1639,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ax.set_ylabel("Neuron count")
             ax.set_xlim(0, 1)
             ax.legend(fontsize=8)
-            ax.text(0, -0.42, _selectivity_statistics(values, label), transform=ax.transAxes,
-                    va="top", ha="left", fontsize=7.3, family="monospace", clip_on=False)
+            stats_ax.axis("off")
+            stats_ax.text(
+                0.01, 0.98, _selectivity_statistics(values, label),
+                transform=stats_ax.transAxes, va="top", ha="left",
+                fontsize=8.2, family="monospace",
+            )
         fig.suptitle("Orientation Selectivity by Neuron")
         fig._waven_caption = f"Shank grouping source: {shank_source}." if show_shanks else "Two-photon view: all-cell distribution only."
         _set_figure_export_payload(
@@ -1966,7 +1980,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _export_displayed_results("Individual neuron")
 
     def export_all_individual_neurons_results():
-        """Render and export the individual-neuron figures for every loaded neuron."""
+        """Render/export one neuron per Tk event-loop turn to keep the GUI responsive."""
         draw = individual_neuron_renderer.get("draw")
         n_neurons = np.asarray(analysis_state.get("spks", np.empty((0, 0, 0)))).shape[-1]
         if draw is None or n_neurons <= 0:
@@ -1977,16 +1991,46 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return
         export_root = os.path.join(selected_dir, f"waven_all_individual_neurons_{time.strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(export_root, exist_ok=True)
+        try:
+            btn_export_all_individual_neurons.configure(state=tk.DISABLED)
+        except NameError:
+            pass
         print(f"[EXPORT] All individual neurons | count={n_neurons}")
-        for neuron_id in range(n_neurons):
-            draw(neuron_id, switch_tab=False)
-            neuron_dir = os.path.join(export_root, f"neuron_{neuron_id:05d}")
-            os.makedirs(neuron_dir, exist_ok=True)
-            for index, record in enumerate(_active_export_records("Individual neuron"), start=1):
-                _export_figure_record(record, neuron_dir, index=index)
-            percent = 100.0 * (neuron_id + 1) / n_neurons
-            update_progress(percent, "Exporting individual neurons", f"Neuron {neuron_id + 1}/{n_neurons}")
-        print(f"[DONE] Exported {n_neurons} individual-neuron result sets\n       {export_root}")
+        export_state = {"neuron_id": 0, "failed": None}
+
+        def export_next_neuron():
+            """Export one neuron, then yield control back to Tk before continuing."""
+            neuron_id = export_state["neuron_id"]
+            if neuron_id >= n_neurons:
+                try:
+                    btn_export_all_individual_neurons.configure(state=tk.NORMAL)
+                except NameError:
+                    pass
+                if export_state["failed"] is None:
+                    print(f"[DONE] Exported {n_neurons} individual-neuron result sets\n       {export_root}")
+                    messagebox.showinfo("Export Complete", f"Exported {n_neurons} individual-neuron result sets.\n\n{export_root}")
+                return
+            try:
+                draw(neuron_id, switch_tab=False)
+                neuron_dir = os.path.join(export_root, f"neuron_{neuron_id:05d}")
+                os.makedirs(neuron_dir, exist_ok=True)
+                for index, record in enumerate(_active_export_records("Individual neuron"), start=1):
+                    _export_figure_record(record, neuron_dir, index=index)
+                export_state["neuron_id"] += 1
+                percent = 100.0 * export_state["neuron_id"] / n_neurons
+                update_progress(percent, "Exporting individual neurons", f"Neuron {export_state['neuron_id']}/{n_neurons}")
+                # A zero-delay timer lets paint/input events run between neurons.
+                root.after(1, export_next_neuron)
+            except Exception as exc:
+                export_state["failed"] = exc
+                try:
+                    btn_export_all_individual_neurons.configure(state=tk.NORMAL)
+                except NameError:
+                    pass
+                print(f"[FAILED] Individual-neuron export at neuron {neuron_id}: {exc}")
+                messagebox.showerror("Export Failed", f"Stopped at neuron {neuron_id}: {exc}")
+
+        root.after_idle(export_next_neuron)
 
     def _render_figure_records(records, message="Loaded plots from cache.", clear=True):
         """Function for render figure records.
@@ -2954,6 +2998,31 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 videodata = _load_downsampled_movie(
                     coarse_downsample_path, streaming=(backend == "convolution")
                 )
+
+                if product == "coarse_rf" and backend == "convolution":
+                    update_progress(25, "Coarse wavelet decomposition", "Writing direct RF power cache")
+                    print("Step 2/2: Writing direct coarse RF power (no temporary phase caches)...")
+                    _register_cancel_cleanup_path(coarse_power_path)
+                    waveletPowerDecompositionConv(
+                        videodata,
+                        sigmas,
+                        wavelet_folder,
+                        n_orientations=n_thetas,
+                        phase_offsets=phase_offsets,
+                        kernel_cache_path=coarse_kernel_cache_path,
+                        output_stem=os.path.splitext(os.path.basename(coarse_power_path))[0],
+                        cancel_event=_current_cancel_event(),
+                    )
+                    _raise_if_cancelled()
+                    if not _artifact_matches(coarse_power_path, coarse_power_shape):
+                        raise ValueError(f"Direct coarse RF power cache has an unexpected shape: {coarse_power_path}")
+                    _write_artifact_metadata(
+                        coarse_power_path, "coarse_rf_power", coarse_power_shape, coarse_power_fingerprint
+                    )
+                    _write_recovery_step("coarse_rf_power_complete", path=coarse_power_path)
+                    print(f"Direct coarse RF power cache is ready: {coarse_power_path}")
+                    update_progress(100, "Coarse wavelet decomposition", "Coarse RF power cache ready")
+                    return True
 
                 update_progress(25, "Coarse wavelet decomposition", "Preparing coarse real phase")
                 print("Step 2/4: Preparing coarse real phase wavelets...")
@@ -3993,8 +4062,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             Result produced by the operation.
         """
         neuron_id = int(param_entries["Neuron ID"].get())
-        if "spks" in analysis_state and not (0 <= neuron_id < analysis_state["spks"].shape[2]):
-            raise ValueError(f"Neuron ID {neuron_id} is outside the loaded range.")
+        if "spks" in analysis_state:
+            neuron_count = int(analysis_state["spks"].shape[2])
+            if neuron_count <= 0:
+                raise ValueError("The loaded neural cache contains no neurons.")
+            if not (0 <= neuron_id < neuron_count):
+                corrected = min(max(neuron_id, 0), neuron_count - 1)
+                print(
+                    f"Neuron ID {neuron_id} is outside the loaded range 0-{neuron_count - 1}; "
+                    f"using {corrected}."
+                )
+                # Model actions run in a worker.  Schedule the widget update
+                # on Tk's main thread instead of touching it here.
+                def update_neuron_entry():
+                    param_entries["Neuron ID"].delete(0, tk.END)
+                    param_entries["Neuron ID"].insert(0, str(corrected))
+                root.after(0, update_neuron_entry)
+                neuron_id = corrected
         return neuron_id
 
     def _parse_bool_entry(value, label):
@@ -4114,6 +4198,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             embed_captured_figures(figures, frame_plot_individual, title_prefix)
         root.after(0, render)
 
+    def _model_summary_figure(model_name, payload):
+        """Create a backend-neutral model summary for safe main-thread embedding."""
+        from matplotlib.figure import Figure
+
+        figure = Figure(figsize=(7.2, 4.2), constrained_layout=True)
+        axis = figure.add_subplot(111)
+        metrics = np.asarray(payload.get("metrics", []), dtype=float)
+        if metrics.size:
+            values = metrics.reshape(metrics.shape[0], -1)[0]
+            labels = ["Metric 1", "Metric 2", "Metric 3"][:values.size]
+            axis.bar(np.arange(values.size), values, color=["#2563EB", "#059669", "#7C3AED"][:values.size])
+            axis.set_xticks(np.arange(values.size), labels)
+            axis.set_ylabel("Model metric")
+            axis.axhline(0, color="#64748B", linewidth=0.8)
+        else:
+            axis.text(0.5, 0.5, "Model completed; no scalar metrics were returned.", ha="center", va="center")
+            axis.set_axis_off()
+        axis.set_title(f"{model_name} summary — neuron {payload.get('neuron_id')}")
+        figure._waven_caption = "Numerical fitting ran in a worker; this summary is rendered safely in the GUI thread."
+        return figure
+
     def plot_run_model_outputs():
         """Function for plot run model outputs.
 
@@ -4191,14 +4296,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 train_idx=split_settings["train_idx"],
                 test_idx=split_settings["test_idx"],
                 lastmin=split_settings["lastmin"],
-                plotting=True,
+                # Model fitting runs in a worker thread.  Matplotlib/Tk figures
+                # must only be constructed on Tk's main thread; the numerical
+                # result is cached and rendered by the GUI afterwards.
+                plotting=False,
                 frames_per_minute=frames_per_minute,
             )
 
-        result, figures = capture_new_figures(call_model)
+        # ``call_model`` deliberately runs without plotting in this worker.
+        # Do not touch pyplot here; Tk/Matplotlib state belongs to the main UI
+        # thread.  A backend-neutral summary figure is created below instead.
+        result, figures = call_model(), []
         del w_r, w_i
         gc.collect()
         model_payload = _model_result_payload("run_Model", result, neuron_id)
+        if not figures:
+            figures = [_model_summary_figure("Run Model", model_payload)]
         for fig in figures:
             _set_figure_export_payload(fig, model_payload)
         _put_cached_entry(
@@ -4282,14 +4395,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 test_idx=split_settings["test_idx"],
                 double_wavelet_model=False,
                 lastmin=split_settings["lastmin"],
-                plotting=True,
+                # As above, never create Tk/Matplotlib figures from the worker
+                # thread that performs Full Model refinement.
+                plotting=False,
                 frames_per_minute=frames_per_minute,
                 coarse_shape=(state["coarse_nx"], state["coarse_ny"]),
                 hz=movie_metadata["fps"],
             )
 
-        result, figures = capture_new_figures(call_full_model)
+        # See Run Model above: avoid pyplot inspection from the worker thread.
+        result, figures = call_full_model(), []
         model_payload = _model_result_payload("run_Full_Model", result, neuron_id)
+        if not figures:
+            figures = [_model_summary_figure("Run Full Model", model_payload)]
         for fig in figures:
             _set_figure_export_payload(fig, model_payload)
         _put_cached_entry(
@@ -4401,7 +4519,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "ephys": modality_values if workflow == WORKFLOW_EPHYS else {},
         }
         path = filedialog.asksaveasfilename(
-            title="Save Configuration",
+            title="Save Current GUI Inputs and Parameters",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json")],
             initialfile="pipeline_config.json",
@@ -4419,7 +4537,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def load_app_state():
         """Function for load app state."""
         path = filedialog.askopenfilename(
-            title="Load Configuration",
+            title="Load GUI Inputs and Parameters",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json")],
         )
@@ -5244,7 +5362,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     btn_load_state = ctk.CTkButton(
         frame_session,
-        text="Load Configuration",
+        text="Load GUI Inputs / Parameters",
         fg_color=primary_btn,
         hover_color="#1D4ED8",
         command=load_app_state,
@@ -5252,7 +5370,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     btn_load_state.pack(fill=tk.X, pady=3)
     btn_save_state = ctk.CTkButton(
         frame_session,
-        text="Save Configuration",
+        text="Save Current GUI Inputs / Parameters",
         fg_color="#4B5563",
         hover_color="#374151",
         command=save_app_state,
@@ -5842,35 +5960,39 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     export_format_segment.pack(side=tk.LEFT, padx=(10, 0))
     export_format_segment.set("npy")
 
+    ctk.CTkLabel(frame_export, text="All-neuron results", text_color=text_color,
+                 font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", pady=(4, 2))
     btn_export_all_results = ctk.CTkButton(
         frame_export,
-        text="Export All Displayed Results",
-        fg_color="#4B5563",
-        hover_color="#374151",
+        text="Export Every Displayed Graph",
+        fg_color="#2563EB",
+        hover_color="#1D4ED8",
         command=export_all_displayed_results,
     )
     btn_export_all_results.pack(fill=tk.X, pady=3)
     btn_export_all_neurons = ctk.CTkButton(
         frame_export,
-        text="Export All Neurons Tab",
-        fg_color="#4B5563",
-        hover_color="#374151",
+        text="Export All-Neuron Summary Graphs",
+        fg_color="#0891B2",
+        hover_color="#0E7490",
         command=export_all_neurons_results,
     )
     btn_export_all_neurons.pack(fill=tk.X, pady=3)
+    ctk.CTkLabel(frame_export, text="Individual-neuron results", text_color=text_color,
+                 font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", pady=(10, 2))
     btn_export_individual_neuron = ctk.CTkButton(
         frame_export,
-        text="Export Individual Neuron Tab",
-        fg_color="#4B5563",
-        hover_color="#374151",
+        text="Export Current Neuron Graphs",
+        fg_color="#7C3AED",
+        hover_color="#6D28D9",
         command=export_individual_neuron_results,
     )
     btn_export_individual_neuron.pack(fill=tk.X, pady=3)
     btn_export_all_individual_neurons = ctk.CTkButton(
         frame_export,
-        text="Export All Individual Neurons",
-        fg_color="#4B5563",
-        hover_color="#374151",
+        text="Export Graphs for Every Neuron",
+        fg_color="#059669",
+        hover_color="#047857",
         command=export_all_individual_neurons_results,
     )
     btn_export_all_individual_neurons.pack(fill=tk.X, pady=3)

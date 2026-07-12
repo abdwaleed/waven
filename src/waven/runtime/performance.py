@@ -32,6 +32,17 @@ def gpu_vram_bytes(device_id: int = 0) -> int:
     return int(torch.cuda.get_device_properties(device_id).total_memory)
 
 
+def gpu_available_vram_bytes(device_id: int = 0) -> int:
+    """Return currently free CUDA memory, falling back safely when unavailable."""
+    if not torch.cuda.is_available() or device_id >= torch.cuda.device_count():
+        return 0
+    try:
+        free_bytes, _total_bytes = torch.cuda.mem_get_info(device_id)
+        return int(free_bytes)
+    except Exception:
+        return gpu_vram_bytes(device_id)
+
+
 def available_ram_bytes() -> int:
     """Return bytes of RAM currently free for allocation (not total installed)."""
     return int(psutil.virtual_memory().available)

@@ -7,8 +7,41 @@ from .common import *
 from .receptive_fields import *
 from .nonlinear_models import *
 from .trial_stats import *
+from .rf_correlation import streaming_cross_correlation
 
 SECONDS_PER_MINUTE = 60
+
+
+class _WaveletWindow:
+    """Lazy time/spatial window over a disk-backed full-model wavelet array."""
+
+    def __init__(self, source, time_start, time_end, x_start, x_end, y_start, y_end):
+        self.source = source
+        self.offsets = (int(time_start), int(x_start), int(y_start))
+        self.shape = (
+            int(time_end - time_start), int(x_end - x_start), int(y_end - y_start),
+            *tuple(int(dim) for dim in source.shape[3:]),
+        )
+        source_chunks = getattr(source, "chunks", None)
+        if source_chunks:
+            self.chunks = tuple(
+                min(int(size), int(chunk)) for size, chunk in zip(self.shape, source_chunks)
+            )
+
+    def __getitem__(self, item):
+        if not isinstance(item, tuple) or len(item) < 3:
+            raise IndexError("Wavelet window requires time, x, and y indices.")
+
+        mapped = []
+        for dimension, index in enumerate(item[:3]):
+            offset = self.offsets[dimension]
+            if isinstance(index, slice):
+                start = 0 if index.start is None else int(index.start)
+                stop = self.shape[dimension] if index.stop is None else int(index.stop)
+                mapped.append(slice(offset + start, offset + stop, index.step))
+            else:
+                mapped.append(offset + int(index))
+        return self.source[tuple(mapped) + item[3:]]
 
 def signaltonoiseScipy(a, axis=0, ddof=0):
     """Function for signaltonoiseScipy.
@@ -242,8 +275,51 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         )
     frames_per_minute = int(frames_per_minute)
 
-    num_neurons = spks.shape[2]
-    if plotting:
+    if spks.ndim != 3:
+        raise ValueError(
+            "run_Model expects spikes with shape (trials, time, neurons); "
+            f"got {spks.shape}."
+        )
+    num_neurons = int(spks.shape[2])
+    if num_neurons <= 0:
+        raise ValueError("run_Model received no neurons.")
+    train_idx = [int(index) for index in train_idx]
+    test_idx = [int(index) for index in test_idx]
+    if not train_idx or not test_idx:
+        raise ValueError("run_Model requires at least one training and one holdout trial.")
+    invalid_trials = [
+        index for index in train_idx + test_idx if index < 0 or index >= int(spks.shape[0])
+    ]
+    if invalid_trials:
+        raise ValueError(
+            f"run_Model trial index/indices are outside 0-{spks.shape[0] - 1}: {invalid_trials}."
+        )
+    overlap = sorted(set(train_idx) & set(test_idx))
+    if overlap:
+        raise ValueError(f"run_Model train and holdout trial indices overlap: {overlap}")
+    for label, params in (("smoothed", maxes0), ("raw", maxes1)):
+        params = np.asarray(params)
+        if params.ndim != 2 or params.shape[0] < 4 or params.shape[1] != num_neurons:
+            raise ValueError(
+                f"run_Model {label} RF parameters must have shape (at least 4, {num_neurons}); "
+                f"got {params.shape}."
+            )
+        limits = np.asarray(wavelets_i.shape[1:5], dtype=int)
+        invalid = np.logical_or(~np.isfinite(params[:4]), params[:4] < 0)
+        invalid |= params[:4] > (limits[:, None] - 1)
+        if np.any(invalid):
+            raise ValueError(
+                f"run_Model {label} RF parameters are outside wavelet bounds {tuple(limits)}. "
+                "Re-run Coarse RF analysis for the current wavelet cache."
+            )
+    shared_frames = min(int(spks.shape[1]), int(wavelets_i.shape[0]), int(dt1))
+    if shared_frames < 2:
+        raise ValueError("run_Model needs at least two frames shared by spikes and wavelets.")
+    if shared_frames != int(dt1):
+        dt1 = shared_frames
+    # A selected GUI neuron is a one-neuron job.  Keep it serial so disk-backed
+    # Zarr inputs are not pickled into a worker process. Plotting is serial too.
+    if plotting or num_neurons == 1:
         parallel_results = [
             _process_single_neuron(
                 idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
@@ -330,13 +406,45 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     test_idx = [int(i) for i in test_idx]
     if not train_idx or not test_idx:
         raise ValueError("run_Full_Model requires at least one train and one test trial.")
-    n_trials = spks.shape[0]
+    if spks.ndim != 3:
+        raise ValueError(
+            "run_Full_Model expects spikes with shape (trials, time, neurons); "
+            f"got {spks.shape}."
+        )
+    n_trials = int(spks.shape[0])
     invalid = [i for i in train_idx + test_idx if i < 0 or i >= n_trials]
     if invalid:
         raise ValueError(f"Trial index/indices out of range for {n_trials} trials: {invalid}")
     overlap = sorted(set(train_idx) & set(test_idx))
     if overlap:
         raise ValueError(f"Train and test trial indices overlap: {overlap}")
+    if len(tt) != 2 or int(tt[0]) < 0 or int(tt[1]) <= int(tt[0]):
+        raise ValueError(f"run_Full_Model requires a valid [start, stop] frame range; got {tt!r}.")
+    if int(tt[1]) > int(spks.shape[1]):
+        raise ValueError(
+            f"Full-model frame range ends at {tt[1]}, but neural data has only {spks.shape[1]} frames."
+        )
+    if idxs is None:
+        selected_indices = list(range(int(spks.shape[2])))
+    else:
+        selected_indices = [int(idx) for idx in idxs]
+    invalid_indices = [idx for idx in selected_indices if idx < 0 or idx >= int(spks.shape[2])]
+    if invalid_indices:
+        raise ValueError(
+            f"Full-model neuron index/indices are outside 0-{spks.shape[2] - 1}: {invalid_indices}."
+        )
+    for label, params in (("raw", maxes0), ("smoothed", maxes1)):
+        params = np.asarray(params)
+        if params.ndim != 2 or params.shape[0] < 4 or params.shape[1] < int(spks.shape[2]):
+            raise ValueError(
+                f"run_Full_Model {label} RF parameters must have at least four rows and one column per neuron; "
+                f"got {params.shape}."
+            )
+        if not np.all(np.isfinite(params[:4, selected_indices])):
+            raise ValueError(
+                f"run_Full_Model {label} RF parameters contain non-finite values for selected neurons. "
+                "Re-run Coarse RF analysis."
+            )
     Predictions = []
     Metrics = []
     Params = []
@@ -393,6 +501,16 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             f"Real/imag full-model wavelets must share a shape, got "
             f"{wavelets_r.shape} and {wavelets_i.shape}."
         )
+    if int(tt[1]) > int(wavelets_r.shape[0]):
+        raise ValueError(
+            f"Full-model frame range ends at {tt[1]}, but full wavelets contain only "
+            f"{wavelets_r.shape[0]} frames. Rebuild the full-model wavelet cache for this movie."
+        )
+    if neuron_pos.ndim != 2 or neuron_pos.shape[0] < int(spks.shape[2]):
+        raise ValueError(
+            "Full-model neuron positions do not match the neural cache: "
+            f"positions {getattr(neuron_pos, 'shape', None)}, neurons {spks.shape[2]}."
+        )
     if coarse_shape is None:
         # Preserve the historical scripted API while allowing the GUI to use
         # arbitrary metadata-derived downsampling percentages.
@@ -402,6 +520,14 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         if coarse_nx <= 0 or coarse_ny <= 0:
             raise ValueError(f"coarse_shape must contain positive dimensions, got {coarse_shape!r}")
         scale_x, scale_y = nx_full / coarse_nx, ny_full / coarse_ny
+        for label, params in (("raw", maxes0), ("smoothed", maxes1)):
+            coordinates = np.asarray(params[:2, selected_indices], dtype=float)
+            upper = np.asarray((coarse_nx - 1, coarse_ny - 1), dtype=float)[:, None]
+            if np.any(coordinates < 0) or np.any(coordinates > upper):
+                raise ValueError(
+                    f"run_Full_Model {label} coarse RF coordinates are outside "
+                    f"the current coarse grid {(coarse_nx, coarse_ny)}. Re-run Coarse RF analysis."
+                )
     margin = 5
     corr_shape = (n_orientations, n_sigmas_w, n_frequencies)
     compute_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -445,8 +571,16 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         Returns:
             Result produced by the operation.
         """
-        corr_real = _corr_features(real_features, response).reshape(output_shape)
-        corr_imag = _corr_features(imag_features, response).reshape(output_shape)
+        if isinstance(real_features, _WaveletWindow):
+            # Initial full-model refinement used to materialize a five-minute
+            # x/y window.  The lazy view delegates to chunk-aligned RF
+            # sufficient statistics instead.
+            response_matrix = np.asarray(response, dtype=np.float32).reshape(-1, 1)
+            corr_real = streaming_cross_correlation(real_features, response_matrix).reshape(output_shape)
+            corr_imag = streaming_cross_correlation(imag_features, response_matrix).reshape(output_shape)
+        else:
+            corr_real = _corr_features(real_features, response).reshape(output_shape)
+            corr_imag = _corr_features(imag_features, response).reshape(output_shape)
         real_score = np.nanmax(np.abs(corr_real))
         imag_score = np.nanmax(np.abs(corr_imag))
         if real_score >= imag_score:
@@ -498,8 +632,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             raise ValueError("Fine refinement needs at least two training frames.")
         spk_train = np.mean(spks[train_idx, t_start:t_end, idx], axis=0)
         x_start, x_end, y_start, y_end = _window_bounds(x0, y0, w)
-        wavelets_r_ = np.asarray(wavelets_r[t_start:t_end, x_start:x_end, y_start:y_end, :, :, :])
-        wavelets_i_ = np.asarray(wavelets_i[t_start:t_end, x_start:x_end, y_start:y_end, :, :, :])
+        wavelets_r_ = _WaveletWindow(wavelets_r, t_start, t_end, x_start, x_end, y_start, y_end)
+        wavelets_i_ = _WaveletWindow(wavelets_i, t_start, t_end, x_start, x_end, y_start, y_end)
         phase, cc_initial, best = _best_phase_correlation(
             wavelets_r_,
             wavelets_i_,
@@ -513,8 +647,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         for iteration in range(10):
             print(x_global, y_global, phase)
             phase, cc_f_1, osf_best = _best_phase_correlation(
-                wavelets_r_[:, x_local, y_local, :, :, :],
-                wavelets_i_[:, x_local, y_local, :, :, :],
+                np.asarray(wavelets_r[t_start:t_end, x_global, y_global, :, :, :]),
+                np.asarray(wavelets_i[t_start:t_end, x_global, y_global, :, :, :]),
                 spk_train,
                 corr_shape,
             )
@@ -532,9 +666,9 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                     ax[i].set_ylabel("Frequency index")
 
             spatial_features = (
-                wavelets_r_[:, :, :, o, s, f]
+                np.asarray(wavelets_r[t_start:t_end, x_start:x_end, y_start:y_end, o, s, f])
                 if phase == "real"
-                else wavelets_i_[:, :, :, o, s, f]
+                else np.asarray(wavelets_i[t_start:t_end, x_start:x_end, y_start:y_end, o, s, f])
             )
             cc_f_1_xy = _corr_features(spatial_features, spk_train).reshape(spatial_features.shape[1:])
             new_x_local, new_y_local = np.unravel_index(np.nanargmax(np.abs(cc_f_1_xy)), cc_f_1_xy.shape)
@@ -603,10 +737,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     if train_stop - train_start <= 1:
         raise ValueError("Full model needs at least two training frames.")
 
-    if idxs==None:
-        list_neurons= range(neuron_pos.shape[0])
-    else:
-        list_neurons=idxs
+    list_neurons = selected_indices
     for idx in list_neurons:  # np.asarray(neuron_pos[:, 1]>600).nonzero()[0]:[1024, 732, 1789, 3279, 614]:#
         if compute_device == "cuda":
             torch.cuda.empty_cache()

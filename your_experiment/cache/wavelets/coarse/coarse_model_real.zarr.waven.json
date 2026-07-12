@@ -1,0 +1,13 @@
+{
+  "fingerprint": "307b0282de6421504c3b4d0187c440cf04242eddb1f825c6f011283659ce5b3c",
+  "kind": "coarse_model_phase",
+  "params": {},
+  "shape": [
+    18000,
+    137,
+    77,
+    18,
+    4
+  ],
+  "version": 1
+}

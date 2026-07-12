@@ -1,6 +1,7 @@
 """Nonlinear Gabor model helper functions and tuning plots."""
 from .common import *
 from .receptive_fields import *
+from .trial_stats import circular_variance
 
 def compute_sta(a, b, ran, nx=None, ny=None, n_orientations=None):
     """Function for compute sta.

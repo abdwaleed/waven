@@ -6,12 +6,80 @@ and lets the legacy :mod:`receptive_fields` API remain a compatibility layer.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Iterator, Optional, Tuple
 
 import numpy as np
 import torch
 
 from ..runtime.performance import has_enough_ram
+
+
+def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features):
+    """Correlate a 5/6-D Zarr tensor by reading each storage chunk once.
+
+    Pearson correlation can be reconstructed from sums, sums of squares, and
+    cross-products.  Accumulating those sufficient statistics over time avoids
+    repeatedly decompressing the same Zarr chunks for each small feature tile.
+    """
+    shape = tuple(int(dim) for dim in stimulus.shape)
+    nx, ny = shape[1], shape[2]
+    features_per_pixel = int(np.prod(shape[3:], dtype=np.int64))
+    chunks = getattr(stimulus, "chunks", None) or (128, min(nx, 16), min(ny, 16))
+    time_chunk = max(1, min(n_time, int(chunks[0])))
+    x_chunk = max(1, min(nx, int(chunks[1])))
+    y_chunk = max(1, min(ny, int(chunks[2])))
+    n_neurons = int(response.shape[1])
+    result = np.empty((n_neurons, n_features), dtype=np.float32)
+    response = np.asarray(response, dtype=np.float32)
+    response_sum = response.sum(axis=0, dtype=np.float64)
+    response_ss = np.einsum("ij,ij->j", response, response, dtype=np.float64)
+    response_var = np.maximum(response_ss - (response_sum * response_sum / n_time), 0.0)
+    total_tiles = math.ceil(nx / x_chunk) * math.ceil(ny / y_chunk)
+    tile_number = 0
+    print(
+        "RF correlation using chunk-aligned sufficient statistics: "
+        f"time={time_chunk}, x={x_chunk}, y={y_chunk}; {total_tiles} spatial tiles."
+    )
+    for x_start in range(0, nx, x_chunk):
+        x_end = min(nx, x_start + x_chunk)
+        for y_start in range(0, ny, y_chunk):
+            y_end = min(ny, y_start + y_chunk)
+            feature_start = (x_start * ny + y_start) * features_per_pixel
+            feature_end = ((x_end - 1) * ny + y_end) * features_per_pixel
+            tile_features = (x_end - x_start) * (y_end - y_start) * features_per_pixel
+            feature_sum = np.zeros(tile_features, dtype=np.float64)
+            feature_ss = np.zeros(tile_features, dtype=np.float64)
+            cross = np.zeros((tile_features, n_neurons), dtype=np.float32)
+            for time_start in range(0, n_time, time_chunk):
+                time_end = min(n_time, time_start + time_chunk)
+                block = np.asarray(
+                    stimulus[time_start:time_end, x_start:x_end, y_start:y_end, ...],
+                    dtype=np.float32,
+                ).reshape(time_end - time_start, tile_features)
+                feature_sum += block.sum(axis=0, dtype=np.float64)
+                feature_ss += np.einsum("ij,ij->j", block, block, dtype=np.float64)
+                cross += block.T @ response[time_start:time_end]
+            feature_var = np.maximum(feature_ss - (feature_sum * feature_sum / n_time), 0.0)
+            denominator = np.sqrt(feature_var[:, None] * response_var[None, :])
+            tile_corr = np.divide(
+                cross - (feature_sum[:, None] * response_sum[None, :] / n_time),
+                denominator,
+                out=np.zeros_like(cross),
+                where=denominator > 1e-12,
+            )
+            # x/y tiles are contiguous only when x has one value.  Assign one
+            # x row at a time to preserve C-order flattening exactly.
+            row_features = (y_end - y_start) * features_per_pixel
+            for local_x, global_x in enumerate(range(x_start, x_end)):
+                row_start = (global_x * ny + y_start) * features_per_pixel
+                row_end = row_start + row_features
+                local_start = local_x * row_features
+                result[:, row_start:row_end] = tile_corr[local_start:local_start + row_features].T
+            tile_number += 1
+            if tile_number % 8 == 0 or tile_number == total_tiles:
+                print(f"RF correlation spatial tiles: {tile_number}/{total_tiles}")
+    return result
 
 
 def streaming_cross_correlation(
@@ -69,6 +137,12 @@ def streaming_cross_correlation(
             f"requires {result_bytes / 1024**3:.2f} GiB. Reduce downsampling percentage, "
             "orientation/sigma bins, or number of units before running RF analysis."
         )
+    if len(stimulus_shape) >= 4:
+        # A structured Zarr tensor benefits from chunk-aligned temporal
+        # accumulation; it is both faster and lower-I/O than reading all time
+        # frames separately for each small spatial feature block.
+        return _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features)
+
     correlations = np.empty((n_neurons, n_features), dtype=np.float32)
 
     def feature_blocks() -> Iterator[Tuple[int, int, Any]]:
