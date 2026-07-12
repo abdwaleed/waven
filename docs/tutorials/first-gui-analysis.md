@@ -4,6 +4,21 @@ This tutorial follows the GUI in its required order. The essential idea is
 simple: the stimulus movie defines the timing and spatial grid for the whole
 session, so it is prepared before neural alignment or Gabor work.
 
+## Before opening the GUI
+
+Have these items ready:
+
+- one supported stimulus movie in a folder by itself;
+- raw two-photon/ephys data **or** an existing matching `spikes`/`pos` cache;
+- a writable local project folder with room for `cache/` and `output/`;
+- visual and analysis coverage in `[left, right, top, bottom]` degree order;
+- Gabor orientations, sizes, phases (in degrees), and—only for the full
+  model—spatial frequencies.
+
+Start from the repository root with `conda activate waven` then `python ui.py`.
+The first launch may show blank GUI fields if `pipeline_config.json` is empty;
+that is expected. The GUI validates a field only when an action needs it.
+
 ## 1. Configure folders
 
 Set `Project Root`, `Movie Path`, neural-data paths, and output folders in
@@ -72,6 +87,19 @@ After RF analysis, **Run Model (Coarse RF)** requires the named coarse-model
 phase pair. **Run Full Model** requires the named full-model phase pair and
 uses the coarse RF feature seeds for local refinement.
 
+### Read the plots correctly
+
+- **All Neurons** azimuth/elevation/orientation/size colours are each neuron's
+  preferred RF feature derived from Pearson correlation; they are not firing
+  rate values.
+- **Individual Neuron** RF, azimuth, elevation, orientation, size, and
+  frequency curves are direct slices of that same RF correlation tensor. Only
+  orientation and size show trial-derived 95% confidence intervals.
+- **OSI/gOSI** are separate. Waven uses the preferred RF location to weight
+  each orientation's stimulus frames, then computes the tuning from neural
+  firing rate/aligned activity. Mean and median are displayed at sufficient
+  precision so weak nonzero selectivity is not rounded away.
+
 ## Resuming safely
 
 Every cache is validated by shape and a parameter fingerprint. Re-running an
@@ -79,3 +107,12 @@ action reuses a compatible completed product and regenerates a stale one. If a
 run fails, read the reported artifact name and shape; do not substitute a cache
 made with a different movie, percentage, backend, orientation count, sigma
 list, phase list, or frequency list.
+
+## A small first run is worth it
+
+For a new machine or a changed configuration, first test a short/small movie
+with a modest percentage and a small Gabor bank. Confirm that the terminal
+shows the same task banner, progress/ETA, and final resource summary for every
+stage. Then move to the experiment-scale movie. This catches missing codecs,
+path references, GPU-driver issues, and insufficient disk capacity without
+creating an enormous partial cache.

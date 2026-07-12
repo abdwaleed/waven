@@ -108,7 +108,6 @@ def PearsonCorrelation(stim, resp, neuron_pos, nx, ny, plotting=True):
     stim_flat = np.abs(stim.reshape(stim.shape[0], -1))
 
     rfs = _safe_chunked_cross_corr(stim_flat, resp)
-    print((resp.shape[1] + stim_flat.shape[1], resp.shape[1] + stim_flat.shape[1]))
 
     # Apply the legacy self-correlation correction a row at a time so its
     # boolean mask cannot double peak memory for a large RF tensor.
@@ -159,12 +158,36 @@ def orientation_correction_for_stretches(visual_coverage, nx, ny, omax):
 
 
 def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_coverage, screen_ratio, sigmas, frequencies, n_orientations=8, fil=[0], absolute=False, plotting=False, n_time=None):
-    """RF correlation for pink-noise stimuli with retinotopy and tuning extraction (6D)."""
+    """Compute a chunked RF-correlation tensor and preferred feature indices.
+
+    Args:
+        stim: Disk-backed or dense wavelet power with shape ``(frames, x, y,
+            orientations, sigmas[, frequencies])``.
+        resp: Trial-averaged neural responses with shape ``(frames, neurons)``.
+        neuron_pos: `(neurons, 2+)` positions retained for optional legacy plots.
+        nx: Number of x features in ``stim``.
+        ny: Number of y features in ``stim``.
+        ns: Number of sigma features in ``stim``.
+        nf: Number of frequency features; use one for coarse coupled wavelets.
+        visual_coverage: Visual-degree bounds in left/right/top/bottom order.
+        screen_ratio: Visual degrees per x analysis pixel.
+        sigmas: Sigma values converted for visual-degree display.
+        frequencies: Frequency values associated with the final feature axis.
+        n_orientations: Number of orientation bins over 180 degrees.
+        fil: Legacy filtering selector used only by optional plotting.
+        absolute: Select preferred features by absolute correlation after output.
+        plotting: Enable legacy Matplotlib diagnostic figures.
+        n_time: Optional shared frame limit; avoids loading beyond aligned data.
+
+    Returns:
+        tuple: RF tensor with shape ``(neurons, x, y, orientations, sigmas,
+        frequencies)``, preferred integer indices, preferred values in visual
+        units, and peak correlation magnitudes.
+    """
     # Keep Zarr/memmap inputs structured.  Flattening a disk-backed wavelet
     # tensor forces a full in-memory allocation before correlation starts.
     rfs = _safe_chunked_cross_corr(stim, resp, n_time=n_time)
     n_features = int(np.prod(stim.shape[1:], dtype=np.int64))
-    print((resp.shape[1] + n_features, resp.shape[1] + n_features))
 
     if absolute:
         rfs = np.abs(rfs)
@@ -172,7 +195,6 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
     for row in rfs:
         row[row >= 0.99] -= 1.0
     np.nan_to_num(rfs, copy=False)
-    print(rfs.shape)
 
     # 1. Update reshape for the 6th dimension (nf)
     rfs = rfs.reshape(rfs.shape[0], nx, ny, n_orientations, ns, nf)

@@ -1,236 +1,69 @@
-<div>
-    <img src="https://github.com/skriabineSop/waven/blob/main/img/image1630.png" width="250" align="right"/>
-</div>
+# waven
 
-**waven**
+`waven` relates time-aligned neural responses to localized Gabor-wavelet
+features extracted from a visual stimulus movie. Its GUI leads a new user from
+movie metadata through neural alignment, Gabor assets, consumer-specific
+wavelet caches, receptive fields, and nonlinear models.
 
-
-
-This project provides a Python package designed to analyze neuronal responses in the visual cortex to visual stimuli. Using a Gabor transform of the stimulus, the package enables users to extract tuning curves for key visual features such as azimuth, elevation, orientation, spatial frequency, phase, size, and drift speed.<br />
-
-**General Documentation and tutorial**<br />
-can be found here <https://waven.readthedocs.io/en/latest/><br />
-
-**Methods transparency guide**<br />
-For a start-to-finish explanation of how the current GUI workflow computes,
-saves, caches, plots, and exports results, see
-`source/methods_transparency.rst`.<br />
-
-
-**Stimulus Generation package**<br />
-check out <https://github.com/mwshinn/zebra_noise><br />
-
-
-**waven Analysis package**<br />
-packages required:
-
-- python 3.8
-- matplotlib
-- numpy
-- opencv_python
-- scikit learn
-- scikit_image
-- scipy
-- tifffile
-- pandas
-- torch
-- tensorly
-- zarr
-
-
-**installation procedure:**<br />
-From the repository root, create and activate the conda environment,
-then install waven in editable mode:
+## Start here
 
 ```bash
 conda env create --solver libmamba -f environment.yml
 conda activate waven
-pip install -e .
+python -m pip install -e .
+python ui.py
 ```
 
-**Example script**<br />
+The full setup guide, including CUDA and developer instructions, is in
+[docs/how-to/install.md](docs/how-to/install.md). Use `python ui.py` from the
+repository root so the bundled `pipeline_config.json` and project-relative
+paths resolve correctly.
 
-check out
-/example/run_waven_parts
+## GUI workflow
 
-**GUI Documentation:**<br />
-https://docs.google.com/presentation/d/1nEv07CzCwYUoozucwwqi6qgS_t0jBy7KwqHKKoh2f2U/edit?usp=sharing<br />
+1. **Stimulus & Metadata** — select one movie, choose a downsampling
+   percentage, and prepare the binary stimulus cache. Movie metadata is the
+   authoritative source for width, height, frame count, FPS, and duration.
+2. **Session Setup** — create an aligned neural cache from raw data or validate
+   an existing cache. Ephys caches hold frame-bin firing rate in Hz.
+3. **Gabor** — build legacy filter libraries or compact convolution kernels.
+   Gabor phases are entered in degrees.
+4. **Wavelet Products** — prepare the cache needed by the next analysis:
+   Coarse RF power, Run Model real/imaginary phases, or Run Full Model
+   real/imaginary phases.
+5. **Analysis** — run Coarse RF, then Run Model and/or Run Full Model.
 
+There are no GUI fields for `NX`, `NY`, manual movie FPS, or hardcoded
+duration. The selected movie and one percentage determine the shared spatial
+grid throughout the application.
 
-**GUI**<br />
-<p align="center">
-  <img src="https://github.com/skriabineSop/waven/blob/main/img/image1618.png" title="hover text">
- </p>
+## Important arrays
 
+| Artifact | Shape | Purpose |
+| --- | --- | --- |
+| aligned neural cache | `(trials, frames, neurons)` | Ephys values are firing rate in Hz; two-photon values are aligned activity. |
+| downsampled movie | `(frames, y, x)` | Disk-backed binary movie used to make wavelets. |
+| Coarse RF power | `(frames, x, y, orientations, sigmas)` | Zarr input to Coarse RF correlation. |
+| coarse model phases | `(frames, x, y, orientations, sigmas)` each | Real/imaginary inputs to Run Model. |
+| full model phases | `(frames, x, y, orientations, sigmas, frequencies)` each | Real/imaginary inputs to Run Full Model. |
+| RF tensor | `(neurons, x, y, orientations, sigmas, frequencies)` | Correlation map used to select and inspect features. |
 
+The Individual Neuron RF curves are correlation diagnostics. OSI and gOSI are
+calculated from the aligned neural response/firing-rate cache at each neuron's
+preferred RF feature—not from correlation values.
 
-**Tutorial**
+## Documentation
 
-> **Current GUI workflow.** The video is the source of truth for width, height,
-> frame count, FPS, and duration. The GUI accepts one downsampling percentage;
-> it does not accept `NX`, `NY`, a stimulus FPS, or a hardcoded duration. Gabor
-> phases are entered in degrees. The current Wavelets tab prepares separate
-> disk-backed Zarr products for Coarse RF power, Run Model real/imaginary
-> phases, and Run Full Model real/imaginary phases. See
-> `docs/how-to/run-wavelet-decomposition.md` for the current files, shapes, and
-> backend-specific behavior. The legacy configuration example below is kept
-> only as historical scripted-pipeline context.
+- [First GUI analysis](docs/tutorials/first-gui-analysis.md)
+- [Prepare configuration](docs/how-to/prepare-configuration.md)
+- [Prepare wavelet products](docs/how-to/run-wavelet-decomposition.md)
+- [Run RF analysis](docs/how-to/run-rf-analysis.md)
+- [Pipeline intuition](docs/explanation/pipeline-intuition.md)
+- [Code organization](docs/explanation/maintainability.md)
 
-Setting up the parameters**
+Build the local documentation site with:
 
-```python
-	
-
-	# List of default parameters for the Gabor Library
-	gabor_param={
-	    "N_thetas":"8",
-	    "Sigmas": "[2, 3, 4, 5, 6, 8]",
-	    "Frequencies": "[0.015, 0.04, 0.07, 0.1]",
-	    "Phases": "[0, 1.57079632679]",
-	    "NX": "135",
-	    "NY": "54",
-	    "Save Path":"outputs/gabor/gabors_library.npy"
-	}
-
-	# List of default parameters
-	param_defaults = {
-	    "Path Directory": "outputs/wavelets",
-	    "Dirs": "data",
-	    "Experiment Info": "('SS002', '2024-07-23', 3)",
-	    "Number of Planes": "1",
-	    "Block End": "0",
-	    "screen_x":"4096",
-	    "screen_y":"1536",
-	    "NX": "135",
-	    "NY": "54",
-	    "Resolution":"1.3671",
-	    "Sigmas": "[2, 3, 4, 5, 6, 8]",
-	    "Frequencies": "[0.015, 0.04, 0.07, 0.1]",
-	    "Visual Coverage":"[-135, 45, 34, -34]",
-	    "Analysis Coverage": "[-135, 0, 34, -34]",
-		"Hz": "30",
-	    "Number of Frames": "18000",
-	    "Number of Trials to Keep": "3",
-	    "Movie Path": "data/stimuli/perlin_stimulus_10min.mp4",
-	    "Library Path": "outputs/gabor/gabors_library.npy",
-	    "Spks Path": "None"
-		"Full Model Wavelet Path": "outputs/full-wavelets",
-		"Full Model Save Path": "outputs/models"
-	}
+```bash
+python -m pip install -e ".[docs]"
+python -m mkdocs serve
 ```
-
-Here is a quick explanation of each parameter:
-
-```python
-	
-	"""
-	Parameters Gabor Library:
-	    N_thetas (int): number of orientatuion equally spaced between 0 and 180 degree.
-	    Sigmas (list): standart deviation of theb gabor filters expressed in pixels (radius of the gaussian half peak wigth).
-	    Frequencies (list): spatial frequencies expressed in pixels per cycles.
-	    Phases (list): 0 and pi/2.
-	    NX (int): number of azimuth positions (pix) (x shape of the downsampled stimuli).
-	    NY (int): number of elevation positions (pix) (y shape of the downsampled stimuli).
-	    Save Path (string): where to save the gabor library
-
-	Parameters alignement:
-	    Dirs (string): where the raw data are.
-	    Experiment Info: (mouse name, data, experiment number)
-	    Number of Planes (int): number of acquisition planes.
-	    Block End (int): timeframe where the experiment starts.
-	    Number of Frames (int): number of frames stim 30 Hz -> 1800 frame/min.
-	    Number of Trials to Keep(int): Number of Trials to Keep.
-
-	Parameters analysis:
-	    screen_x: stimulus screen x size inn pixels.
-	    screen_y: stimulus screen y size inn pixels.
-	    NX (int): number of azimuth positions (pix) (x shape of the downsampled stimuli).
-	    NY (int): number of elevation positions (pix) (y shape of the downsampled stimuli).
-	    Resolution (float): microscope resolution (um per pixels)
-	    Sigmas (list): standart deviation of theb gabor filters expressed in pixels (radius of the gaussian half peak wigth).
-	    Visual Coverage (list): [azimuth left, azimuth right, elevation top , elevation bottom] in visual degree.
-	    Analysis Coverage (list): [azimuth left, azimuth right, elevation top , elevation bottom] in visual degree.
-		Hz: the frame rate of the moplayed movie
-	    Movie Path: path to the stimulus (.mp4)
-	    Library Path: path to Gabor library (same as save path if ran)
-	    Spks Path (opt): path to the spks.npy file to skip the alignement procedure, if set ignores Parameter alignment
-	"""
-```
-
-2. **To run the UI:**
-```python
-	import waven
-
-	config = waven.PipelineConfig.from_json(Path('path to pipeline_config.json'))
-	waven.gui.run(
-    config.analysis.to_gui_mapping(),
-    config.gabor.to_gui_mapping(),
-)
-```
-documentation can be found here <https://docs.google.com/presentation/d/1nEv07CzCwYUoozucwwqi6qgS_t0jBy7KwqHKKoh2f2U/edit?usp=sharing>
-
-3. **To create new Gabor libraries**
-
-```python
-
-    coarse_library_path = waven.create_coarse_gabor_library(config.gabor)
-    fine_library_path = waven.create_fine_gabor_library(
-        config.gabor,
-        extra_sigmas=config.analysis.sigmas_full_model,
-    )
-    print(f"Created coarse Gabor library: {coarse_library_path}")
-    print(f"Created fine Gabor library: {fine_library_path}")
-```
-
-An already made Gabor Library well suited for mice can be found on FigShare <https://doi.org/10.5522/04/31295536>
-
-4. ** Running the wavelet decomposition :**
-
-```python
-
-	config = waven.PipelineConfig.from_json(Path('path to pipeline_config.json'))
-	
-	coarse_output_dir = waven.prepare_stimulus_wavelets(
-        config.analysis,
-        library_path=config.gabor.coarse_save_path,
-    )
-	full_output_dir = waven.prepare_full_model_wavelets(
-        config.analysis,
-        config.gabor,
-        library_path=config.gabor.fine_save_path,
-    )
-	print(f"Prepared coarse wavelets in: {coarse_output_dir}")
-	print(f"Prepared full-model wavelets in: {full_output_dir}")
-```
-For more effiscient analysis, we advise to save the resulting library as a zarr folder (check the wavelet_zarr.py script for more details) and to set the parameter "Full Model Wavelet Path" to the path of the zarr folder, this way the wavelet decomposition will be skipped when running the full model.
-
-5. **Loading you neural activity and neuron positions :**
-
-```python
-	
-	spike_data = load_spikes_and_positions(config.analysis)
-```
-
-	
-6. **Running the Quick receptive field Analysis:**
-
-```python
-	
-	rf_analysis = run_rf_analysis(
-		config.analysis,
-		config.gabor,
-		spike_data,
-		plotting=True,
-		neuron_id=2441,
-	)
-	print("RF correlation analysis complete")
-```
-
-7. **Running the Full Model :**
-
-```python
-
-	full_model = run_full_model(config, spike_data, rf_analysis, tt = [0, 36000])
-	print(f"Full model complete: {type(full_model).__name__}")
-```
-	

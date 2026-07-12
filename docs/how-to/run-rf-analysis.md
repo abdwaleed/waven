@@ -33,7 +33,7 @@ RF analysis needs aligned neural responses and the coarse wavelet cache:
 | --- | --- | --- |
 | `spikes` | `(n_trials, n_frames, n_neurons)` | Trial responses aligned to stimulus frames. Values may be deconvolved activity, thresholded events, or aligned spike-like responses depending on workflow. |
 | `neuron_pos` | `(n_neurons, 2)` or `(n_neurons, 3)` | Anatomical positions used for scatter plots, quality overlays, shank/unit grouping, and neighborhood smoothing. |
-| `wavelets_complex` | `(n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` | Combined coarse wavelet coefficients used as stimulus features. |
+| `coarse_rf_power` | `(n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` | Disk-backed wavelet power used as the RF stimulus feature tensor. |
 
 `run_rf_analysis` truncates all time-dependent inputs to the shortest available
 frame count. That protects against small movie/spike/cache length mismatches,
@@ -66,11 +66,12 @@ The GUI does not silently delete low-quality neurons; it lowers their visual
 alpha so population structure remains visible while the quality mask is still
 obvious.
 
-OSI and gOSI use the RF **correlation** orientation tuning curve. The RF tensor
-selects each neuron's preferred position, size, and frequency, then the values
-over orientation at that feature slice are summarized. A high selectivity value
-on a noisy, low-repeatability neuron is a hypothesis to inspect, not a
-conclusion by itself.
+OSI and gOSI do **not** use RF correlations. The RF tensor selects each
+neuron's preferred position, size, and frequency; Waven then uses the aligned
+neural response cache to calculate a firing-rate orientation curve weighted by
+the power at that preferred feature. For ephys this uses frame-bin Hz directly.
+A high selectivity value on a noisy, low-repeatability neuron is a hypothesis to
+inspect, not a conclusion by itself.
 
 In two-photon mode, the **All neurons** tab shows the all-cell OSI/gOSI
 distributions only. In ephys mode, the GUI also overlays shank distributions

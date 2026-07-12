@@ -14,6 +14,7 @@ must not accidentally turn a disk-backed operation into a full-memory copy.
 | Wavelets | `wavelets/decomposition.py` | Legacy and convolution wavelet generation, chunking, and cache writing. |
 | Storage | `storage/array_store.py`, `storage/binary_movie.py`, `storage/neural_cache.py` | NPY/Zarr opening, safe disk-backed views, and neural-cache persistence. |
 | RF correlation | `analysis/rf_correlation.py` | Bounded-memory correlation of disk-backed wavelets and neural responses. |
+| RF tuning extraction | `analysis/tuning.py` | Validated direct axis slices for individual-neuron RF plots and exports. |
 | Legacy analysis | `analysis/receptive_fields.py` | Existing public RF, plotting, prediction, and signal-analysis API. |
 
 ## Dependency direction
@@ -57,6 +58,20 @@ GUI code. Storage modules must not import analysis or GUI code.
    or loading policy changes.
 5. Prefer a small new module with one responsibility over another large helper
    block inside `gui.py` or `receptive_fields.py`.
+
+## Docstring and terminal rules
+
+Public or reusable functions use Google-style docstrings. Describe the
+scientific purpose first, then required and optional inputs, units, array shape
+and dtype where they matter, output shape, and raised errors. Do not use generic
+phrases such as “input value for this operation.” GUI-local callbacks may have a
+short purpose docstring when their enclosing widget context makes full API
+documentation unnecessary.
+
+Every long GUI action is launched through the shared task wrapper. It emits the
+same timestamped **Starting**, progress, resource summary, and final status
+format. Numerical modules should use `progress_message()` for repeated work;
+that gives elapsed time, ETA, and throughput without importing Tkinter.
 
 ## Current refactoring boundary
 

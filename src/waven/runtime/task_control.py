@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from typing import Optional
 
 
 class OperationCancelled(RuntimeError):
@@ -41,3 +42,37 @@ def progress_message(label, completed, total, start_time, unit="steps") -> str:
         f"{speed:.2f} {unit}/s"
     )
 
+
+def task_start_message(task_name: str, started_at: Optional[float] = None) -> str:
+    """Format the standard terminal banner for a user-initiated GUI task.
+
+    Args:
+        task_name: Human-readable action name, such as ``"Run Coarse RF"``.
+        started_at: Optional Unix timestamp. When omitted, the current local
+            time is used.
+
+    Returns:
+        A newline-delimited banner suitable for ``print``. The shared format
+        keeps neural-cache, stimulus, Gabor, wavelet, RF, model, and export
+        actions visually consistent in the GUI terminal.
+    """
+    timestamp = time.strftime("%H:%M:%S", time.localtime(started_at))
+    return f"\n[{timestamp}] {str(task_name).upper()}\n  Starting...\n"
+
+
+def task_finish_message(task_name: str, status: str, finished_at: Optional[float] = None) -> str:
+    """Format the standard final line for a GUI task.
+
+    Args:
+        task_name: Human-readable action name used in the start banner.
+        status: Final state, normally ``"finished"``, ``"failed"``, or
+            ``"cancelled"``.
+        finished_at: Optional Unix timestamp. When omitted, the current local
+            time is used.
+
+    Returns:
+        A concise timestamped completion line. Detailed resource metrics are
+        emitted separately by the GUI task monitor.
+    """
+    timestamp = time.strftime("%H:%M:%S", time.localtime(finished_at))
+    return f"[{timestamp}] {task_name} {str(status).lower()}."

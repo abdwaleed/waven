@@ -7,9 +7,9 @@ wavelet decomposition and model fitting much slower.
 
 ## Can Gabor libraries be reused?
 
-Yes. Reuse them when `NX`, `NY`, orientations, sigmas, phases, and frequencies
-match the experiment configuration. The GUI now checks output shapes before
-reusing artifacts.
+Yes. Reuse them when the movie metadata, downsampling percentage, orientations,
+sigmas, phases, frequencies, and backend match the experiment configuration.
+The GUI checks output shapes and parameter fingerprints before reuse.
 
 ## Why does preprocessing take so long?
 
@@ -26,7 +26,7 @@ numeric arrays and metadata.
 OSI compares the preferred and orthogonal orientation responses. gOSI summarizes
 the whole orientation tuning curve with a vector sum.
 
-## Why does a movie shape look like `(frames, NY, NX)` but wavelets use `(frames, NX, NY, ...)`?
+## Why does a movie shape look like `(frames, y, x)` but wavelets use `(frames, x, y, ...)`?
 
 Downsampled movies are image arrays, so their spatial axes are row then column:
 `(y, x)`. Gabor libraries and RF tensors use feature coordinates: `(x, y)`.
@@ -40,7 +40,7 @@ orientation, sigma, and frequency multiplies the total size. One full-model
 phase is:
 
 ```text
-n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies * 4 bytes
+n_frames * analysis_x * analysis_y * n_orientations * n_sigmas * n_frequencies * 4 bytes
 ```
 
 Real and imaginary phases are separate files.

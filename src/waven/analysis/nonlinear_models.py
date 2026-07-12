@@ -1131,9 +1131,6 @@ def getmetrics(x, y, n, frames_per_minute=None):
     )
     feve = FEVE(y.reshape(n, frames_per_minute), x)
     cc = np.corrcoef(np.mean(y.reshape(n, frames_per_minute), axis=0), x)
-    print(feve)
-    print(ev)
-    print(cc[0][1])
     return feve, ev,cc
 
 def getpolar(cos, sin):
@@ -1157,14 +1154,14 @@ from scipy.signal import find_peaks
 
 
 def gaussian_smooth(y, sigma = 2):
-    """Function for gaussian smooth.
+    """Smooth a one-dimensional model factor with a normalized Gaussian kernel.
 
     Args:
-        y: Input value for this operation.
-        sigma: Input value for this operation.
+        y: One-dimensional numeric factor sampled on a model-feature axis.
+        sigma: Gaussian width in factor samples. Must be positive.
 
     Returns:
-        Result produced by the operation.
+        np.ndarray: Smoothed factor with the same intended axis length as ``y``.
     """
     kernel_size = 2 * int(3 * sigma) + 1
     gaussian_kernel = np.exp(-0.5 * (np.linspace(-3, 3, kernel_size) / sigma) ** 2)
@@ -1172,23 +1169,24 @@ def gaussian_smooth(y, sigma = 2):
 
     # Convolution (conserve intensity)
     y_smooth = np.convolve(y, gaussian_kernel, mode='full')
-    print(y.shape, y_smooth.shape, gaussian_kernel.shape)
     y_smooth=y_smooth[int((gaussian_kernel.shape[0]-1)/2)-1:-int((gaussian_kernel.shape[0]-1)/2)-1]
-    print(y_smooth.shape)
     return y_smooth
 
 def approx_Matrix(X, plotting=False):
-
-    """Function for approx Matrix.
+    """Fit a rank-one non-negative approximation used by the response model.
 
     Args:
-        X: Input value for this operation.
-        plotting: Input value for this operation.
+        X: Non-negative three-dimensional response histogram.
+        plotting: Whether to create diagnostic Matplotlib figures.
 
     Returns:
-        Result produced by the operation.
+        tuple[np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]: The
+        rank-one reconstruction and one factor for each input axis.
     """
     X=np.clip(X, 0, None)
+    if not np.any(X):
+        factors = tuple(np.zeros(length, dtype=float) for length in X.shape)
+        return np.zeros_like(X, dtype=float), factors
     model1 = NMF(n_components=1, init='random', random_state=42)
     U1 = model1.fit_transform(X.reshape(X.shape[0], -1))[:, 0]
 
@@ -1219,27 +1217,30 @@ def approx_Matrix(X, plotting=False):
     # Approximation
     X_approx = np.einsum('i,j,k -> ijk', U1, U2, U3)
 
-    error = np.linalg.norm(X - X_approx) / np.linalg.norm(X)
-    print(f"Erreur relative : {error:.4f}")
-
     return X_approx, (U1, U2, U3)
 
 def approx_Matrix2(X, smoothing_factor=0.75, plotting=False):
-    """Function for approx Matrix2.
+    """Fit a rank-one non-negative CP approximation with safe empty handling.
 
     Args:
-        X: Input value for this operation.
-        smoothing_factor: Input value for this operation.
-        plotting: Input value for this operation.
+        X: Non-negative three-dimensional response histogram.
+        smoothing_factor: Optional Gaussian width applied to returned factors.
+            Pass ``None`` to preserve raw CP factors.
+        plotting: Reserved compatibility flag for legacy callers.
 
     Returns:
-        Result produced by the operation.
+        tuple[np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]: The
+        reconstruction and one-dimensional factors for each input axis.
     """
     from tensorly.decomposition import non_negative_parafac
 
+    X = np.clip(np.asarray(X, dtype=float), 0.0, None)
+    if not np.any(X):
+        factors = tuple(np.zeros(length, dtype=float) for length in X.shape)
+        return np.zeros_like(X), factors
+
     weights, factors = non_negative_parafac(X, rank=1, init='random', normalize_factors=False)
     U1, U2, U3 = factors
-    print(U1.shape, U2.shape, U3.shape)
 
     U1=U1.reshape(-1)
     U2=U2.reshape(-1)
@@ -1251,29 +1252,28 @@ def approx_Matrix2(X, smoothing_factor=0.75, plotting=False):
         U3 = gaussian_smooth(U3, smoothing_factor)
 
     X_approx = np.einsum('i,j,k -> ijk', U1, U2, U3)
-    error = np.linalg.norm(X - X_approx) / np.linalg.norm(X)
-    print(f"Erreur relative : {error:.4f}")
-
     return X_approx,  (U1, U2, U3)
     
 
 def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, plotting=True, sigma=7):
-    """Function for getPhiRho.
+    """Estimate a smoothed firing-response surface in rho/phase/drift space.
 
     Args:
-        spk: Input value for this operation.
-        w_i: Input value for this operation.
-        w_r: Input value for this operation.
-        dphi: Input value for this operation.
-        w_i_inhib: Input value for this operation.
-        w_r_inhib: Input value for this operation.
-        dphi_inhib: Input value for this operation.
-        ncut: Input value for this operation.
-        plotting: Input value for this operation.
-        sigma: Input value for this operation.
+        spk: Trial-by-frame neural responses with shape ``(trials, frames)``.
+        w_i: Imaginary selected-wavelet trace, ``(frames,)`` or ``(frames, 1)``.
+        w_r: Real selected-wavelet trace with the same frame axis as ``w_i``.
+        dphi: Instantaneous phase-drift trace in radians per frame.
+        w_i_inhib: Imaginary inhibitory-wavelet trace.
+        w_r_inhib: Real inhibitory-wavelet trace.
+        dphi_inhib: Inhibitory phase-drift trace.
+        ncut: Number of bins on each response-surface axis.
+        plotting: Whether to construct legacy diagnostic figures.
+        sigma: Histogram-smoothing width in bins.
 
     Returns:
-        Result produced by the operation.
+        tuple: Smoothed response surfaces, bin centers, histogram data, and
+        interpolation helpers consumed by the nonlinear model. Empty histogram
+        cells are represented safely as zero response rather than NaN.
     """
     sin = w_i.reshape(-1, 1)
     cos = w_r.reshape(-1, 1)
@@ -1287,20 +1287,14 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
 
     a = abs(max(rho.min(), rho.max()))
     c = abs(max(phi.min(), phi.max()))
-    print('cos : ', cos.min(), cos.max())
-    print('sin : ', sin.min(), sin.max())
-    print('phi : ', phi.min(), phi.max())
-    print('rho : ', rho.min(), rho.max())
     if a == 0:
         a = 0.3
     b = abs(max(dphi.min(), dphi.max()))
     d = abs(max(cos.min(), cos.max()))
     e = abs(max(sin.min(), sin.max()))
     d = max(d, e)
-    print('dphi : ', dphi.min(), dphi.max())
-    print(a, b, c, d)
     if b == 0:
-        b == 1
+        b = 1.0
         
     E = [np.linspace(0, a, ncut + 1), np.linspace(0, c, ncut + 1), np.linspace(-b, b, ncut + 1)]
     Ecs = [np.linspace(-d, d, ncut + 1), np.linspace(-d, d, ncut + 1)]
@@ -1345,15 +1339,21 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
 
     Hcs = np.nanmean(Hcs, axis=0)
     Hcs_ = np.nanmean(Hcs_, axis=0)
-    Zcs = Hcs / Hcs_
-    print(Zcs.shape)
+    Zcs = np.divide(Hcs, Hcs_, out=np.zeros_like(Hcs), where=Hcs_ > 0)
     
     H = np.nanmean(H, axis=0)
     H_ = np.nanmean(H_, axis=0)
     
     H = np.concatenate((H, H, H), axis=1)
     H_ = np.concatenate((H_, H_, H_), axis=1)
-    Z = hanningconv3d(H, sigma) / hanningconv3d(H_, sigma)
+    smoothed_signal = hanningconv3d(H, sigma)
+    smoothed_counts = hanningconv3d(H_, sigma)
+    Z = np.divide(
+        smoothed_signal,
+        smoothed_counts,
+        out=np.zeros_like(smoothed_signal),
+        where=smoothed_counts > 0,
+    )
     Z = Z[:, :int(Z.shape[1]/3), :]
     
     xedges = E[0]
@@ -1392,7 +1392,6 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
         ax1_0 = fig.add_subplot(inner_gs0[0], projection='3d')
         a1_1 = fig.add_subplot(inner_gs0[1])
         threshold = np.nanpercentile(Zcs.flatten(), 95)
-        print('threshold ', threshold)
         m = a1_1.imshow(Zcs, vmin=0, vmax=threshold, cmap='bone_r')
         a1_1.set_xticks(np.arange(20))
         a1_1.set_xticklabels(10*(0.5 * (Ecs[0][1:] + Ecs[0][:-1])).astype(int) / 10, rotation=45)
@@ -1530,7 +1529,14 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     H = np.mean(H_inhib, axis=0)
     H_ = np.mean(H_inhib_, axis=0)
     
-    Z = hanningconv3d(H, 3) / hanningconv3d(H_, 3)
+    smoothed_signal = hanningconv3d(H, 3)
+    smoothed_counts = hanningconv3d(H_, 3)
+    Z = np.divide(
+        smoothed_signal,
+        smoothed_counts,
+        out=np.zeros_like(smoothed_signal),
+        where=smoothed_counts > 0,
+    )
     xedges = E[0]
     yedges = E[1]
     zedges = E[2]
@@ -1553,7 +1559,6 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     cv = circular_variance(np.linspace(0, 360, 20), pp.reshape(-1, 1))
     complexity_f = 1 - cv[1][0]
 
-    print('linearity: ' , complexity, complexity_f)
 
     return interp, interp_h, d_val, d_h, complexity, complexity_f, HMP, HMP_f, [plots, plot_h]
 
@@ -1634,57 +1639,41 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
 
     fittedParameters, pcov, res = fitnonlin(X1, y_train, func)
 
-    print('prediction on training set : ')
     res1 = res  # + (w_pc*pcs_test[:, 0])
     res2 = np.mean(res1.reshape(len(train_idx), dt1), axis=0)
     ev = explained_variance_score(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2, multioutput='uniform_average')
     feve = FEVE(y_train.reshape(len(train_idx), dt1), res2)
     cc_train=np.corrcoef(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2)[0][1]
-    print(feve)
-    print(ev)
-    print(cc_train)
 
     # --- Test Data Preparation ---
-    print('prediction acress repeats : ')
     # Reuse the same tiling logic for the test indices
     X1 = np.tile(base_X1, (len(test_idx), 1))
     X1 = np.nan_to_num(X1)
     
-    print(X1.shape)
     unrectified = np.mean(X1[:, 0].reshape(len(test_idx), dt1), axis=0)
     unrectified2 = np.mean(X1[:, 1].reshape(len(test_idx), dt1), axis=0)
     res = func(X1, *fittedParameters)
-    print(res.shape,unrectified.shape)
 
     res1 = res  # + (w_pc*pcs_test[:, 0])
     w = 0
     if double_wavelet_model:
         res2 = np.mean(res1.reshape(len(test_idx), dt1), axis=0)
     else:
-        print('single wavelet')
         res21=unrectified
         cc1 = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res21)[0,1]
-        print(cc1)
         res22 = unrectified2
         cc2 = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res22)[0,1]
-        print(cc2)
         if cc1>=cc2:
-            print('1st')
             res2=unrectified
         else:
-            print('2nd')
             w = 1
             res2=unrectified2
     ev = explained_variance_score(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2, multioutput='uniform_average')
     feve = FEVE(y_test.reshape(len(test_idx), dt1), res2)
     cc = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2)
-    print(feve)
-    print(ev)
-    print(cc)
 
     cclastmin = np.nan
     if lastmin:
-        print('prediction last minute : ')
         holdout_start = dt1
         holdout_end = min(dt1 + frames_per_minute, signal_len)
         holdout_len = holdout_end - holdout_start
@@ -1702,7 +1691,6 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
             reslastmin = np.mean(res.reshape(len(test_idx), holdout_len), axis=0)
             y_holdout_mean = np.mean(y_holdout.reshape(len(test_idx), holdout_len), axis=0)
             cclastmin = np.corrcoef(y_holdout_mean, reslastmin)[0, 1]
-            print(cclastmin)
     return res2, [feve, ev, cc, cc_train, cclastmin], fittedParameters, [d, c, hmp, d_h, c_h, hmp_h], plot, unrectified, w, f
 
 

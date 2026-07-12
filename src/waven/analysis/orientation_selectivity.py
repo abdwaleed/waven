@@ -40,7 +40,9 @@ def calculate_osi(angles_deg, rates):
     denom = r_pref + r_orth
     if denom == 0:
         return np.nan
-    return round(float((r_pref - r_orth) / denom), 6)
+    # Preserve low but real selectivity values. Rounding here previously turned
+    # weak responses into literal zeros before population statistics were made.
+    return float((r_pref - r_orth) / denom)
 
 
 def calculate_gosi(angles_deg, rates):
@@ -54,7 +56,7 @@ def calculate_gosi(angles_deg, rates):
     if denominator == 0:
         return np.nan
     numerator = np.abs(np.sum(rates * np.exp(2 * np.deg2rad(angles_deg) * 1j)))
-    return round(float(numerator / denominator), 6)
+    return float(numerator / denominator)
 
 
 def orientation_selectivity_from_tuning(orientation_tuning, angles_deg=None):

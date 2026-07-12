@@ -4,3 +4,4 @@ from .nonlinear_models import *
 from .trial_stats import *
 from .model_runs import *
 from .orientation_selectivity import *
+from .tuning import extract_rf_tuning_curves

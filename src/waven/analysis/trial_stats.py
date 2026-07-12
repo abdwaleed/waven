@@ -4,26 +4,30 @@ from .receptive_fields import *
 from .nonlinear_models import *
 
 def circular_variance(angles, responses):
-    '''
-    Compute the preferred orientation and circular variance of cells
-    as per Ringach et al. 2002
+    """Compute doubled-angle preferred orientation and circular variance.
 
     Args:
-        angles (ndarray): Angles used in experiment, in degrees
-        responses (ndarray): (n_angles, n_cells) responses of all cells to all angles
+        angles: One-dimensional orientation-bin centers in degrees.
+        responses: Response matrix with shape ``(n_angles, n_cells)``. Columns
+            with a zero total response receive a zero resultant vector instead
+            of producing a divide-by-zero warning.
 
     Returns:
-        preferred_angles: 0-180 degrees, favorite angle of each cell
-        circular_variance: 0 is very selective, 1 is not selective at all
-
-    '''
+        tuple[np.ndarray, np.ndarray]: Preferred orientations in ``[0, 180)``
+        degrees and circular variance, where zero is maximally selective.
+    """
     # responses should be of shape n_angles, n_cells
     # angles is of shape n_angles IN DEGREES
     angles_radians = np.deg2rad(angles)[:, np.newaxis]
 
     numerator = (responses * np.exp(angles_radians * 2j)).sum(axis=0)
     denominator = responses.sum(axis=0)
-    resultant = numerator / denominator
+    resultant = np.divide(
+        numerator,
+        denominator,
+        out=np.zeros_like(numerator, dtype=complex),
+        where=denominator != 0,
+    )
 
     circular_variance = 1 - np.abs(resultant)
 

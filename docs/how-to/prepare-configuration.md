@@ -91,10 +91,9 @@ The checked-in `pipeline_config.json` uses the exact schema written by the GUI's
 
 | Field | Accepted values | Effect |
 | --- | --- | --- |
-| `analysis_scale` | `"coarse"`, `"full"` | Chooses which scale-specific folders and parameters are visible. |
 | `wavelet_backend` | `"legacy"`, `"convolution"` | Selects the decomposition implementation. |
 | `neural_source` | `"data_dir"`, `"spks_path"` | `data_dir` means fresh/raw acquisition; `spks_path` means continue from an existing cache. |
-| `downsample_percent` | number from 0 through 100 | Spatial percentage applied to source movie width and height. |
+| `downsample_percent` | number from 0 through 100 | Spatial percentage applied to movie-metadata width and height. Coarse RF, Run Model, and Run Full Model all share this one grid. |
 | format fields | `"npy"` or `"zarr"` | Initial cache formats for the corresponding stage. |
 
 ## `gabor_param`
@@ -184,11 +183,11 @@ Configuration fields are not just metadata. They directly determine array size:
 
 | Axis | Comes from | Appears in |
 | --- | --- | --- |
-| `n_frames` | movie length and `Number of Frames` | downsampled movies, wavelets, spikes |
+| `n_frames` | movie metadata | downsampled movies, wavelets, spikes |
 | `n_trials` | repeats discovered during neural alignment | `spikes` |
 | `n_neurons` | Suite2p/ephys input | `spikes`, RF tensors, plots |
-| `NX`, `NY` | config grid | fine library and full wavelets |
-| coarse `nx`, `ny` | derived from `NX`, `NY` | coarse library, coarse wavelets, RF tensor |
+| `analysis_x`, `analysis_y` | movie metadata × `downsample_percent` | Gabor assets, wavelets, RF tensor |
+| coarse `x`, `y` | derived from the shared analysis grid | coarse assets, Coarse RF cache, RF tensor |
 | `n_orientations` | `N_thetas` | Gabor libraries, wavelets, RF tensor, OSI/gOSI |
 | `n_sigmas` | `Sigmas` or `Sigmas Full Model` | Gabor libraries, wavelets, RF tensor |
 | `n_frequencies` | `Frequencies` | fine library, full wavelets, RF tensor when present |
@@ -198,7 +197,7 @@ wavelets are usually the limiting object because each phase is a dense
 `float32` tensor:
 
 ```text
-bytes_per_phase = n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies * 4
+bytes_per_phase = n_frames * analysis_x * analysis_y * n_orientations * n_sigmas * n_frequencies * 4
 ```
 
 Coarse RF search is intentionally smaller because it uses the derived coarse

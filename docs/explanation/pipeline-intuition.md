@@ -39,9 +39,11 @@ the array used by the coarse RF search.
 
 ## Coarse versus full paths
 
-The coarse path reduces the spatial grid before correlation. If the configured
-grid is `NX` by `NY`, the coarse grid is derived from the configuration helper
-and written as lowercase `nx` by `ny` in the docs. This stage is meant to answer:
+The coarse path reduces the metadata-derived analysis grid before correlation.
+The user chooses one downsampling percentage; movie width and height determine
+the shared grid, and the coarse grid is derived from it. There are no GUI
+entries for `NX`, `NY`, movie FPS, or a fixed movie duration. This stage is
+meant to answer:
 
 - where is the receptive field approximately?
 - which orientation and size look plausible?
@@ -52,7 +54,7 @@ spatial frequencies. This is much larger because the output grows with every
 axis:
 
 ```text
-n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies
+n_frames * full_x * full_y * n_orientations * n_sigmas * n_frequencies
 ```
 
 That value is per phase. Real and imaginary full-model outputs are separate
@@ -68,7 +70,24 @@ neuron tends to be less active when that feature is strong. The preferred
 feature is selected by maximum absolute correlation so strongly negative
 relationships are still visible instead of being discarded.
 
-Orientation tuning curves are slices through the RF tensor at the preferred
-position, size, and frequency. OSI and gOSI summarize those slices. They are
-descriptive statistics for the fitted tuning curve, not replacement evidence for
-trial reliability, signal quality, or model performance.
+The individual RF orientation curve is a correlation slice through the RF
+tensor at the preferred position, size, and frequency. It is useful for
+understanding why that feature was selected, but it is **not** used for OSI or
+gOSI. Those metrics first use the RF search to choose the preferred feature
+location, then form an orientation-by-orientation weighted mean from the
+aligned firing-rate array. This keeps the selectivity measurement in neural
+response units rather than correlation units.
+
+For each orientation \(o\), Waven computes a non-negative weighted mean
+firing rate \(R_o\):
+
+```text
+R_o = sum_t(power[t, preferred_x, preferred_y, o, preferred_size] * rate[t])
+      / sum_t(power[t, preferred_x, preferred_y, o, preferred_size])
+```
+
+OSI compares the preferred orientation with its orthogonal orientation; gOSI
+is the magnitude of the doubled-angle vector sum of the same rates. Both range
+from zero (no orientation preference) toward one (strong preference). They are
+descriptive statistics, not a replacement for repeatability, signal quality,
+or model performance.

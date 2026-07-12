@@ -56,7 +56,13 @@ from ..gui_support import (
     _zarr_output_path,
 )
 from ..runtime.keep_awake import KeepAwake
-from ..runtime.task_control import OperationCancelled, check_cancelled, format_duration
+from ..runtime.task_control import (
+    OperationCancelled,
+    check_cancelled,
+    format_duration,
+    task_finish_message,
+    task_start_message,
+)
 from ..project_layout import (
     WavenProjectLayout,
     conventional_downsample_path,
@@ -80,7 +86,7 @@ NavigationToolbar2Tk = None
 
 
 def _ensure_plot_imports():
-    """Function for ensure plot imports."""
+    """Lazily import Tk-compatible Matplotlib objects used by the GUI."""
     global _PLOT_IMPORTS_READY, plt, FigureCanvasTkAgg, NavigationToolbar2Tk
     if _PLOT_IMPORTS_READY:
         return
@@ -95,10 +101,10 @@ def _ensure_plot_imports():
 
 
 def _ensure_gabor_imports(label="Gabor library construction"):
-    """Function for ensure gabor imports.
+    """Load Gabor builders only when a Gabor action needs them.
 
     Args:
-        label: Input value for this operation.
+        label: Human-readable caller description retained for future diagnostics.
     """
     global _GABOR_IMPORTS_READY
     global makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
@@ -117,10 +123,10 @@ def _ensure_gabor_imports(label="Gabor library construction"):
 
 
 def _ensure_wavelet_imports(label="stimulus wavelet generation"):
-    """Function for ensure wavelet imports.
+    """Load disk-backed wavelet operations on first use.
 
     Args:
-        label: Input value for this operation.
+        label: Human-readable caller description retained for future diagnostics.
     """
     global _WAVELET_IMPORTS_READY
     global coarseWavelet, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
@@ -158,13 +164,13 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
 
 
 def _ensure_rf_imports(label="coarse RF analysis"):
-    """Function for ensure rf imports.
+    """Load RF-analysis dependencies and the Tk plotting backend on demand.
 
     Args:
-        label: Input value for this operation.
+        label: Human-readable caller description retained for future diagnostics.
     """
     global _RF_IMPORTS_READY
-    global compute_skewness_neurons, PearsonCorrelationPinkNoise, PlotTuningCurve
+    global compute_skewness_neurons, PearsonCorrelationPinkNoise
     global repetability_trial3, firing_rate_orientation_tuning
     if _RF_IMPORTS_READY:
         return
@@ -174,26 +180,22 @@ def _ensure_rf_imports(label="coarse RF analysis"):
         PearsonCorrelationPinkNoise as _PearsonCorrelationPinkNoise,
         repetability_trial3 as _repetability_trial3,
     )
-    from ..analysis.nonlinear_models import (
-        PlotTuningCurve as _PlotTuningCurve,
-    )
     from ..analysis.orientation_selectivity import (
         firing_rate_orientation_tuning as _firing_rate_orientation_tuning,
     )
 
     compute_skewness_neurons = _compute_skewness_neurons
     PearsonCorrelationPinkNoise = _PearsonCorrelationPinkNoise
-    PlotTuningCurve = _PlotTuningCurve
     repetability_trial3 = _repetability_trial3
     firing_rate_orientation_tuning = _firing_rate_orientation_tuning
     _RF_IMPORTS_READY = True
 
 
 def _ensure_model_imports(label="model plot capture"):
-    """Function for ensure model imports.
+    """Load numerical model runners only when a model action is requested.
 
     Args:
-        label: Input value for this operation.
+        label: Human-readable caller description retained for future diagnostics.
     """
     global _MODEL_IMPORTS_READY
     global run_Model, run_Full_Model, smooth_best_positions
@@ -860,7 +862,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             btn_cancel_terminal.configure(state=tk.NORMAL, text="Cancel")
         except NameError:
             pass
-        print(f"\n[{time.strftime('%H:%M:%S')}] {task_name.upper()}\n  Starting...\n")
+        print(task_start_message(task_name, task_state["start"]))
         root.after(1000, _refresh_task_heartbeat)
 
     def end_task(success=False, cancelled=False, metrics=None):
@@ -877,7 +879,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             progress_bar.configure(mode="determinate", value=0 if cancelled else 100)
             status_label = "cancelled" if cancelled else ("finished" if success else "failed")
             print(_format_task_summary(metrics, status_label))
-            print(f"[{time.strftime('%H:%M:%S')}] {task_state['name']} {status_label}.\n")
+            print(task_finish_message(task_state["name"], status_label))
+            print()
             flash_taskbar()
             if success:
                 action_map = {
@@ -1525,15 +1528,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return groups, labels, source
 
     def _metric_values(selectivity, name, filter_mask=None):
-        """Function for metric values.
+        """Return finite OSI/gOSI values and the aligned boolean selection mask.
 
         Args:
-            selectivity: Input value for this operation.
-            name: Input value for this operation.
-            filter_mask: Input value for this operation.
+            selectivity: Mapping created by ``firing_rate_orientation_tuning``.
+            name: Metric key, either ``"osi"`` or ``"gosi"``.
+            filter_mask: Optional per-neuron quality mask. It is combined with
+                finite-value filtering but does not mutate population metrics.
 
         Returns:
-            Result produced by the operation.
+            tuple[np.ndarray, np.ndarray]: Selected finite values and a boolean
+            mask aligned to the original neuron axis.
         """
         values = np.asarray(selectivity[name], dtype=float)
         valid = np.isfinite(values)
@@ -1542,7 +1547,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return values[valid], valid
 
     def _selectivity_statistics(values, label):
-        """Return a compact, display-ready descriptive table for OSI/gOSI."""
+        """Build a readable OSI/gOSI distribution table without rounding to zero."""
         values = np.asarray(values, dtype=float)
         values = values[np.isfinite(values)]
         if not values.size:
@@ -1556,16 +1561,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         mode = (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1]) / 2
         n = values.size
         category = lambda mask: f"{np.count_nonzero(mask)} ({100 * np.mean(mask):.1f}%)"
+        def fmt(value):
+            """Keep weak, nonzero selectivity visible in the statistics panel."""
+            value = float(value)
+            return f"{value:.3e}" if 0 < abs(value) < 1e-5 else f"{value:.6f}"
         return (
             f"{label} DISTRIBUTION STATISTICS\n"
-            f"Sample Size — Total units: {n}\n"
-            f"Central Tendency — Mean: {values.mean():.3f}; Median: {q2:.3f}; Mode: {mode:.3f}\n"
-            f"Spread — Std Dev: {std:.3f}; Variance: {values.var():.3f}; Range: {np.ptp(values):.3f}\n"
-            f"Distribution — Min: {values.min():.3f}; Q1 (25%): {q1:.3f}; Q2 (50%): {q2:.3f}; "
-            f"Q3 (75%): {q3:.3f}; Max: {values.max():.3f}\n"
-            f"Shape — Skewness: {skew:.3f}; Kurtosis: {kurtosis:.3f}\n"
-            f"Selectivity Categories — High (>0.5): {category(values > .5)}; "
-            f"Medium (0.3–0.5): {category((values >= .3) & (values <= .5))}; "
+            f"Sample Size\n  Total units: {n}\n"
+            f"Central Tendency\n  Mean: {fmt(values.mean())}    Median: {fmt(q2)}    Mode: {fmt(mode)}\n"
+            f"Spread\n  Std Dev: {fmt(std)}    Variance: {fmt(values.var())}    Range: {fmt(np.ptp(values))}\n"
+            f"Distribution\n  Min: {fmt(values.min())}    Q1: {fmt(q1)}    Q2: {fmt(q2)}    Q3: {fmt(q3)}    Max: {fmt(values.max())}\n"
+            f"Shape\n  Skewness: {fmt(skew)}    Kurtosis: {fmt(kurtosis)}\n"
+            f"Selectivity Categories\n  High (>0.5): {category(values > .5)}    "
+            f"Medium (0.3–0.5): {category((values >= .3) & (values <= .5))}    "
             f"Low (<0.3): {category(values < .3)}"
         )
 
@@ -1581,26 +1589,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ax.plot(x, density * values.size * 0.05, color=color, linewidth=2, label=label)
 
     def _plot_selectivity_population(selectivity, filter_mask, neuron_pos=None, show_shanks=True):
-        """Function for plot selectivity population.
+        """Render unsquashed all-neuron firing-rate OSI and gOSI distributions.
 
         Args:
-            selectivity: Input value for this operation.
-            filter_mask: Input value for this operation.
-            neuron_pos: Input value for this operation.
+            selectivity: Firing-rate selectivity mapping with one OSI/gOSI value
+                per neural unit.
+            filter_mask: Per-unit quality mask used for an optional overlay.
+            neuron_pos: Optional `(n_neurons, 2+)` positions used to infer ephys
+                shank groups.
+            show_shanks: Whether to overlay inferred shank histograms.
 
         Returns:
-            Result produced by the operation.
+            matplotlib.figure.Figure: Two full-width distributions, KDE/mean/
+            median legend entries, and independent statistics panels.
         """
         bins = np.linspace(0, 1, 21)
-        # Give each distribution its own statistics panel.  Anchoring two long
-        # text blocks below a one-row figure caused them to overlap/squish the
-        # OSI and gOSI plots in the GUI and in exports.
-        fig, axes = plt.subplots(
-            2, 2, figsize=(13, 8.8), constrained_layout=True,
-            gridspec_kw={"height_ratios": [3.2, 1.5]},
-        )
-        plot_axes = axes[0]
-        stats_axes = axes[1]
+        # One full-width plot and statistics block per metric avoids squeezing
+        # either distribution when the detailed table is visible in the GUI.
+        fig = plt.figure(figsize=(13.5, 14.5))
+        grid = fig.add_gridspec(4, 1, height_ratios=(3.2, 1.55, 3.2, 1.55), hspace=0.52)
+        plot_axes = (fig.add_subplot(grid[0]), fig.add_subplot(grid[2]))
+        stats_axes = (fig.add_subplot(grid[1]), fig.add_subplot(grid[3]))
         specs = [("osi", "OSI"), ("gosi", "gOSI")]
         shank_groups = None
         shank_labels = []
@@ -1608,14 +1617,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if show_shanks and neuron_pos is not None:
             shank_groups, shank_labels, shank_source = _grouping_for_selectivity(neuron_pos, preferred="shank")
         colors = ["#059669", "#D97706", "#7C3AED", "#DC2626", "#0891B2", "#BE185D", "#4B5563", "#65A30D"]
+        def metric_label(value):
+            """Format legend values without visually collapsing weak selectivity."""
+            value = float(value)
+            return f"{value:.3e}" if 0 < abs(value) < 1e-5 else f"{value:.6f}"
         for ax, stats_ax, (key, label) in zip(plot_axes, stats_axes, specs):
             values, valid = _metric_values(selectivity, key)
             filtered, _ = _metric_values(selectivity, key, filter_mask=filter_mask)
             ax.hist(values, bins=bins, color="#2563EB", alpha=0.72, label=f"All neurons (n={values.size})")
             _plot_kde(ax, values, "#DC2626", "KDE")
             if values.size:
-                ax.axvline(values.mean(), color="#059669", linewidth=2, label=f"Mean ({values.mean():.3f})")
-                ax.axvline(np.median(values), color="#7C3AED", linewidth=2, linestyle="--", label=f"Median ({np.median(values):.3f})")
+                ax.axvline(values.mean(), color="#059669", linewidth=2, label=f"Mean ({metric_label(values.mean())})")
+                ax.axvline(np.median(values), color="#7C3AED", linewidth=2, linestyle="--", label=f"Median ({metric_label(np.median(values))})")
             if filtered.size:
                 ax.hist(filtered, bins=bins, histtype="step", color="#111827", linewidth=1.6, label=f"Quality mask (n={filtered.size})")
             if shank_groups is not None and len(shank_labels) <= 8:
@@ -1645,7 +1658,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 transform=stats_ax.transAxes, va="top", ha="left",
                 fontsize=8.2, family="monospace",
             )
-        fig.suptitle("Orientation Selectivity by Neuron")
+        fig.suptitle("Firing-rate Orientation Selectivity by Neuron", fontsize=15, y=0.995)
         fig._waven_caption = f"Shank grouping source: {shank_source}." if show_shanks else "Two-photon view: all-cell distribution only."
         _set_figure_export_payload(
             fig,
@@ -1660,15 +1673,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return fig
 
     def _plot_selectivity_by_unit(selectivity, neuron_pos, filter_mask, unit_ids=None):
-        """Function for plot selectivity by unit.
+        """Render ephys OSI/gOSI histograms for real multi-unit groupings.
+
+        Individual acquisition IDs are never treated as groups because that
+        would force every histogram to report ``n = 1``.
 
         Args:
-            selectivity: Input value for this operation.
-            neuron_pos: Input value for this operation.
-            filter_mask: Input value for this operation.
+            selectivity: Firing-rate selectivity mapping with one value per unit.
+            neuron_pos: Unit positions and optional shank/unit metadata.
+            filter_mask: Per-unit quality mask for the displayed subset.
+            unit_ids: Optional acquisition IDs. Repeated IDs form valid groups;
+                unique IDs fall back to position-derived grouping.
 
         Returns:
-            Result produced by the operation.
+            matplotlib.figure.Figure: Grouped OSI/gOSI distribution grid.
         """
         if unit_ids is not None and len(unit_ids) == len(selectivity["osi"]):
             unit_labels_raw = np.asarray(unit_ids, dtype=object)
@@ -3810,10 +3828,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 return ci, int(np.nanmin(counts[valid_columns]))
 
             def draw_individual_neuron(neuron_id, switch_tab=True):
-                """Function for draw individual neuron.
+                """Refresh the selected-neuron spike and direct RF-slice panels.
 
                 Args:
-                    neuron_id: Input value for this operation.
+                    neuron_id: Zero-based index into the aligned neural cache
+                        and RF tensor.
+                    switch_tab: When true, reveal the Individual Neuron tab
+                        after rendering. Export uses false to avoid tab changes.
+
+                The spike chart is trial-averaged neural activity. All RF
+                curves are direct Pearson-correlation tensor slices at the
+                validated preferred feature; OSI/gOSI in the title remain the
+                separate firing-rate metrics.
                 """
                 try:
                     entry_neuron.delete(0, tk.END)
@@ -3844,11 +3870,24 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     refresh_figure_caption(fig2)
                     canvas2.draw()
 
-                    rf2d, x_tuning, y_tuning, ori_tun, s_tuning, f_tuning = PlotTuningCurve(rfs_gabor, neuron_id, analysis_coverage, sigmas_deg, screen_ratio, frequencies, show=False)
-                    best_indices = np.asarray(rfs_gabor[1], dtype=int)[:, neuron_id]
-                    best_x, best_y, best_orientation, best_sigma = best_indices[:4]
+                    # Use direct slices of the RF correlation tensor.  The
+                    # legacy PlotTuningCurve helper derives spatial curves with
+                    # an SVD, which can display a component unrelated to the
+                    # selected neuron's actual azimuth/elevation response.
+                    from ..analysis.tuning import extract_rf_tuning_curves
+
+                    rf_curves = extract_rf_tuning_curves(
+                        rfs_gabor[0], rfs_gabor[1], neuron_id,
+                    )
+                    best_x, best_y, best_orientation, best_sigma, best_frequency = rf_curves["indices"]
+                    rf2d = rf_curves["rf_xy"].T
+                    elevation_tuning = rf_curves["elevation"]
+                    azimuth_tuning = rf_curves["azimuth"]
+                    orientation_tuning = rf_curves["orientation"]
+                    ori_tun = np.append(orientation_tuning, orientation_tuning[0])
+                    s_tuning = rf_curves["size"]
+                    f_tuning = rf_curves["frequency"]
                     if w_c_downsampled.ndim == 6:
-                        best_frequency = best_indices[4]
                         orientation_features = w_c_downsampled[:n_frames, best_x, best_y, :, best_sigma, best_frequency]
                         size_features = w_c_downsampled[:n_frames, best_x, best_y, best_orientation, :, best_frequency]
                     else:
@@ -3878,29 +3917,29 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     ax3[0].set_title('Receptive Field')
                     ax3[0].set_xlabel("Azimuth (deg)")
                     ax3[0].set_ylabel("Elevation (deg)")
-                    ax3[1].plot(x_tuning[::-1], c='k')
+                    ax3[1].plot(elevation_tuning, c='#2563EB')
                     ax3[1].set_title('Elevation (deg)')
-                    ax3[1].set_xticks([0, rf2d.shape[0]], [ym, yM])
+                    ax3[1].set_xticks([0, max(0, len(elevation_tuning) - 1)], [yM, ym])
                     ax3[1].set_xlabel("Elevation (deg)")
-                    ax3[1].set_ylabel("Correlation (a.u.)")
-                    ax3[2].plot(y_tuning, c='k')
+                    ax3[1].set_ylabel("RF correlation (r)")
+                    ax3[2].plot(azimuth_tuning, c='#2563EB')
                     ax3[2].set_title('Azimuth (deg)')
-                    ax3[2].set_xticks([0, rf2d.shape[1]], [xM, xm])
+                    ax3[2].set_xticks([0, max(0, len(azimuth_tuning) - 1)], [xM, xm])
                     ax3[2].set_xlabel("Azimuth (deg)")
-                    ax3[2].set_ylabel("Correlation (a.u.)")
+                    ax3[2].set_ylabel("RF correlation (r)")
                     ax3[3].errorbar(
                         np.arange(len(ori_tun)), ori_tun, yerr=None if ori_ci is None else np.append(ori_ci, ori_ci[0]),
                         fmt='o-', c='#2563EB', ecolor='#60A5FA', capsize=3,
                         label=f'Correlation (95% CI; n={ori_ci_trials})' if ori_ci is not None else 'Correlation',
                     )
-                    ax3[3].set_title(f'Orientation (firing-rate OSI {neuron_osi:.3f}, gOSI {neuron_gosi:.3f})')
+                    ax3[3].set_title(f'Orientation correlation (firing-rate OSI {neuron_osi:.6f}, gOSI {neuron_gosi:.6f})')
                     n_ori = rfs_gabor[0].shape[3]
                     ax3[3].set_xticks(
                         [0, max(1, n_ori // 2), max(2, n_ori - 1)],
                         [0, 90, 180],
                     )
                     ax3[3].set_xlabel("Orientation (deg)")
-                    ax3[3].set_ylabel("Correlation (a.u.)")
+                    ax3[3].set_ylabel("RF correlation (r)")
                     ax3[3].legend(fontsize=8)
                     ax3[4].errorbar(
                         np.arange(len(s_tuning)), s_tuning, yerr=size_ci,
@@ -3910,7 +3949,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     ax3[4].set_title('Size (deg)')
                     ax3[4].set_xticks([0, len(sigmas) - 1], [sigmas_deg[0], sigmas_deg[-1]])
                     ax3[4].set_xlabel("Size (deg)")
-                    ax3[4].set_ylabel("Correlation (a.u.)")
+                    ax3[4].set_ylabel("RF correlation (r)")
                     ax3[4].legend(fontsize=8)
                     has_frequency_axis = w_c_downsampled.ndim == 6 and rf_nf > 1 and len(f_tuning) > 1
                     if has_frequency_axis:
@@ -3919,7 +3958,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         ax3[5].set_title('Spatial Frequency')
                         ax3[5].set_xticks(range(len(rf_frequencies)), [round(f, 3) for f in rf_frequencies])
                         ax3[5].set_xlabel("Spatial frequency (cycles/deg)")
-                        ax3[5].set_ylabel("Correlation (a.u.)")
+                        ax3[5].set_ylabel("RF correlation (r)")
                     else:
                         ax3[5].set_visible(False)
                     _set_figure_export_payload(
@@ -3928,8 +3967,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "source": "Inspect Single Neuron",
                             "neuron_id": neuron_id,
                             "rf2d": rf2d,
-                            "x_tuning": x_tuning,
-                            "y_tuning": y_tuning,
+                            "azimuth_correlation_tuning": azimuth_tuning,
+                            "elevation_correlation_tuning": elevation_tuning,
                             "orientation_correlation_tuning": ori_tun,
                             "orientation_correlation_ci_95": ori_ci,
                             "orientation_firing_rate_tuning": rate_ori_tun,

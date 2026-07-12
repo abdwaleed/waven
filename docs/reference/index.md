@@ -12,7 +12,7 @@ ownership boundaries that signatures alone cannot convey.
 | `n_trials` | repeated stimulus presentations | alignment output |
 | `n_frames` | stimulus frames after alignment/truncation | movie, spikes, wavelets |
 | `n_neurons` | recorded cells or units | Suite2p/ephys input |
-| `NX`, `NY` | full configured analysis grid | `PipelineConfig` |
+| `analysis_x`, `analysis_y` | movie-metadata dimensions scaled by the GUI percentage | stimulus metadata |
 | `coarse_nx`, `coarse_ny` | derived coarse RF grid | `AnalysisConfig.coarse_nx/coarse_ny` |
 | `n_orientations` | orientation bins over 0-180 degrees | `N_thetas` |
 | `n_sigmas` | Gabor size bins | `Sigmas` or `Sigmas Full Model` |
@@ -23,9 +23,9 @@ ownership boundaries that signatures alone cannot convey.
 | Object | Shape | dtype | Read this as |
 | --- | --- | --- | --- |
 | `spikes` | `(n_trials, n_frames, n_neurons)` | floating numeric | neural response time series |
-| downsampled movie | `(n_frames, NY, NX)` | `bool` | image-space stimulus frames |
-| coarse wavelet cache | `(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)` | `float32` | real, imaginary, and combined coarse features |
-| full-model phase | `(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)` | `float32` | dense real or imaginary wavelet coefficients |
+| downsampled movie | `(n_frames, analysis_y, analysis_x)` | `bool` | image-space stimulus frames |
+| Coarse RF power | `(n_frames, coarse_x, coarse_y, n_orientations, n_sigmas)` | `float32` | power-only Zarr feature cache used by RF correlation |
+| full-model phase | `(n_frames, analysis_x, analysis_y, n_orientations, n_sigmas, n_frequencies)` | `float32` | dense real or imaginary wavelet coefficients |
 | RF tensor | `(n_neurons, coarse_nx, coarse_ny, n_orientations, n_sigmas, n_frequencies)` | numeric | correlation per neuron and feature |
 
 Movie arrays are image-like and use `(y, x)` spatial order. Wavelet, RF, and

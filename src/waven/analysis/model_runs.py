@@ -159,7 +159,6 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
     y1 = int(np.round(maxes1[1, idx]))
     o1 = int(np.round(maxes1[2, idx]))
     s1 = int(np.round(maxes1[3, idx]))
-    print(idx, (x, y, o, s), (x1, y1, o1, s1))
 
     w_i = wavelets_i[:, x, y, o, s ].reshape(-1, 1)  # +w_i_downsampled[:, x1, y1, o1, s1]
     w_r = wavelets_r[:, x, y, o, s].reshape(-1, 1)  # +w_r_downsampled[:, x1, y1, o1, s1]
@@ -249,14 +248,40 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
                                                                                           lastmin=lastmin, func=relu, sigma=15,
                                                                                           plotting=False,
                                                                                           frames_per_minute=frames_per_minute)
-    print(rhophiparams)
     return vis_resp, nonlinparams, rhophiparams, a, interp
 
 def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
               n_min=5, double_wavelet_model=True, train_idx=[0, 2],
               test_idx=[1, 3], lastmin=False, plotting=False, frames_per_minute=None,
               show_sem_errorbars=False):
-    """Fit the fast nonlinear Gabor-wavelet model for every neuron in parallel."""
+    """Fit the coarse nonlinear Gabor-wavelet model for one or more neurons.
+
+    Args:
+        maxes0: Smoothed preferred RF indices with shape ``(at least 4,
+            n_neurons)`` in x/y/orientation/size order.
+        maxes1: Unsmoothened preferred RF indices with the same shape; they
+            seed the inhibitory-feature selection.
+        spks: Aligned neural responses with shape ``(trials, frames, neurons)``.
+        wavelets_i: Imaginary coarse phase with shape ``(frames, x, y,
+            orientations, sigmas)``. May be a disk-backed Zarr/NPY view.
+        wavelets_r: Real coarse phase with the same shape as ``wavelets_i``.
+        dt1: Maximum shared training-frame count.
+        n_min: Model fitting duration in minutes.
+        double_wavelet_model: Whether to include the inhibitory wavelet feature.
+        train_idx: Zero-based trial indices used to fit the nonlinearity.
+        test_idx: Zero-based held-out trial indices.
+        lastmin: Whether to evaluate an additional final-minute holdout.
+        plotting: Enable legacy diagnostic figures. GUI workers leave this false.
+        frames_per_minute: Required movie FPS multiplied by 60.
+        show_sem_errorbars: Compatibility argument for legacy plot callers.
+
+    Returns:
+        tuple: Predictions, nonlinear parameters, rho/phi parameters, scalar
+        metrics, and interpolation objects, each ordered by neuron.
+
+    Raises:
+        ValueError: If cache axes, RF indices, trial splits, or shared frame length are incompatible.
+    """
     if wavelets_i.ndim != 5 or wavelets_r.ndim != 5:
         raise ValueError(
             "run_Model expects 5D coarse wavelets with shape "
@@ -358,34 +383,42 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                    memmapping=True, train_idx=None, test_idx=None, double_wavelet_model=False, lastmin=False,
                    plotting=False, frames_per_minute=None, coarse_shape=None,
                    hz=None, show_sem_errorbars=False):
-    """Function for run Full Model.
+    """Refine coarse RF seeds against full-model real/imaginary wavelets.
 
     Args:
-        maxes0: Input value for this operation.
-        maxes1: Input value for this operation.
-        spks: Input value for this operation.
-        idxs: Input value for this operation.
-        thetas: Input value for this operation.
-        sigmas: Input value for this operation.
-        frequencies: Input value for this operation.
-        visual_coverage: Input value for this operation.
-        neuron_pos: Input value for this operation.
-        wavelet_path: Input value for this operation.
-        savepath: Input value for this operation.
-        n_min: Input value for this operation.
-        tt: Input value for this operation.
-        memmapping: Input value for this operation.
-        train_idx: Input value for this operation.
-        test_idx: Input value for this operation.
-        double_wavelet_model: Input value for this operation.
-        lastmin: Input value for this operation.
-        plotting: Input value for this operation.
-        frames_per_minute: Input value for this operation.
-        hz: Input value for this operation.
-        show_sem_errorbars: Input value for this operation.
+        maxes0: Smoothed coarse preferred indices with shape ``(at least 4,
+            n_neurons)``.
+        maxes1: Raw coarse preferred indices with the same neuron axis.
+        spks: Aligned responses with shape ``(trials, frames, neurons)``.
+        idxs: Zero-based neuron indices to refine.
+        thetas: Orientation-bin values or indices used by legacy outputs.
+        sigmas: Full-model sigma values in analysis pixels.
+        frequencies: Full-model spatial frequencies in cycles per analysis pixel.
+        visual_coverage: Four visual-degree bounds in left/right/top/bottom order.
+        neuron_pos: `(n_neurons, 2+)` positions used by neighbourhood smoothing.
+        wavelet_path: Folder containing `dwt_videodata2_r/i.zarr` or compatible
+            NPY phases.
+        savepath: Folder for durable model-result arrays.
+        n_min: Training-window duration in minutes.
+        tt: Required ``[start, stop]`` frame range shared by spikes and phases.
+        memmapping: Prefer disk-backed phase loading.
+        train_idx: Zero-based fitting trial indices.
+        test_idx: Zero-based held-out trial indices.
+        double_wavelet_model: Include inhibitory wavelet features when true.
+        lastmin: Evaluate an optional final-minute holdout.
+        plotting: Enable legacy diagnostic figures; false is safe for GUI workers.
+        frames_per_minute: Movie FPS multiplied by 60.
+        coarse_shape: Expected coarse `(x, y)` grid for validating seed indices.
+        hz: Movie frame rate, used when ``frames_per_minute`` is omitted.
+        show_sem_errorbars: Compatibility argument for legacy figure callers.
 
     Returns:
-        Result produced by the operation.
+        tuple: Full-model predictions, refined preferred parameters, nonlinear
+        parameters, rho/phi parameters, metrics, selectivity outputs, and
+        interpolators in the legacy public ordering.
+
+    Raises:
+        ValueError: If phase cache axes, trial splits, frame range, or coarse seed coordinates are incompatible.
     """
     if tt is None:
         tt = [0, 18000]
@@ -455,7 +488,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     interpolators = []
 
     if memmapping:
-        print('looking for wavelets zarr folder in : ', wavelet_path)
+        print(f"[INFO] Run Full Model: loading disk-backed full wavelets from {wavelet_path}")
         try:
             wavelets_i = load_array(
                 os.path.join(wavelet_path, 'dwt_videodata2_i.zarr'),
@@ -466,7 +499,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                 mmap_mode='r',
             )
         except Exception:
-            print('Zarr not found; falling back to full-model NPY memmaps.')
+            print("[INFO] Run Full Model: Zarr phase cache unavailable; using NPY memory maps.")
             from ..stimulus import load_stimulus_simple_cell2
 
             wavelets_r, wavelets_i = load_stimulus_simple_cell2(
@@ -475,7 +508,6 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                 downsampling=False,
             )
             memmapping = False
-        print(wavelets_r.shape)
     else:
         from ..stimulus import load_stimulus_simple_cell2
 
@@ -645,7 +677,6 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         y_global = y_start + y_local
 
         for iteration in range(10):
-            print(x_global, y_global, phase)
             phase, cc_f_1, osf_best = _best_phase_correlation(
                 np.asarray(wavelets_r[t_start:t_end, x_global, y_global, :, :, :]),
                 np.asarray(wavelets_i[t_start:t_end, x_global, y_global, :, :, :]),
@@ -684,17 +715,13 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                 plt.xlabel("Local X position (pixels)")
                 plt.ylabel("Local Y position (pixels)")
 
-            print(o, s, f)
-            print(new_x_global, new_y_global)
             if new_x_global == x_global and new_y_global == y_global:
-                print('converged')
                 break
             x_local, y_local = int(new_x_local), int(new_y_local)
             x_global, y_global = new_x_global, new_y_global
 
         if compute_device == "cuda":
             torch.cuda.empty_cache()
-        print(x_global, y_global, o, s, f)
         return (x_global, y_global, o, s, f)
     
     
@@ -741,12 +768,9 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     for idx in list_neurons:  # np.asarray(neuron_pos[:, 1]>600).nonzero()[0]:[1024, 732, 1789, 3279, 614]:#
         if compute_device == "cuda":
             torch.cuda.empty_cache()
-        print(idx)
         x, y, o, s = maxes1[:4, idx]
 
-        print(x, y, o, s)
         x1, y1, o1, s1 = maxes0[:4, idx]
-        print(x1, y1, o1, s1)
 
         if memmapping:
             (x, y, o, s, f) = findBestPos_profiled(int(np.round(x)), int(np.round(y)), int(np.round(o)),
@@ -1021,7 +1045,6 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax6.set_ylabel("Activity (a.u.)")
             ax[0].axis("off")
             ax[1].axis("off")
-        print(rhophiparams)
         Predictions.append(vis_resp)
         nonlinParams.append(nonlinparams)
         rhophiparams.append(ori_selectivity)

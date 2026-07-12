@@ -12,10 +12,11 @@ opened, memory-mapped, chunked, or converted.
 | memory-mapped `.npy` | reads slices without loading the whole file | still one large uncompressed file |
 | Zarr | chunked and compressed; friendlier for huge full-model wavelets | directory store; requires `zarr` and `numcodecs` |
 
-Full-model wavelets are the usual Zarr candidate:
+Full-model wavelets are the usual Zarr candidate. Their spatial dimensions come
+from movie metadata scaled by the GUI percentage:
 
 ```text
-(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)
+(n_frames, analysis_x, analysis_y, n_orientations, n_sigmas, n_frequencies)
 ```
 
 The logical dtype remains `float32`.
