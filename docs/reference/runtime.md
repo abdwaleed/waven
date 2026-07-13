@@ -29,11 +29,14 @@ That line is the reliable way to identify whether a particular run is limited
 by decoding, GPU convolution, or storage rather than guessing from CPU/GPU
 percentages alone.
 
-### Optional hardware flags
+### Performance and hardware choices
 
-These are process environment flags for advanced deployments; the safe defaults
-require no configuration. Set a flag to `0` to disable an optimization while
-diagnosing a machine-specific driver or filesystem issue.
+The GUI exposes every runtime choice in **Session Configuration → Performance &
+Hardware**.  The safe defaults require no configuration, apply to the next
+action without restarting the GUI, and are saved in `gui.performance` when you
+save the current GUI inputs and parameters. The matching environment variables
+remain supported for unattended or command-line launches. Set a value to `0`
+only when diagnosing a machine-specific driver or filesystem issue.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
@@ -48,6 +51,18 @@ then gathers them in original order. It does not change filter settings or
 array layout, and a setup failure automatically continues on the primary GPU.
 GPU RF acceleration also preserves the CPU algorithm's sufficient statistics;
 only the floating-point matrix multiply location changes.
+
+### Optional two-photon timeline roots
+
+The GUI also exposes **Advanced 2-photon data discovery** in Session
+Configuration. It supplies the optional `WAVEN_SUBJECT_DIRS` process setting
+used by the Suite2p timeline adapter. Enter one or more dataset-root folders,
+separated by the operating system's path separator (`;` on Windows, `:` on
+Linux/macOS), then choose **Apply Suite2p Folders**. This is only needed when a
+two-photon timeline must be discovered outside the project `Dir`; it does not
+alter neural data, alignment mathematics, cache content, or any model input.
+Leaving it empty removes the temporary override, which avoids carrying paths
+from another computer into a new session.
 
 ## Why this matters
 

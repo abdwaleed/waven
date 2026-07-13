@@ -78,7 +78,7 @@ The JSON file has four main sections:
 | Section | Required? | Meaning |
 | --- | --- | --- |
 | `workflow` | optional for GUI | `"2p"` for two-photon or `"ephys"` for electrophysiology. |
-| `gui` | optional | Initial scale, backend, fresh/continue source, and output-format selectors. |
+| `gui` | optional | Initial scale, backend, fresh/continue source, output-format selectors, optional Suite2p discovery roots, and runtime scheduling choices. |
 | `gabor_param` | optional for launch | Filter axes and coarse/full cache folders. Grid dimensions are read from movie metadata. |
 | `common` | optional for launch | Stimulus, timing, coverage, and shared folder settings. |
 | `two_photon` / `ephys` | optional for launch | Workflow-specific acquisition settings. |
@@ -94,7 +94,31 @@ The checked-in `pipeline_config.json` uses the exact schema written by the GUI's
 | `wavelet_backend` | `"legacy"`, `"convolution"` | Selects the decomposition implementation. |
 | `neural_source` | `"data_dir"`, `"spks_path"` | `data_dir` means fresh/raw acquisition; `spks_path` means continue from an existing cache. |
 | `downsample_percent` | number from 0 through 100 | Spatial percentage applied to movie-metadata width and height. Coarse RF, Run Model, and Run Full Model all share this one grid. |
-| format fields | `"npy"` or `"zarr"` | Initial cache formats for the corresponding stage. |
+| `gabor_format`, `downsample_format`, `neural_cache_format`, `wavelet_format` | `"npy"` or `"zarr"` | Initial cache formats for the corresponding stage. `wavelet_format` controls the three consumer-specific wavelet-product buttons. |
+| `performance` | object of booleans | GUI runtime choices: `autotune`, `prefetch`, `async_writer`, `rf_gpu`, and `multi_gpu`. They control scheduling/hardware only, never analysis values. |
+| `suite2p_subject_dirs` | string | Optional two-photon timeline dataset roots, separated by the platform path separator (`;` on Windows, `:` on Linux/macOS). Leave `""` unless Suite2p timeline discovery needs folders outside `Dir`. |
+
+Example performance block:
+
+```json
+"performance": {
+  "autotune": true,
+  "prefetch": true,
+  "async_writer": true,
+  "rf_gpu": true,
+  "multi_gpu": false
+}
+```
+
+Enable `multi_gpu` only when using the convolution backend with at least two
+CUDA GPUs dedicated to Waven. The GUI displays detected hardware and safely
+falls back to one GPU or CPU when the option cannot apply.
+
+`suite2p_subject_dirs` is intentionally empty in the portable example
+configuration. It is a machine-specific data-discovery convenience, not a
+project-relative input or an analysis parameter. The GUI's **Advanced
+2-photon data discovery** card can apply it for the current process and stores
+it with the rest of the current GUI inputs when you save them.
 
 ## `gabor_param`
 

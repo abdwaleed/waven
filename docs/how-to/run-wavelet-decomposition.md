@@ -70,11 +70,13 @@ the first measured batches within that ceiling. At the end of the action, the
 terminal reports input, compute/transfer, and output throughput so a slow run
 can be attributed to decoding, GPU compute, or disk writes.
 
-On a multi-GPU workstation, batch-parallel convolution is available only when
-the advanced `WAVEN_MULTI_GPU=1` environment flag is set before launch. This is
-off by default because leaving a display or shared workload GPU saturated can
-reduce desktop responsiveness. If multi-GPU setup fails, the action continues
-on the primary GPU rather than failing the decomposition.
+On a multi-GPU workstation, enable **Use all available GPUs** in **Session
+Configuration → Performance & Hardware** before starting a convolution action.
+This is off by default because leaving a display or shared-workload GPU
+saturated can reduce desktop responsiveness. The same choice is saved with the
+current GUI inputs (and remains available as `WAVEN_MULTI_GPU=1` for unattended
+launches). If multi-GPU setup fails, the action continues on the primary GPU
+rather than failing the decomposition.
 
 ## Disk intuition
 

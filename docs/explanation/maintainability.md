@@ -14,7 +14,7 @@ must not accidentally turn a disk-backed operation into a full-memory copy.
 | Wavelets | `wavelets/decomposition.py` | Legacy and convolution wavelet generation, chunking, and cache writing. |
 | Storage | `storage/array_store.py`, `storage/binary_movie.py`, `storage/neural_cache.py` | NPY/Zarr opening, safe disk-backed views, and neural-cache persistence. |
 | RF correlation | `analysis/rf_correlation.py` | Bounded-memory correlation of disk-backed wavelets and neural responses. |
-| RF tuning extraction | `analysis/tuning.py` | Validated direct axis slices for individual-neuron RF plots and exports. |
+| RF tuning extraction | `analysis/tuning.py` | Validated direct axis slices for programmatic RF consumers and exports. The GUI keeps the established SVD spatial projection for azimuth/elevation displays. |
 | Legacy analysis | `analysis/receptive_fields.py` | Existing public RF, plotting, prediction, and signal-analysis API. |
 
 ## Dependency direction

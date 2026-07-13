@@ -6,7 +6,16 @@
     "downsample_percent": 10.7,
     "downsample_format": "npy",
     "neural_cache_format": "npy",
-    "gabor_format": "npy"
+    "gabor_format": "npy",
+    "wavelet_format": "zarr",
+    "suite2p_subject_dirs": "",
+    "performance": {
+      "autotune": true,
+      "prefetch": true,
+      "async_writer": true,
+      "rf_gpu": true,
+      "multi_gpu": false
+    }
   },
   "gabor_param": {
     "N_thetas": "18",

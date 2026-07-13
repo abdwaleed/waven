@@ -92,9 +92,11 @@ uses the coarse RF feature seeds for local refinement.
 - **All Neurons** azimuth/elevation/orientation/size colours are each neuron's
   preferred RF feature derived from Pearson correlation; they are not firing
   rate values.
-- **Individual Neuron** RF, azimuth, elevation, orientation, size, and
-  frequency curves are direct slices of that same RF correlation tensor. Only
-  orientation and size show trial-derived 95% confidence intervals.
+- **Individual Neuron** RF, orientation, size, and frequency are derived from
+  the same RF correlation tensor. Azimuth and elevation are the established
+  signed SVD spatial projections of the selected RF map, which give a robust
+  one-dimensional retinotopic profile instead of letting one pixel dominate the
+  curve. Only orientation and size show trial-derived 95% confidence intervals.
 - **OSI/gOSI** are separate. Waven uses the preferred RF location to weight
   each orientation's stimulus frames, then computes the tuning from neural
   firing rate/aligned activity. Mean and median are displayed at sufficient

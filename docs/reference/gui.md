@@ -56,6 +56,37 @@ Non-path text fields include a visible example beneath the entry. These examples
 distinguish integers, floats, booleans, tuples, and numeric lists, and state the
 units where applicable.
 
+## Performance & Hardware controls
+
+Session Configuration includes a **Performance & Hardware** card. These are
+runtime scheduling controls, not scientific parameters: changing one never
+changes movie dimensions, Gabor values, cache shape, or fitted-model inputs.
+They apply immediately to the current GUI process and are included in **Save
+Current GUI Inputs / Parameters** under `gui.performance`.
+
+| GUI control | Runtime flag | Default | Applies to |
+| --- | --- | --- | --- |
+| Adaptive batch tuning | `WAVEN_AUTOTUNE` | on | Convolution wavelet actions |
+| Prefetch input chunks | `WAVEN_PREFETCH` | on | Downsampling and convolution wavelet reads |
+| Asynchronous cache writing | `WAVEN_ASYNC_WRITER` | on | Convolution wavelet outputs |
+| GPU Coarse RF statistics | `WAVEN_RF_GPU` | on | Coarse RF sufficient-statistics cross-products |
+| Use all available GPUs | `WAVEN_MULTI_GPU` | off | Convolution wavelets only, with two or more CUDA GPUs |
+
+The hardware status line reports the detected CUDA count and whether multi-GPU
+can be effective with the selected backend. Choosing multi-GPU on a one-GPU or
+CPU-only machine is safe and persists the preference, but it has no effect
+until the app runs on a compatible multi-GPU convolution system. GPU Coarse RF
+also remains safe on a constrained device: each tile falls back to CPU if it
+does not fit.
+
+The **Advanced 2-photon data discovery** card exposes the other optional
+runtime setting used by the application: Suite2p timeline dataset roots. Enter
+one or more roots separated by the platform path separator (`;` on Windows,
+`:` on Linux/macOS) and select **Apply Suite2p Folders**. This field is needed
+only for two-photon timeline discovery outside `Dir`; an empty value removes
+the setting from the current process so a saved configuration never forces a
+path from another computer.
+
 ## Folder contract
 
 GUI path fields are folders. `Project Root` anchors the strict project layout:

@@ -22,11 +22,17 @@ from ..runtime.performance import (
 
 
 def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features):
-    """Correlate a 5/6-D Zarr tensor by reading each storage chunk once.
+    """Correlate a 5/6-D tensor with stable, chunk-aligned covariance updates.
 
-    Pearson correlation can be reconstructed from sums, sums of squares, and
-    cross-products.  Accumulating those sufficient statistics over time avoids
-    repeatedly decompressing the same Zarr chunks for each small feature tile.
+    The calculation uses the parallel/Welford covariance update.  In contrast
+    to reconstructing covariance from ``sum(x*y) - sum(x)*sum(y)/n``, this
+    does not lose the small neural signal when non-negative wavelet power has a
+    large baseline.  That cancellation previously produced impossible Pearson
+    values (for example, values far outside ``[-1, 1]``) and corrupted the RF
+    peak used by every downstream tuning plot.
+
+    Each spatial tile is read once per time chunk.  Tile working memory remains
+    bounded by the Zarr chunk and one feature-by-neuron covariance matrix.
     """
     shape = tuple(int(dim) for dim in stimulus.shape)
     nx, ny = shape[1], shape[2]
@@ -37,84 +43,103 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
     y_chunk = max(1, min(ny, int(chunks[2])))
     n_neurons = int(response.shape[1])
     result = np.empty((n_neurons, n_features), dtype=np.float32)
-    response = np.asarray(response, dtype=np.float32)
-    response_sum = response.sum(axis=0, dtype=np.float64)
-    response_ss = np.einsum("ij,ij->j", response, response, dtype=np.float64)
-    response_var = np.maximum(response_ss - (response_sum * response_sum / n_time), 0.0)
+    # Float64 running statistics are deliberate.  Wavelet power can have a
+    # sizeable positive baseline while the correlation signal is small.
+    response = np.asarray(response, dtype=np.float64)
     total_tiles = math.ceil(nx / x_chunk) * math.ceil(ny / y_chunk)
     tile_number = 0
     telemetry = OperationTelemetry("Coarse RF correlation")
     use_gpu = enabled_feature("RF_GPU", default=True) and torch.cuda.is_available()
-    response_tensor = None
-    if use_gpu:
-        try:
-            response_tensor = torch.as_tensor(response, dtype=torch.float32, device="cuda:0")
-        except RuntimeError as exc:
-            print(f"RF GPU setup failed; using CPU accumulation: {exc}")
-            use_gpu = False
     print(
-        "RF correlation using chunk-aligned sufficient statistics: "
+        "RF correlation using stable chunk-aligned covariance: "
         f"time={time_chunk}, x={x_chunk}, y={y_chunk}; {total_tiles} spatial tiles."
     )
     for x_start in range(0, nx, x_chunk):
         x_end = min(nx, x_start + x_chunk)
         for y_start in range(0, ny, y_chunk):
             y_end = min(ny, y_start + y_chunk)
-            feature_start = (x_start * ny + y_start) * features_per_pixel
-            feature_end = ((x_end - 1) * ny + y_end) * features_per_pixel
             tile_features = (x_end - x_start) * (y_end - y_start) * features_per_pixel
-            feature_sum = np.zeros(tile_features, dtype=np.float64)
-            feature_ss = np.zeros(tile_features, dtype=np.float64)
-            cross = np.zeros((tile_features, n_neurons), dtype=np.float32)
+            feature_mean = np.zeros(tile_features, dtype=np.float64)
+            feature_m2 = np.zeros(tile_features, dtype=np.float64)
+            response_mean = np.zeros(n_neurons, dtype=np.float64)
+            response_m2 = np.zeros(n_neurons, dtype=np.float64)
+            cross = np.zeros((tile_features, n_neurons), dtype=np.float64)
             cross_tensor = None
             if use_gpu:
-                required = tile_features * n_neurons * np.dtype(np.float32).itemsize * 3
+                required = tile_features * n_neurons * np.dtype(np.float64).itemsize * 3
                 if required < gpu_available_vram_bytes() * 0.35:
                     try:
-                        cross_tensor = torch.zeros((tile_features, n_neurons), dtype=torch.float32, device="cuda:0")
+                        cross_tensor = torch.zeros(
+                            (tile_features, n_neurons), dtype=torch.float64, device="cuda:0"
+                        )
                     except RuntimeError:
                         cross_tensor = None
+            seen = 0
             for time_start in range(0, n_time, time_chunk):
                 time_end = min(n_time, time_start + time_chunk)
+                batch_size = time_end - time_start
                 read_start = time.perf_counter()
                 block = np.asarray(
                     stimulus[time_start:time_end, x_start:x_end, y_start:y_end, ...],
-                    dtype=np.float32,
-                ).reshape(time_end - time_start, tile_features)
+                    dtype=np.float64,
+                ).reshape(batch_size, tile_features)
                 telemetry.add("input", time.perf_counter() - read_start, block.nbytes)
-                feature_sum += block.sum(axis=0, dtype=np.float64)
-                feature_ss += np.einsum("ij,ij->j", block, block, dtype=np.float64)
+                response_block = response[time_start:time_end]
+                block_mean = block.mean(axis=0, dtype=np.float64)
+                response_block_mean = response_block.mean(axis=0, dtype=np.float64)
+                centered_block = block - block_mean
+                centered_response = response_block - response_block_mean
+                total = seen + batch_size
+                if seen:
+                    correction_scale = seen * batch_size / total
+                    feature_delta = block_mean - feature_mean
+                    response_delta = response_block_mean - response_mean
+                    cross += feature_delta[:, None] * response_delta[None, :] * correction_scale
+                    feature_m2 += feature_delta * feature_delta * correction_scale
+                    response_m2 += response_delta * response_delta * correction_scale
                 if cross_tensor is not None:
                     try:
                         compute_start = time.perf_counter()
-                        block_tensor = torch.as_tensor(block, dtype=torch.float32, device="cuda:0")
-                        cross_tensor += block_tensor.T @ response_tensor[time_start:time_end]
+                        block_tensor = torch.as_tensor(centered_block, dtype=torch.float64, device="cuda:0")
+                        response_tensor = torch.as_tensor(centered_response, dtype=torch.float64, device="cuda:0")
+                        cross_tensor += block_tensor.T @ response_tensor
                         telemetry.add("gpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
-                        del block_tensor
+                        del block_tensor, response_tensor
                     except RuntimeError as exc:
                         print(f"RF GPU tile fell back to CPU: {exc}")
-                        # Preserve cross-products already accumulated on the GPU
-                        # before processing the failed chunk on the CPU.
+                        # Preserve completed GPU chunks before finishing this
+                        # and remaining chunks with the numerically identical
+                        # CPU calculation.
                         cross += cross_tensor.cpu().numpy()
                         del cross_tensor
                         torch.cuda.empty_cache()
-                        cross += block.T @ response[time_start:time_end]
+                        cross += centered_block.T @ centered_response
                         cross_tensor = None
                 else:
                     compute_start = time.perf_counter()
-                    cross += block.T @ response[time_start:time_end]
+                    cross += centered_block.T @ centered_response
                     telemetry.add("cpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
+                feature_m2 += np.einsum("ij,ij->j", centered_block, centered_block, dtype=np.float64)
+                response_m2 += np.einsum(
+                    "ij,ij->j", centered_response, centered_response, dtype=np.float64
+                )
+                feature_mean += (block_mean - feature_mean) * (batch_size / total)
+                response_mean += (response_block_mean - response_mean) * (batch_size / total)
+                seen = total
             if cross_tensor is not None:
-                cross = cross_tensor.cpu().numpy()
+                cross += cross_tensor.cpu().numpy()
                 del cross_tensor
-            feature_var = np.maximum(feature_ss - (feature_sum * feature_sum / n_time), 0.0)
-            denominator = np.sqrt(feature_var[:, None] * response_var[None, :])
+            denominator = np.sqrt(feature_m2[:, None] * response_m2[None, :])
             tile_corr = np.divide(
-                cross - (feature_sum[:, None] * response_sum[None, :] / n_time),
+                cross,
                 denominator,
-                out=np.zeros_like(cross),
+                out=np.zeros_like(cross, dtype=np.float64),
                 where=denominator > 1e-12,
             )
+            # A valid Pearson coefficient cannot exceed one.  The clip only
+            # removes last-bit roundoff and prevents a malformed cache from
+            # silently becoming a false preferred feature.
+            np.clip(tile_corr, -1.0, 1.0, out=tile_corr)
             # x/y tiles are contiguous only when x has one value.  Assign one
             # x row at a time to preserve C-order flattening exactly.
             row_features = (y_end - y_start) * features_per_pixel
@@ -127,9 +152,6 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
             if tile_number % 8 == 0 or tile_number == total_tiles:
                 print(f"RF correlation spatial tiles: {tile_number}/{total_tiles}")
             telemetry.maybe_report()
-    if response_tensor is not None:
-        del response_tensor
-        torch.cuda.empty_cache()
     telemetry.report()
     return result
 
@@ -160,7 +182,7 @@ def streaming_cross_correlation(
         )
 
     n_features = int(np.prod(stimulus_shape[1:], dtype=np.int64))
-    response = np.asarray(response, dtype=np.float32)
+    response = np.asarray(response, dtype=np.float64)
     if response.ndim != 2 or response.shape[0] != n_time:
         raise ValueError(
             "Stimulus/response time axes must match for RF correlation: "
@@ -180,8 +202,6 @@ def streaming_cross_correlation(
         f"({n_time:,} frames × {n_neurons:,} neurons)."
     )
 
-    response -= response.mean(axis=0, keepdims=True)
-    response /= np.maximum(response.std(axis=0, keepdims=True, ddof=1), 1e-9)
     result_bytes = n_neurons * n_features * np.dtype(np.float32).itemsize
     if not has_enough_ram(result_bytes, safety_margin=1.50):
         raise MemoryError(
@@ -194,6 +214,9 @@ def streaming_cross_correlation(
         # accumulation; it is both faster and lower-I/O than reading all time
         # frames separately for each small spatial feature block.
         return _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features)
+
+    response -= response.mean(axis=0, keepdims=True)
+    response /= np.maximum(response.std(axis=0, keepdims=True, ddof=1), 1e-9)
 
     correlations = np.empty((n_neurons, n_features), dtype=np.float32)
 

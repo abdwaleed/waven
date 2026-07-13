@@ -13,19 +13,23 @@ import os
 from datetime import datetime as dt
 
     
-# Dataset roots are environment-specific. Configure one or more paths with
-# WAVEN_SUBJECT_DIRS (separated by the platform path separator) rather than
-# shipping another user's mounted drives in source code.
-dirs = [path for path in os.environ.get('WAVEN_SUBJECT_DIRS', '').split(os.pathsep) if path]
-
 def expt_dirs():
-    
-    """Function for expt dirs.
+    """Return Suite2p dataset roots configured for the current process.
+
+    The GUI may change ``WAVEN_SUBJECT_DIRS`` after this module is imported,
+    so the environment is read on every lookup rather than cached at module
+    import time.  Empty path components are ignored.
 
     Returns:
-        Result produced by the operation.
+        list[str]: Configured dataset-root paths, in the user's supplied
+            search order. The list is empty when external timeline discovery
+            is not configured.
     """
-    return dirs
+    return [
+        path
+        for path in os.environ.get("WAVEN_SUBJECT_DIRS", "").split(os.pathsep)
+        if path
+    ]
 
 def get_subject_log(subject):
     """Function for get subject log.

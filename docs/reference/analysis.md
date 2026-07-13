@@ -24,10 +24,12 @@ non-negative firing-rate tuning curve. Ephys values are frame-bin Hz; two-photon
 values are the aligned activity used by that workflow.
 
 The Individual Neuron tab deliberately keeps these measurements separate. Its
-RF map, azimuth, elevation, orientation, size, and frequency panels are direct
-slices of the correlation tensor. Its orientation title reports OSI/gOSI from
-the separate firing-rate calculation. This avoids falsely presenting a
-correlation coefficient as a firing rate.
+RF map, orientation, size, and frequency panels use the selected correlation
+tensor features. Azimuth and elevation use the established signed SVD
+projection of the selected RF map, which summarizes the spatial pattern without
+allowing one noisy feature cell to define a profile. Its orientation title
+reports OSI/gOSI from the separate firing-rate calculation. This avoids falsely
+presenting a correlation coefficient as a firing rate.
 
 ## Which module to read
 

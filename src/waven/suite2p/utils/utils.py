@@ -846,8 +846,9 @@ def get_exp_data(job, full_spks,exp_idx, v_filt_sec = 0.25, v_abs=True):
     configured_dirs = [path for path in os.environ.get('WAVEN_SUBJECT_DIRS', '').split(os.pathsep) if path]
     if not configured_dirs:
         raise ValueError(
-            "No Suite2p subject directory is configured. Set WAVEN_SUBJECT_DIRS "
-            "to one or more dataset roots before loading timeline information."
+            "No Suite2p subject directory is configured. In the GUI, enter one or more "
+            "roots in Session Configuration > Advanced 2-photon data discovery, or set "
+            "WAVEN_SUBJECT_DIRS before loading timeline information."
         )
     tl_ts, frame_ts, vs, sync_led_raw = load_timeline_info(*exp_info, dirs=configured_dirs, v_filt_sec=v_filt_sec, frame_counts=job.load_frame_counts())
     if v_abs: vs = n.abs(vs)

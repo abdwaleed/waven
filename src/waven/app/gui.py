@@ -170,7 +170,7 @@ def _ensure_rf_imports(label="coarse RF analysis"):
         label: Human-readable caller description retained for future diagnostics.
     """
     global _RF_IMPORTS_READY
-    global compute_skewness_neurons, PearsonCorrelationPinkNoise
+    global compute_skewness_neurons, PearsonCorrelationPinkNoise, PlotTuningCurve
     global repetability_trial3, firing_rate_orientation_tuning
     if _RF_IMPORTS_READY:
         return
@@ -183,9 +183,11 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     from ..analysis.orientation_selectivity import (
         firing_rate_orientation_tuning as _firing_rate_orientation_tuning,
     )
+    from ..analysis.nonlinear_models import PlotTuningCurve as _PlotTuningCurve
 
     compute_skewness_neurons = _compute_skewness_neurons
     PearsonCorrelationPinkNoise = _PearsonCorrelationPinkNoise
+    PlotTuningCurve = _PlotTuningCurve
     repetability_trial3 = _repetability_trial3
     firing_rate_orientation_tuning = _firing_rate_orientation_tuning
     _RF_IMPORTS_READY = True
@@ -3828,7 +3830,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 return ci, int(np.nanmin(counts[valid_columns]))
 
             def draw_individual_neuron(neuron_id, switch_tab=True):
-                """Refresh the selected-neuron spike and direct RF-slice panels.
+                """Refresh the selected-neuron spike and receptive-field panels.
 
                 Args:
                     neuron_id: Zero-based index into the aligned neural cache
@@ -3836,10 +3838,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     switch_tab: When true, reveal the Individual Neuron tab
                         after rendering. Export uses false to avoid tab changes.
 
-                The spike chart is trial-averaged neural activity. All RF
-                curves are direct Pearson-correlation tensor slices at the
-                validated preferred feature; OSI/gOSI in the title remain the
-                separate firing-rate metrics.
+                The spike chart is trial-averaged neural activity. The RF map,
+                orientation, and size plots are Pearson correlations. Spatial
+                azimuth/elevation profiles use the established signed SVD
+                projection of that map; this is the historical display
+                convention and prevents a single outlier pixel from defining
+                the apparent spatial tuning. OSI/gOSI remain separate
+                firing-rate metrics.
                 """
                 try:
                     entry_neuron.delete(0, tk.END)
@@ -3870,23 +3875,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     refresh_figure_caption(fig2)
                     canvas2.draw()
 
-                    # Use direct slices of the RF correlation tensor.  The
-                    # legacy PlotTuningCurve helper derives spatial curves with
-                    # an SVD, which can display a component unrelated to the
-                    # selected neuron's actual azimuth/elevation response.
-                    from ..analysis.tuning import extract_rf_tuning_curves
-
-                    rf_curves = extract_rf_tuning_curves(
-                        rfs_gabor[0], rfs_gabor[1], neuron_id,
+                    # Keep the established plotting decomposition.  It uses
+                    # the same validated preferred feature and RF tensor as
+                    # the legacy exports, including the signed SVD spatial
+                    # projections that users use to interpret retinotopy.
+                    rf2d, elevation_tuning, azimuth_tuning, ori_tun, s_tuning, f_tuning = PlotTuningCurve(
+                        rfs_gabor,
+                        neuron_id,
+                        analysis_coverage,
+                        sigmas_deg,
+                        screen_ratio,
+                        frequencies,
+                        show=False,
                     )
-                    best_x, best_y, best_orientation, best_sigma, best_frequency = rf_curves["indices"]
-                    rf2d = rf_curves["rf_xy"].T
-                    elevation_tuning = rf_curves["elevation"]
-                    azimuth_tuning = rf_curves["azimuth"]
-                    orientation_tuning = rf_curves["orientation"]
-                    ori_tun = np.append(orientation_tuning, orientation_tuning[0])
-                    s_tuning = rf_curves["size"]
-                    f_tuning = rf_curves["frequency"]
+                    best_x, best_y, best_orientation, best_sigma, best_frequency = np.asarray(
+                        rfs_gabor[1], dtype=int
+                    )[:5, neuron_id]
                     if w_c_downsampled.ndim == 6:
                         orientation_features = w_c_downsampled[:n_frames, best_x, best_y, :, best_sigma, best_frequency]
                         size_features = w_c_downsampled[:n_frames, best_x, best_y, best_orientation, :, best_frequency]
@@ -3917,9 +3921,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     ax3[0].set_title('Receptive Field')
                     ax3[0].set_xlabel("Azimuth (deg)")
                     ax3[0].set_ylabel("Elevation (deg)")
-                    ax3[1].plot(elevation_tuning, c='#2563EB')
+                    ax3[1].plot(elevation_tuning[::-1], c='#2563EB')
                     ax3[1].set_title('Elevation (deg)')
-                    ax3[1].set_xticks([0, max(0, len(elevation_tuning) - 1)], [yM, ym])
+                    ax3[1].set_xticks([0, max(0, len(elevation_tuning) - 1)], [ym, yM])
                     ax3[1].set_xlabel("Elevation (deg)")
                     ax3[1].set_ylabel("RF correlation (r)")
                     ax3[2].plot(azimuth_tuning, c='#2563EB')
@@ -3968,7 +3972,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "neuron_id": neuron_id,
                             "rf2d": rf2d,
                             "azimuth_correlation_tuning": azimuth_tuning,
-                            "elevation_correlation_tuning": elevation_tuning,
+                            "elevation_correlation_tuning": elevation_tuning[::-1],
                             "orientation_correlation_tuning": ori_tun,
                             "orientation_correlation_ci_95": ori_ci,
                             "orientation_firing_rate_tuning": rate_ori_tun,
@@ -4548,9 +4552,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "wavelet_backend": _selected_wavelet_backend(),
                 "downsample_percent": _selected_downsample_percent(),
                 "gabor_format": gabor_format_var.get(),
+                "wavelet_format": wavelet_format_var.get(),
                 "downsample_format": _selected_downsample_format(),
                 "neural_source": _selected_neural_source(),
                 "neural_cache_format": _selected_neural_cache_format(),
+                "performance": _runtime_control_values(),
+                "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
             },
             "gabor_param": {key: entry.get() for key, entry in gabor_entries.items()},
             "common": common_values,
@@ -4625,6 +4632,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     param_entries[key].insert(0, str(value))
             save_options = gui_state
             gabor_format_var.set(save_options.get("gabor_format", gabor_format_var.get()))
+            loaded_wavelet_format = save_options.get("wavelet_format")
+            if loaded_wavelet_format in {"npy", "zarr"}:
+                wavelet_format_var.set(loaded_wavelet_format)
             downsample_format = save_options.get("downsample_format")
             if downsample_format in {"npy", "zarr"}:
                 downsample_format_var.set(downsample_format)
@@ -4634,6 +4644,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             neural_cache_format = save_options.get("neural_cache_format")
             if neural_cache_format in {"npy", "zarr"}:
                 neural_cache_format_var.set(neural_cache_format)
+            _set_runtime_controls(save_options.get("performance") or {})
+            suite2p_subject_dirs_var.set(
+                str(save_options.get("suite2p_subject_dirs", "")).strip()
+            )
+            _apply_suite2p_subject_dirs()
             _apply_project_layout_defaults(force=True)
             try:
                 _refresh_neural_source_controls()
@@ -5326,6 +5341,116 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     initial_neural_format = gui_options.get("neural_cache_format", "npy")
     neural_cache_format_var = tk.StringVar(value=initial_neural_format if initial_neural_format in {"npy", "zarr"} else "npy")
+    suite2p_subject_dirs_var = tk.StringVar(
+        value=str(
+            gui_options.get("suite2p_subject_dirs", os.environ.get("WAVEN_SUBJECT_DIRS", ""))
+        ).strip()
+    )
+
+    # These controls expose every performance/safety feature flag used by the
+    # convolution wavelet and Coarse RF implementations.  They are intentionally
+    # separate from scientific parameters: changing one affects scheduling and
+    # hardware use, never stimulus dimensions or model definitions.
+    runtime_control_specs = (
+        (
+            "autotune", "WAVEN_AUTOTUNE", True, "Adaptive batch tuning",
+            "Measures early convolution chunks and adjusts batch size within a safe RAM/VRAM ceiling.",
+        ),
+        (
+            "prefetch", "WAVEN_PREFETCH", True, "Prefetch input chunks",
+            "Overlaps one bounded movie/Zarr read with the current compute chunk.",
+        ),
+        (
+            "async_writer", "WAVEN_ASYNC_WRITER", True, "Asynchronous cache writing",
+            "Uses one bounded writer so completed wavelet chunks can be saved while the next chunk computes.",
+        ),
+        (
+            "rf_gpu", "WAVEN_RF_GPU", True, "GPU Coarse RF statistics",
+            "Uses GPU feature-response cross-products when the current tile fits; automatically falls back to CPU.",
+        ),
+        (
+            "multi_gpu", "WAVEN_MULTI_GPU", False, "Use all available GPUs",
+            "Opt-in batch-parallel convolution. Requires the convolution backend and at least two CUDA GPUs.",
+        ),
+    )
+
+    def _coerce_runtime_bool(value, default):
+        """Interpret a persisted GUI/environment boolean without raising at startup."""
+        if value is None:
+            return bool(default)
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    configured_performance = dict(gui_options.get("performance") or {})
+    runtime_control_vars = {}
+    for runtime_key, environment_key, default, _label, _description in runtime_control_specs:
+        initial = configured_performance.get(runtime_key)
+        if initial is None:
+            initial = os.environ.get(environment_key)
+        runtime_control_vars[runtime_key] = tk.BooleanVar(
+            value=_coerce_runtime_bool(initial, default)
+        )
+
+    def _runtime_control_values():
+        """Return serializable acceleration/safety choices shown in Session Configuration."""
+        return {
+            key: bool(variable.get())
+            for key, variable in runtime_control_vars.items()
+        }
+
+    def _runtime_hardware_text():
+        """Describe detected CUDA hardware and the effective multi-GPU condition."""
+        try:
+            import torch
+
+            count = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
+        except Exception:
+            count = 0
+        try:
+            backend = wavelet_backend_var.get()
+        except NameError:
+            backend = "legacy"
+        if count >= 2 and backend == "convolution":
+            return f"Detected {count} CUDA GPUs. Multi-GPU is available when enabled."
+        if count >= 2:
+            return f"Detected {count} CUDA GPUs. Multi-GPU applies after selecting the convolution backend."
+        if count == 1:
+            return "Detected 1 CUDA GPU. Multi-GPU is saved but has no effect on this computer."
+        return "No CUDA GPU detected. GPU options are saved but use safe CPU fallbacks on this computer."
+
+    def _apply_runtime_controls():
+        """Apply GUI performance choices to this process before the next action starts."""
+        for runtime_key, environment_key, _default, _label, _description in runtime_control_specs:
+            os.environ[environment_key] = "1" if runtime_control_vars[runtime_key].get() else "0"
+        try:
+            runtime_hardware_label.configure(text=_runtime_hardware_text())
+        except NameError:
+            pass
+
+    def _set_runtime_controls(saved_values):
+        """Restore persisted performance choices and immediately apply them to the process."""
+        for runtime_key, _environment_key, default, _label, _description in runtime_control_specs:
+            if runtime_key in saved_values:
+                runtime_control_vars[runtime_key].set(
+                    _coerce_runtime_bool(saved_values[runtime_key], default)
+                )
+        _apply_runtime_controls()
+
+    def _apply_suite2p_subject_dirs():
+        """Apply optional Suite2p dataset roots used for timeline-data discovery.
+
+        The value uses the operating-system path separator (``;`` on Windows,
+        ``:`` on POSIX) so it matches the established ``WAVEN_SUBJECT_DIRS``
+        setting used by the Suite2p adapter.  An empty field deliberately
+        removes the process override rather than retaining a stale path from
+        another computer or saved session.
+        """
+        configured_dirs = suite2p_subject_dirs_var.get().strip()
+        if configured_dirs:
+            os.environ["WAVEN_SUBJECT_DIRS"] = configured_dirs
+        else:
+            os.environ.pop("WAVEN_SUBJECT_DIRS", None)
 
     def refresh_scale_controls():
         """Refresh shared-grid controls for the selected backend."""
@@ -5368,6 +5493,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         wavelet_backend_var.set(value)
         _invalidate_completed_actions("gabor", "wavelet", "rf")
         refresh_scale_controls()
+        try:
+            _apply_runtime_controls()
+        except NameError:
+            pass
 
     ctk.CTkLabel(
         frame_session,
@@ -5403,6 +5532,88 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     wavelet_backend_segment.pack(fill=tk.X)
     wavelet_backend_segment.set(wavelet_backend_var.get())
+
+    runtime_frame = ctk.CTkFrame(frame_session, fg_color="#F8FAFC", corner_radius=8)
+    runtime_frame.pack(fill=tk.X, pady=(4, 8))
+    ctk.CTkLabel(
+        runtime_frame,
+        text="Performance & Hardware",
+        text_color=text_color,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).pack(anchor="w", padx=10, pady=(8, 1))
+    ctk.CTkLabel(
+        runtime_frame,
+        text="These controls affect scheduling and resource use only; they do not change analysis parameters or cache shapes.",
+        text_color=muted_text,
+        wraplength=310,
+        justify="left",
+    ).pack(anchor="w", padx=10, pady=(0, 4))
+    for runtime_key, _environment_key, _default, label, description in runtime_control_specs:
+        row = ctk.CTkFrame(runtime_frame, fg_color="transparent")
+        row.pack(fill=tk.X, padx=8, pady=1)
+        switch = ctk.CTkSwitch(
+            row,
+            text=label,
+            variable=runtime_control_vars[runtime_key],
+            command=_apply_runtime_controls,
+            text_color=text_color,
+            onvalue=True,
+            offvalue=False,
+        )
+        switch.pack(anchor="w")
+        ctk.CTkLabel(
+            row,
+            text=description,
+            text_color=muted_text,
+            font=ctk.CTkFont(size=10),
+            wraplength=285,
+            justify="left",
+        ).pack(anchor="w", padx=(34, 0), pady=(0, 2))
+    runtime_hardware_label = ctk.CTkLabel(
+        runtime_frame,
+        text="",
+        text_color="#475569",
+        font=ctk.CTkFont(size=10),
+        wraplength=310,
+        justify="left",
+    )
+    runtime_hardware_label.pack(anchor="w", padx=10, pady=(4, 8))
+    _apply_runtime_controls()
+
+    suite2p_dirs_frame = ctk.CTkFrame(frame_session, fg_color="#F8FAFC", corner_radius=8)
+    suite2p_dirs_frame.pack(fill=tk.X, pady=(0, 8))
+    ctk.CTkLabel(
+        suite2p_dirs_frame,
+        text="Advanced 2-photon data discovery (optional)",
+        text_color=text_color,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).pack(anchor="w", padx=10, pady=(8, 1))
+    ctk.CTkLabel(
+        suite2p_dirs_frame,
+        text=(
+            "Suite2p subject/data roots for timeline alignment. Separate multiple folders with "
+            f"'{os.pathsep}'. Leave empty unless your dataset needs external timeline discovery."
+        ),
+        text_color=muted_text,
+        wraplength=310,
+        justify="left",
+    ).pack(anchor="w", padx=10, pady=(0, 4))
+    suite2p_dirs_entry = ctk.CTkEntry(
+        suite2p_dirs_frame,
+        textvariable=suite2p_subject_dirs_var,
+        placeholder_text="Optional Suite2p data root(s)",
+    )
+    suite2p_dirs_entry.pack(fill=tk.X, padx=10, pady=(0, 5))
+    suite2p_dirs_entry.bind("<FocusOut>", lambda _event: _apply_suite2p_subject_dirs())
+    ctk.CTkButton(
+        suite2p_dirs_frame,
+        text="Apply Suite2p Folders",
+        command=_apply_suite2p_subject_dirs,
+        fg_color="#64748B",
+        hover_color="#475569",
+        height=26,
+    ).pack(anchor="e", padx=10, pady=(0, 8))
+    _apply_suite2p_subject_dirs()
 
     btn_load_state = ctk.CTkButton(
         frame_session,
