@@ -93,6 +93,7 @@ nav:
       - Storage: reference/storage.md
       - Runtime: reference/runtime.md
       - Time Alignment: reference/time-alignment.md
+      - Spike-Triggered Averaging: reference/spike-triggered-averaging.md
       - Neural Data: reference/neural-data.md
       - Plotting: reference/plotting.md
       - Compatibility Modules: reference/compatibility.md

@@ -2,6 +2,8 @@
 
 This map emphasizes scientific inputs, transformations, outputs, and assumptions.
 
+![Code Mindmap](images/2p_mindmap.svg)
+
 ```mermaid
 flowchart TD
     M["Stimulus movie<br/>frames x screen_y x screen_x"]

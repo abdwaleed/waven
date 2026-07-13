@@ -3,6 +3,8 @@
 This map follows extracellular events to firing-rate receptive fields. Actual
 unit keys from the pickle are preserved and used as OSI/gOSI unit labels.
 
+![Code Mindmap](images/ephys_mindmap.svg)
+
 ```mermaid
 flowchart TD
     M["Stimulus movie and configuration"]

@@ -11,7 +11,12 @@ from typing import Any, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .storage.neural_cache import load_neural_cache_pair, save_aligned_neural_cache
+from .storage.neural_cache import (
+    load_neural_cache_pair,
+    load_spike_counts_cache,
+    save_aligned_neural_cache,
+    save_spike_counts_cache,
+)
 
 WORKFLOW_2P = "2p"
 WORKFLOW_EPHYS = "ephys"
@@ -25,6 +30,7 @@ class AlignedNeuralData:
     neuron_pos: np.ndarray
     aligned_spikes: Optional[np.ndarray] = None
     unit_ids: Optional[np.ndarray] = None
+    spike_counts: Optional[np.ndarray] = None
 
 
 def _save_aligned_outputs(
@@ -153,6 +159,10 @@ def align_ephys_data(
 
         neuron_pos = np.zeros((n_neurons, 3))
         spikes = np.zeros((n_trials, nb_frames, n_neurons))
+        # Keep the unnormalised bins alongside firing rates.  STA needs these
+        # integer counts, whereas all existing RF/OSI consumers use ``spikes``
+        # in Hz and must retain that behavior.
+        spike_counts = np.zeros((n_trials, nb_frames, n_neurons), dtype=np.int32)
 
         unit_ids = np.asarray(list(units.keys()), dtype=object)
         for neuron_idx, neuron_data in enumerate(units.values()):
@@ -185,6 +195,7 @@ def align_ephys_data(
 
                 # 1. Get raw counts per bin
                 binned_counts, _ = np.histogram(trial_spikes, bins=frame_edges)
+                spike_counts[trial_idx, :, neuron_idx] = binned_counts
                 
                 # 2. Calculate the exact duration of each bin in seconds
                 # np.diff gets the distance between edges in samples; divide by sampling_rate for seconds
@@ -200,7 +211,7 @@ def align_ephys_data(
                 spikes[trial_idx, :, neuron_idx] = firing_rate_hz
 
         # Return frame-aligned firing rates in Hz. Do not subtract timestamps here.
-        return neuron_pos, spikes, unit_ids
+        return neuron_pos, spikes, spike_counts, unit_ids
     
     def handle_dropped_frames(frame_edges: list, nb_frames: int) -> None:
         """
@@ -342,17 +353,23 @@ def align_ephys_data(
     start_times, end_times = get_possible_trial_edges(freq, pd_time) 
     start_times, end_times = validate_edges(start_times, end_times, stimulus_duration, SAMPLING_RATE, 0.01)
 
-    neuron_pos, spikes, unit_ids = extract_pos_and_spikes(units, start_times, end_times, pd_time, pd_state, nb_frames)
+    neuron_pos, spikes, spike_counts, unit_ids = extract_pos_and_spikes(
+        units, start_times, end_times, pd_time, pd_state, nb_frames
+    )
     
     print(neuron_pos.shape)
     print(spikes.shape)
-    _save_aligned_outputs(neuron_pos, spikes, save_dir or data_dir, output_format, unit_ids=unit_ids)
+    cache_dir = save_dir or data_dir
+    _save_aligned_outputs(neuron_pos, spikes, cache_dir, output_format, unit_ids=unit_ids)
+    counts_path = save_spike_counts_cache(spike_counts, cache_dir, output_format)
+    print(f"Saved STA spike-count cache: {counts_path} {spike_counts.shape}")
 
     return AlignedNeuralData(
         spikes=spikes,
         neuron_pos=neuron_pos,
         aligned_spikes=None,
         unit_ids=unit_ids,
+        spike_counts=spike_counts,
     )
 
 # TEST EPHYS CODE
@@ -395,11 +412,19 @@ def load_aligned_spikes(
 
     if spks_path is not None:
         spikes, neuron_pos, _, _ = load_neural_cache_pair(spks_path.parent, spks_path)
-        return AlignedNeuralData(spikes=spikes, neuron_pos=neuron_pos)
+        try:
+            spike_counts, _ = load_spike_counts_cache(spks_path.parent)
+        except FileNotFoundError:
+            spike_counts = None
+        return AlignedNeuralData(spikes=spikes, neuron_pos=neuron_pos, spike_counts=spike_counts)
 
     try:
         spikes, neuron_pos, _, _ = load_neural_cache_pair(cache_dir)
-        return AlignedNeuralData(spikes=spikes, neuron_pos=neuron_pos)
+        try:
+            spike_counts, _ = load_spike_counts_cache(cache_dir)
+        except FileNotFoundError:
+            spike_counts = None
+        return AlignedNeuralData(spikes=spikes, neuron_pos=neuron_pos, spike_counts=spike_counts)
     except FileNotFoundError:
         pass
 

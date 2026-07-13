@@ -2,6 +2,8 @@
 
 This page maps the current GUI workflow to the durable artifacts it creates.
 
+![Code Mindmap](images/code_mindmap.svg)
+
 ```mermaid
 flowchart TD
     M["Stimulus movie metadata\nwidth, height, frames, FPS, duration"]

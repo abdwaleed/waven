@@ -72,13 +72,20 @@ from ..project_layout import (
     resolve_folder_reference,
     write_reference,
 )
-from ..storage.neural_cache import find_neural_cache_pair, load_neural_cache_pair, load_unit_ids
+from ..storage.neural_cache import (
+    find_neural_cache_pair,
+    find_spike_counts_cache,
+    load_neural_cache_pair,
+    load_spike_counts_cache,
+    load_unit_ids,
+)
 from ..stimulus.metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
 _ANALYSIS_IMPORTS_READY = False
 _GABOR_IMPORTS_READY = False
 _WAVELET_IMPORTS_READY = False
 _RF_IMPORTS_READY = False
 _MODEL_IMPORTS_READY = False
+_STA_IMPORTS_READY = False
 _PLOT_IMPORTS_READY = False
 plt = None
 FigureCanvasTkAgg = None
@@ -161,6 +168,20 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     video_downsample_chunk_size = _video_downsample_chunk_size
     convert_npy_to_zarr = _convert_npy_to_zarr
     _WAVELET_IMPORTS_READY = True
+
+
+def _ensure_sta_imports(label="spike-triggered averaging"):
+    """Load the ephys-only STA engine only when the option is enabled."""
+    global _STA_IMPORTS_READY, compute_sta, phase_gabor_image, load_array
+    if _STA_IMPORTS_READY:
+        return
+    from ..analysis.sta import compute_sta as _compute_sta, phase_gabor_image as _phase_gabor_image
+    from ..storage.array_store import load_array as _load_array
+
+    compute_sta = _compute_sta
+    phase_gabor_image = _phase_gabor_image
+    load_array = _load_array
+    _STA_IMPORTS_READY = True
 
 
 def _ensure_rf_imports(label="coarse RF analysis"):
@@ -984,7 +1005,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     temp_directories = []
     current_wavelet_dir = [None]
     analysis_state = {}
+    sta_state = {"result": None}
     individual_neuron_renderer = {"draw": None}
+    sta_neuron_renderer = {"draw": None}
     embedded_canvases = []
     figure_export_records = []
     active_recovery_dir = {"path": None}
@@ -1421,6 +1444,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 return "All neurons"
             if parent_container is frame_plot_individual:
                 return "Individual neuron"
+            if parent_container is frame_plot_sta:
+                return "STA Receptive Fields"
         except NameError:
             pass
         return "Plots"
@@ -2085,7 +2110,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 except Exception as exc:
                     print(f"Could not restore cached figure: {exc}")
                     continue
-                parent = frame_plot_all if record.get("tab") == "all" else frame_plot_individual
+                if record.get("tab") == "all":
+                    parent = frame_plot_all
+                elif record.get("tab") == "sta":
+                    parent = frame_plot_sta
+                else:
+                    parent = frame_plot_individual
                 embed_interactive_figure(fig, parent, record.get("title"))
             print(message)
         root.after(0, render)
@@ -3261,7 +3291,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         update_progress(100, "Full wavelet decomposition", "Full-model wavelets ready")
         return True
     
-    def embed_interactive_figure(fig, parent_container, title=None):
+    def embed_interactive_figure(fig, parent_container, title=None, tab_name=None):
         """Embed a matplotlib figure with navigation toolbar in ``parent_container``."""
         _ensure_plot_imports()
         section = ctk.CTkFrame(parent_container, corner_radius=8, fg_color="#FFFFFF")
@@ -3299,7 +3329,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "canvas": canvas,
             "figure": fig,
             "title": graph_title,
-            "tab": _tab_name_for_parent(parent_container),
+            "tab": tab_name or _tab_name_for_parent(parent_container),
             "section": section,
             "caption_widget": caption_label,
         }
@@ -3368,6 +3398,138 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
             except Exception:
                 pass
+
+    def render_sta_receptive_fields(result, neuron_id=None, switch_tab=True):
+        """Render one selected neuron's STA and phase-Gabor fit at every lag.
+
+        Each temporal lag gets a nested tab inside the ephys-only STA parent
+        tab.  Keeping one neuron per lag view makes signed ON/OFF subfields and
+        their fitted phase directly comparable without trying to tile thousands
+        of receptive fields into an unreadable overview.
+        """
+        sta_state["result"] = result
+
+        def draw(selected_neuron=None, reveal=True):
+            _ensure_plot_imports()
+            current = sta_state.get("result")
+            if current is None:
+                return
+            n_neurons = int(current.images.shape[1])
+            if n_neurons <= 0:
+                return
+            if selected_neuron is None:
+                try:
+                    selected_neuron = int(param_entries["Neuron ID"].get())
+                except Exception:
+                    selected_neuron = 0
+            selected_neuron = min(max(int(selected_neuron), 0), n_neurons - 1)
+            try:
+                param_entries["Neuron ID"].delete(0, tk.END)
+                param_entries["Neuron ID"].insert(0, str(selected_neuron))
+            except Exception:
+                pass
+
+            clear_plot_tab(frame_plot_sta)
+            lag_tabs = ctk.CTkTabview(
+                frame_plot_sta,
+                corner_radius=8,
+                fg_color="#EEF2FF",
+                segmented_button_selected_color=primary_btn,
+                segmented_button_selected_hover_color="#1D4ED8",
+            )
+            lag_tabs.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            responsive = int(np.sum(current.significant[:, selected_neuron]))
+            try:
+                sta_update_label.configure(
+                    text=(
+                        f"Neuron {selected_neuron}: {responsive}/{len(current.lag_frames)} lags "
+                        "passed the circular-shuffle test"
+                    )
+                )
+            except Exception:
+                pass
+
+            for lag_index, lag_value in enumerate(current.lag_ms):
+                tab = lag_tabs.add(f"Lag {float(lag_value):.1f} ms")
+                tab_frame = ctk.CTkScrollableFrame(tab, fg_color="#F9FAFB", corner_radius=8)
+                tab_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+                tune_scrollable_frame(tab_frame, increment=36)
+                image = np.asarray(current.images[lag_index, selected_neuron], dtype=np.float32)
+                peak = float(current.peak_values[lag_index, selected_neuron])
+                noise = float(current.noise_std[lag_index, selected_neuron])
+                is_significant = bool(current.significant[lag_index, selected_neuron])
+                threshold = float(current.metadata.get("significance_sd", 3.0)) * noise
+                vmax = float(np.nanmax(np.abs(image))) if np.any(np.isfinite(image)) else 0.0
+                vmax = max(vmax, 1e-8)
+                fig, axes = plt.subplots(1, 2, figsize=(9, 4.5), constrained_layout=True)
+                rendered = axes[0].imshow(image, cmap="coolwarm", vmin=-vmax, vmax=vmax, aspect="equal")
+                fig.colorbar(rendered, ax=axes[0], fraction=0.046)
+                axes[0].set_title(f"STA, lag {float(lag_value):.1f} ms")
+                axes[0].set_xlabel("Stimulus x (px)")
+                axes[0].set_ylabel("Stimulus y (px)")
+
+                params = np.asarray(current.gabor_params[lag_index, selected_neuron], dtype=float)
+                if is_significant and np.all(np.isfinite(params[:9])):
+                    fitted = phase_gabor_image(params, image.shape[0], image.shape[1])
+                    fitted_max = max(float(np.nanmax(np.abs(fitted))), vmax, 1e-8)
+                    fit_plot = axes[1].imshow(
+                        fitted, cmap="coolwarm", vmin=-fitted_max, vmax=fitted_max, aspect="equal"
+                    )
+                    fig.colorbar(fit_plot, ax=axes[1], fraction=0.046)
+                    axes[1].set_title(
+                        "Phase-sensitive Gabor fit\n"
+                        f"RMSE {float(current.gabor_rmse[lag_index, selected_neuron]):.4g}"
+                    )
+                elif is_significant:
+                    axes[1].text(
+                        0.5, 0.5, "Passed shuffle test\nGabor fit did not converge",
+                        ha="center", va="center", transform=axes[1].transAxes,
+                    )
+                    axes[1].set_title("Phase-sensitive Gabor fit")
+                else:
+                    axes[1].text(
+                        0.5, 0.5, "Unresponsive / no RF found\nGabor fit skipped",
+                        ha="center", va="center", transform=axes[1].transAxes,
+                    )
+                    axes[1].set_title("Shuffle test")
+                axes[1].set_xlabel("Stimulus x (px)")
+                axes[1].set_ylabel("Stimulus y (px)")
+                fig._waven_caption = (
+                    f"Spike-count STA for neuron {selected_neuron}; peak={peak:.5g}, "
+                    f"shuffle SD={noise:.5g}, threshold={threshold:.5g}, "
+                    f"total spikes={float(current.total_spikes[lag_index, selected_neuron]):.0f}."
+                )
+                _set_figure_export_payload(
+                    fig,
+                    {
+                        "source": "Spike-Triggered Averaging",
+                        "neuron_id": selected_neuron,
+                        "lag_frames": int(current.lag_frames[lag_index]),
+                        "lag_ms": float(lag_value),
+                        "sta_image": image,
+                        "shuffle_noise_sd": noise,
+                        "peak_value": peak,
+                        "significant": is_significant,
+                        "gabor_parameter_names": current.metadata.get("gabor_parameter_names"),
+                        "phase_gabor_params": params,
+                        "phase_gabor_rmse": float(current.gabor_rmse[lag_index, selected_neuron]),
+                    },
+                )
+                embed_interactive_figure(
+                    fig,
+                    tab_frame,
+                    title=f"Neuron {selected_neuron} — STA lag {float(lag_value):.1f} ms",
+                    tab_name="STA Receptive Fields",
+                )
+
+            if reveal:
+                try:
+                    plot_tabs.set("STA Receptive Fields")
+                except Exception:
+                    pass
+
+        sta_neuron_renderer["draw"] = draw
+        root.after(0, lambda: draw(neuron_id, switch_tab))
 
     def embed_captured_figures(figures, parent, title_prefix):
         """Function for embed captured figures.
@@ -3448,14 +3610,92 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "sampling_rate": sampling_rate,
         }
 
+    def _sta_requested():
+        """Return whether the optional ephys/convolution STA path is enabled."""
+        try:
+            return bool(sta_enable_var.get())
+        except NameError:
+            return False
+
+    def _validate_sta_availability():
+        """Guard STA even when an older GUI state re-enables its checkbox."""
+        if workflow != WORKFLOW_EPHYS:
+            raise ValueError("Spike-triggered averaging is available for ephys data only, not two-photon data.")
+        if _selected_wavelet_backend() != "convolution":
+            raise ValueError("Spike-triggered averaging is available only with the convolution backend.")
+
+    def _run_sta_from_counts(context, spike_counts):
+        """Compute/cache ephys STA from raw frame counts and the shared movie cache."""
+        _validate_sta_availability()
+        _ensure_sta_imports("ephys spike-triggered averaging")
+        _raise_if_cancelled()
+        if spike_counts is None:
+            spike_counts, counts_path = load_spike_counts_cache(context["neural_cache_dir"], mmap_mode=None)
+            print(f"Loaded STA spike counts from: {counts_path}")
+        movie_path = _find_movie_path()
+        movie_metadata = _movie_metadata(movie_path)
+        target_nx, target_ny = _stimulus_grid_dimensions("coarse", movie_path)
+        expected_shape = (movie_metadata["frames"], target_ny, target_nx)
+        downsample_path, _ = _find_compatible_downsample_cache(
+            movie_path, "coarse", expected_shape, _selected_downsample_format()
+        )
+        if downsample_path is None:
+            raise FileNotFoundError(
+                "STA needs the prepared coarse stimulus cache. Prepare Stimulus Cache first."
+            )
+        try:
+            max_lag_ms = float(sta_max_lag_ms_var.get())
+            n_shuffles = int(sta_shuffle_count_var.get())
+            significance_sd = float(sta_significance_sd_var.get())
+            random_seed = int(sta_random_seed_var.get())
+        except Exception as exc:
+            raise ValueError(f"Invalid STA option: {exc}") from exc
+        if not 3.0 <= significance_sd <= 5.0:
+            raise ValueError("STA shuffle threshold must be between 3 and 5 standard deviations.")
+        if max_lag_ms <= 0:
+            raise ValueError("STA maximum lag must be positive.")
+        if n_shuffles < 1:
+            raise ValueError("STA shuffle count must be at least one.")
+
+        update_progress(35, "Neural cache / STA", "Loading disk-backed stimulus movie and spike counts")
+        movie = load_array(downsample_path, mmap_mode="r")
+        sta_dir = context["neural_cache_dir"] / "sta"
+        print(
+            "Computing ephys STA from raw spike counts "
+            f"(lag <= {max_lag_ms:g} ms, {n_shuffles} circular shuffles, "
+            f"{significance_sd:g} SD threshold)."
+        )
+        result = compute_sta(
+            movie,
+            spike_counts,
+            movie_metadata["fps"],
+            max_lag_ms=max_lag_ms,
+            n_shuffles=n_shuffles,
+            significance_sd=significance_sd,
+            random_seed=random_seed,
+            output_dir=sta_dir,
+            cancel_event=_current_cancel_event(),
+        )
+        _raise_if_cancelled()
+        print(
+            f"STA complete: {int(np.sum(result.significant))} responsive lag/neuron images; "
+            f"cache: {sta_dir}"
+        )
+        update_progress(92, "Neural cache / STA", "Rendering lag-specific receptive fields")
+        render_sta_receptive_fields(result, switch_tab=True)
+        return result
+
     def create_neural_cache():
-        """Create or validate the aligned ``pos`` and ``spikes`` cache pair."""
+        """Create/validate neural caches, optionally followed by ephys STA."""
         if "downsample:coarse" not in completed_actions:
             raise RuntimeError(
                 "Prepare Stimulus & Metadata first. Neural alignment uses the selected movie's "
                 "metadata-derived frame count and duration."
             )
         context = _neural_alignment_context()
+        run_sta = _sta_requested()
+        if run_sta:
+            _validate_sta_availability()
         spks_text = param_entries["Spks Path"].get().strip()
         if _selected_neural_source() == "spks_path":
             if spks_text.lower() in ("", "none", "null"):
@@ -3469,42 +3709,75 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             print(f"Validated aligned spikes cache: {loaded_spks_path} {tuple(spks.shape)}")
             print(f"Validated neuron position cache: {loaded_pos_path} {tuple(np.asarray(neuron_pos).shape)}")
             _set_entry_value(param_entries["Spks Path"], spks_folder)
-            update_progress(100, "Neural cache", "Existing cache ready")
+            if run_sta:
+                try:
+                    spike_counts, counts_path = load_spike_counts_cache(spks_folder, mmap_mode=None)
+                except FileNotFoundError as exc:
+                    raise FileNotFoundError(
+                        f"{exc} Existing-cache mode cannot recreate raw ephys counts; switch to Fresh / raw data."
+                    ) from exc
+                print(f"Validated STA spike-count cache: {counts_path} {tuple(spike_counts.shape)}")
+                _run_sta_from_counts(context, spike_counts)
+            update_progress(100, "Neural cache / STA" if run_sta else "Neural cache", "Existing cache ready")
             return True
 
         if spks_text.lower() not in ("", "none", "null"):
             print("Neural source is Data Dir; Spks Path will be ignored unless you select Spks Path mode.")
 
         cache_pair = find_neural_cache_pair(context["neural_cache_dir"])
+        force_ephys_count_rebuild = False
         if cache_pair is not None:
-            update_progress(20, "Neural cache", "Loading existing aligned cache")
-            spks, neuron_pos, loaded_spks_path, loaded_pos_path = load_neural_cache_pair(context["neural_cache_dir"])
-            print(f"Resume: found aligned spikes cache: {loaded_spks_path} {tuple(spks.shape)}")
-            print(f"Resume: found neuron position cache: {loaded_pos_path} {tuple(np.asarray(neuron_pos).shape)}")
-            _set_entry_value(param_entries["Spks Path"], context["neural_cache_dir"])
-            update_progress(100, "Neural cache", "Existing cache ready")
-            return True
+            if run_sta:
+                counts_path = find_spike_counts_cache(context["neural_cache_dir"])
+                if counts_path is not None:
+                    update_progress(20, "Neural cache / STA", "Loading existing aligned count cache")
+                    spike_counts, loaded_counts_path = load_spike_counts_cache(context["neural_cache_dir"], mmap_mode=None)
+                    print(f"Resume: found STA spike-count cache: {loaded_counts_path} {tuple(spike_counts.shape)}")
+                    _set_entry_value(param_entries["Spks Path"], context["neural_cache_dir"])
+                    _run_sta_from_counts(context, spike_counts)
+                    update_progress(100, "Neural cache / STA", "Existing cache and STA ready")
+                    return True
+                force_ephys_count_rebuild = True
+                print("Existing firing-rate cache has no raw count cache; rebuilding ephys alignment for STA.")
+            else:
+                update_progress(20, "Neural cache", "Loading existing aligned cache")
+                spks, neuron_pos, loaded_spks_path, loaded_pos_path = load_neural_cache_pair(context["neural_cache_dir"])
+                print(f"Resume: found aligned spikes cache: {loaded_spks_path} {tuple(spks.shape)}")
+                print(f"Resume: found neuron position cache: {loaded_pos_path} {tuple(np.asarray(neuron_pos).shape)}")
+                _set_entry_value(param_entries["Spks Path"], context["neural_cache_dir"])
+                update_progress(100, "Neural cache", "Existing cache ready")
+                return True
 
         update_progress(10, "Neural cache", "Aligning neural data")
         from .. import time_alignment as ta
 
-        aligned = ta.load_aligned_spikes(
-            workflow,
-            experiment_info=context["experiment_info"],
-            data_dir=Path(context["data_dirs"][0]),
-            data_dir_strings=context["data_dirs"],
-            suite2p_dir=context["suite2p_dir"],
-            block_end=context["block_end"],
-            n_planes=context["n_planes"],
-            nb_frames=context["nb_frames"],
-            resolution=context["resolution"],
-            sampling_rate=context["sampling_rate"],
-            stimulus_duration=_movie_metadata()["duration"],
-            threshold=1.25,
-            method="frame2ttl",
-            save_dir=context["neural_cache_dir"],
-            output_format=_selected_neural_cache_format(),
-        )
+        if force_ephys_count_rebuild:
+            aligned = ta.align_ephys_data(
+                Path(context["data_dirs"][0]),
+                context["nb_frames"],
+                context["sampling_rate"],
+                save_dir=context["neural_cache_dir"],
+                output_format=_selected_neural_cache_format(),
+                stimulus_duration=_movie_metadata()["duration"],
+            )
+        else:
+            aligned = ta.load_aligned_spikes(
+                workflow,
+                experiment_info=context["experiment_info"],
+                data_dir=Path(context["data_dirs"][0]),
+                data_dir_strings=context["data_dirs"],
+                suite2p_dir=context["suite2p_dir"],
+                block_end=context["block_end"],
+                n_planes=context["n_planes"],
+                nb_frames=context["nb_frames"],
+                resolution=context["resolution"],
+                sampling_rate=context["sampling_rate"],
+                stimulus_duration=_movie_metadata()["duration"],
+                threshold=1.25,
+                method="frame2ttl",
+                save_dir=context["neural_cache_dir"],
+                output_format=_selected_neural_cache_format(),
+            )
         cache_pair = find_neural_cache_pair(context["neural_cache_dir"])
         if cache_pair is None:
             raise FileNotFoundError(
@@ -3514,7 +3787,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         print(f"Created aligned spikes cache: {saved_spks_path} {tuple(aligned.spikes.shape)}")
         print(f"Created neuron position cache: {saved_pos_path} {tuple(np.asarray(aligned.neuron_pos).shape)}")
         _set_entry_value(param_entries["Spks Path"], context["neural_cache_dir"])
-        update_progress(100, "Neural cache", "Cache created")
+        if run_sta:
+            if aligned.spike_counts is None:
+                aligned.spike_counts, _ = load_spike_counts_cache(context["neural_cache_dir"], mmap_mode=None)
+            _run_sta_from_counts(context, aligned.spike_counts)
+        update_progress(100, "Neural cache / STA" if run_sta else "Neural cache", "Cache created")
         return True
 
     def plot_data():
@@ -3988,6 +4265,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         },
                     )
                     canvas3.draw()
+                    sta_draw = sta_neuron_renderer.get("draw")
+                    if sta_draw is not None:
+                        sta_draw(neuron_id, reveal=False)
                     if switch_tab:
                         switch_to_individual_tab(flash=True)
                 except Exception as e:
@@ -4556,6 +4836,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "downsample_format": _selected_downsample_format(),
                 "neural_source": _selected_neural_source(),
                 "neural_cache_format": _selected_neural_cache_format(),
+                "sta_enabled": bool(sta_enable_var.get()),
+                "sta_max_lag_ms": sta_max_lag_ms_var.get(),
+                "sta_shuffle_count": sta_shuffle_count_var.get(),
+                "sta_significance_sd": sta_significance_sd_var.get(),
+                "sta_random_seed": sta_random_seed_var.get(),
                 "performance": _runtime_control_values(),
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
             },
@@ -4644,6 +4929,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             neural_cache_format = save_options.get("neural_cache_format")
             if neural_cache_format in {"npy", "zarr"}:
                 neural_cache_format_var.set(neural_cache_format)
+            sta_enable_var.set(bool(save_options.get("sta_enabled", sta_enable_var.get())))
+            for key, variable in (
+                ("sta_max_lag_ms", sta_max_lag_ms_var),
+                ("sta_shuffle_count", sta_shuffle_count_var),
+                ("sta_significance_sd", sta_significance_sd_var),
+                ("sta_random_seed", sta_random_seed_var),
+            ):
+                if key in save_options:
+                    variable.set(str(save_options[key]))
             _set_runtime_controls(save_options.get("performance") or {})
             suite2p_subject_dirs_var.set(
                 str(save_options.get("suite2p_subject_dirs", "")).strip()
@@ -4652,6 +4946,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             _apply_project_layout_defaults(force=True)
             try:
                 _refresh_neural_source_controls()
+                _refresh_sta_controls()
                 _refresh_downsample_controls()
                 _sync_completed_actions_from_artifacts()
                 refresh_action_buttons()
@@ -5263,6 +5558,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     plot_tabs.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
     all_neurons_tab = plot_tabs.add("All neurons")
     individual_neuron_tab = plot_tabs.add("Individual neuron")
+    sta_receptive_fields_tab = plot_tabs.add("STA Receptive Fields")
     frame_plot_all = ctk.CTkScrollableFrame(all_neurons_tab, fg_color="#F9FAFB", corner_radius=8)
     frame_plot_all.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
     tune_scrollable_frame(frame_plot_all, increment=36)
@@ -5278,6 +5574,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_plot_individual = ctk.CTkScrollableFrame(individual_neuron_tab, fg_color="#F9FAFB", corner_radius=8)
     frame_plot_individual.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
     tune_scrollable_frame(frame_plot_individual, increment=36)
+    sta_update_label = ctk.CTkLabel(
+        sta_receptive_fields_tab,
+        text="Enable ephys STA during neural cache creation to display receptive fields.",
+        fg_color="#EEF2FF",
+        text_color="#3730A3",
+        corner_radius=6,
+        height=30,
+    )
+    sta_update_label.pack(fill=tk.X, padx=4, pady=(4, 2))
+    frame_plot_sta = ctk.CTkScrollableFrame(sta_receptive_fields_tab, fg_color="#F9FAFB", corner_radius=8)
+    frame_plot_sta.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+    tune_scrollable_frame(frame_plot_sta, increment=36)
 
     # --- Session configuration ---
     frame_session = ttk.LabelFrame(frame_left, text="Session Configuration", padding=15)
@@ -5299,6 +5607,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             frame_params.configure(text=f"Experiment Configuration ({workflow_label})")
             render_parameter_fields(preserve_values=True)
             refresh_size_estimates()
+            _refresh_sta_controls()
         except NameError:
             pass
 
@@ -5341,6 +5650,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     initial_neural_format = gui_options.get("neural_cache_format", "npy")
     neural_cache_format_var = tk.StringVar(value=initial_neural_format if initial_neural_format in {"npy", "zarr"} else "npy")
+    sta_enable_var = tk.BooleanVar(value=bool(gui_options.get("sta_enabled", False)))
+    sta_max_lag_ms_var = tk.StringVar(value=str(gui_options.get("sta_max_lag_ms", 150)))
+    sta_shuffle_count_var = tk.StringVar(value=str(gui_options.get("sta_shuffle_count", 100)))
+    sta_significance_sd_var = tk.StringVar(value=str(gui_options.get("sta_significance_sd", 3)))
+    sta_random_seed_var = tk.StringVar(value=str(gui_options.get("sta_random_seed", 0)))
     suite2p_subject_dirs_var = tk.StringVar(
         value=str(
             gui_options.get("suite2p_subject_dirs", os.environ.get("WAVEN_SUBJECT_DIRS", ""))
@@ -5495,6 +5809,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         refresh_scale_controls()
         try:
             _apply_runtime_controls()
+            _refresh_sta_controls()
         except NameError:
             pass
 
@@ -5959,6 +6274,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             else:
                 neural_cache_format_frame.grid_remove()
                 btn_create_neural_cache.configure(text="Validate Existing Neural Cache")
+            _refresh_sta_controls()
         except Exception:
             pass
 
@@ -6027,6 +6343,70 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     neural_cache_format_segment.pack(side=tk.LEFT, padx=(10, 0))
     neural_cache_format_segment.set(neural_cache_format_var.get())
 
+    sta_options_frame = ctk.CTkFrame(frame_neural_cache, fg_color="#F8FAFC", corner_radius=8)
+    sta_options_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    sta_options_frame.columnconfigure(1, weight=1)
+    sta_enable_checkbox = ctk.CTkCheckBox(
+        sta_options_frame,
+        text="Compute Spike-Triggered Averaging (STA)",
+        variable=sta_enable_var,
+        onvalue=True,
+        offvalue=False,
+        text_color=text_color,
+        command=lambda: _refresh_sta_controls(),
+    )
+    sta_enable_checkbox.grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 2))
+    sta_status_label = ctk.CTkLabel(
+        sta_options_frame,
+        text="Ephys + convolution only. Uses raw frame spike counts; existing firing-rate analysis is unchanged.",
+        text_color=muted_text,
+        wraplength=420,
+        justify="left",
+    )
+    sta_status_label.grid(row=1, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 6))
+    sta_fields = (
+        ("Max lag (ms)", sta_max_lag_ms_var),
+        ("Shuffle count", sta_shuffle_count_var),
+        ("Threshold (SD)", sta_significance_sd_var),
+        ("Random seed", sta_random_seed_var),
+    )
+    sta_entries = []
+    for index, (label, variable) in enumerate(sta_fields):
+        row = 2 + index
+        ctk.CTkLabel(sta_options_frame, text=label, text_color=muted_text).grid(
+            row=row, column=0, sticky="w", padx=10, pady=2
+        )
+        entry = ctk.CTkEntry(sta_options_frame, textvariable=variable, height=28, corner_radius=6)
+        entry.grid(row=row, column=1, sticky="ew", padx=(10, 10), pady=2)
+        sta_entries.append(entry)
+
+    def _refresh_sta_controls():
+        """Expose STA only for the supported ephys/convolution workflow."""
+        eligible = workflow == WORKFLOW_EPHYS and _selected_wavelet_backend() == "convolution"
+        try:
+            sta_enable_checkbox.configure(state=tk.NORMAL if eligible else tk.DISABLED)
+            for entry in sta_entries:
+                entry.configure(state=tk.NORMAL if eligible and sta_enable_var.get() else tk.DISABLED)
+            if not eligible:
+                sta_enable_var.set(False)
+                reason = "STA is available only for ephys data with the convolution backend."
+                sta_status_label.configure(text=reason)
+            elif sta_enable_var.get():
+                sta_status_label.configure(
+                    text="Raw ephys frame counts will be cached, mean-centred movie STA will run, and only shuffle-significant images will receive a phase-sensitive Gabor fit."
+                )
+            else:
+                sta_status_label.configure(
+                    text="Optional: compute raw-count STA with circular-shuffle significance testing during neural cache creation."
+                )
+            source = _selected_neural_source()
+            base = "Create pos/spikes Cache" if source == "data_dir" else "Validate Existing Neural Cache"
+            if eligible and sta_enable_var.get():
+                base += " + STA"
+            btn_create_neural_cache.configure(text=base)
+        except NameError:
+            pass
+
     btn_create_neural_cache = ctk.CTkButton(
         frame_neural_cache,
         text="Create pos/spikes Cache (.npy or .zarr)",
@@ -6036,8 +6416,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#1D4ED8",
         command=run_in_thread(create_neural_cache, "Neural cache creation"),
     )
-    btn_create_neural_cache.grid(row=4, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    btn_create_neural_cache.grid(row=5, column=0, columnspan=2, pady=(12, 0), sticky="ew")
     _refresh_neural_source_controls()
+    _refresh_sta_controls()
 
     # --- Stimulus downsample cache ---
     frame_downsample = ttk.LabelFrame(stage_downsample, text="Stimulus Downsample Cache", padding=15)

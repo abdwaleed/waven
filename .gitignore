@@ -3,7 +3,6 @@ __pycache__/
 *.npy
 *.tif
 *.mp4
-*.svg
 *.zarr
 *.dat
 *.pkl
