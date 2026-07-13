@@ -142,14 +142,24 @@ beside it. The `Create as` selector is displayed only for fresh processing and
 controls whether the button writes `spikes.npy`/`pos.npy` or
 `spikes.zarr`/`pos.zarr`.
 
-For an **ephys** session using the **convolution** backend, this card also
-offers **Compute Spike-Triggered Averaging (STA)**. It writes a sibling raw
-`spike_counts` cache without changing the standard firing-rate `spikes` cache,
-then streams the prepared stimulus cache through lagged STA and a circular
-shuffle test. The **STA Receptive Fields** results tab contains one nested tab
+For an **ephys** session using the **convolution** backend, neural alignment
+writes a sibling raw `spike_counts` cache without changing the standard
+firing-rate `spikes` cache. The **Neural & RF Analysis** panel then offers
+**Run Spike-Triggered Averaging (STA)**, which streams the prepared stimulus
+cache through lagged STA and a circular shuffle test. STA has its own **STA
+Neuron Index** selector, separate from the normal coarse-RF Neuron ID. The
+**STA Receptive Fields** results tab contains one nested tab
 per lag and only fits its phase-sensitive Gabor model after the image passes
 the selected 3–5 SD shuffle threshold. See [Spike-Triggered
 Averaging](spike-triggered-averaging.md) for the method and artifacts.
+
+After STA finishes, the GUI asks for a valid STA Neuron Index instead of
+plotting an arbitrary cell (a valid index already typed is used directly). The
+normal selected-neuron RF figure retains correlation tuning and adds a separate
+orientation curve in firing-rate units. Export includes **Export All STA Data
+and Lag Graphs** and **Export Every Individual Graph Type for Every Neuron**;
+the latter includes the firing-rate orientation graph and, when available, STA
+lag plots.
 
 The `Stimulus & Metadata` section controls movie downsampling before neural
 alignment and Gabor projection. Its only spatial control is a percentage slider that scales

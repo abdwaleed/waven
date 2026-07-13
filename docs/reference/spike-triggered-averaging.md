@@ -2,9 +2,9 @@
 
 STA estimates a unit's visual receptive field by asking a direct question:
 which stimulus patterns tend to occur immediately before that unit emits a
-spike? It is an ephys-only, convolution-backend option in **Create
-pos/spikes Cache**. It does not alter Coarse RF correlation, OSI/gOSI, model
-runs, or the normal firing-rate `spikes` cache.
+spike? It is an ephys-only, convolution-backend action in **Run Coarse RF
+Analysis**. It does not alter Coarse RF correlation, OSI/gOSI, model runs, or
+the normal firing-rate `spikes` cache.
 
 ## When to use it
 
@@ -69,10 +69,12 @@ Trials are not concatenated across their boundaries. Summing same-index frame
 counts is equivalent for a repeated movie while preventing a lag from treating
 the end of one presentation as the beginning of the next.
 
-## Lag and shuffle controls
+## Lag, shuffle, and display controls
 
-The neural-cache panel exposes these STA settings when the ephys workflow and
-convolution backend are selected:
+The **Neural & RF Analysis** panel exposes these STA settings when the ephys
+workflow and convolution backend are selected. Neural alignment still creates
+the raw-count cache; STA is deliberately a separate action so users can tune
+the lag and shuffle settings without recreating their neural cache.
 
 | Control | Default | Meaning |
 | --- | --- | --- |
@@ -137,8 +139,18 @@ The action writes a `sta/` folder inside the selected neural cache folder:
 The right-side **STA Receptive Fields** tab contains a nested tab for every
 computed lag. Each shows the selected neuron's signed STA beside its
 phase-sensitive Gabor fit, or a clear explanation that the shuffle test
-rejected the fit. Selecting a neuron through the normal individual-neuron
-inspection refreshes the STA views without rerunning the calculation.
+rejected the fit. STA has its own **STA Neuron Index** field and **Display STA
+Neuron** button; it never inherits the normal coarse-RF Neuron ID. On
+completion, the GUI displays a prompt rather than an arbitrary neuron, unless
+the STA field already contains a valid index.
+
+The Export panel includes **Export All STA Data and Lag Graphs**. It writes the
+full numeric STA tensors and metadata once, then writes the signed STA/Gabor
+figure bundle for every neuron and lag. **Export Every Individual Graph Type
+for Every Neuron** additionally writes the normal coarse-RF individual plots
+and, when available, STA lag plots into separate folders. For coarse RF it
+also writes a standalone image and JSON data description for each visible
+panel, including the firing-rate orientation-tuning curve.
 
 ## Programmatic API
 
@@ -159,4 +171,3 @@ result = compute_sta(
 movie. It validates exact movie/count frame agreement before calculation.
 
 ::: waven.analysis.sta
-
