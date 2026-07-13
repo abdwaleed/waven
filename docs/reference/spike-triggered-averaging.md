@@ -82,6 +82,7 @@ the lag and shuffle settings without recreating their neural cache.
 | Shuffle count | 100 | number of circular null draws per lag |
 | Threshold (SD) | 3 | required real-STA peak in units of shuffled pixel SD; the GUI allows 3–5 |
 | Random seed | 0 | reproducible circular-shift sequence; change to sample another valid null set |
+| STA cache format | NPY | persistent STA arrays: NPY is directly memory-mappable; compressed Zarr can reduce disk use and supports chunked reads |
 
 For every null draw, the count vector is circularly shifted by a random 3–5
 second offset (or a non-zero available frame offset for a very short movie).
@@ -125,15 +126,20 @@ the GUI; an unresponsive image has no fit by design.
 
 ## Output and display
 
-The action writes a `sta/` folder inside the selected neural cache folder:
+The action writes a `sta/` folder inside the selected neural cache folder. The
+**STA cache format** radio buttons select either `.npy` or compressed `.zarr`
+for every numeric artifact below; the selection is saved with the GUI state and
+is also used by **Export All STA Data and Lag Graphs**. Choose NPY when simple
+portable files or OS-level memory mapping are most useful. Choose Zarr when
+storage pressure matters or chunked compressed access is preferable.
 
 | Artifact | Shape |
 | --- | --- |
-| `sta_images.npy` | `(lags, neurons, analysis_y, analysis_x)` |
-| `sta_lag_frames.npy`, `sta_lag_ms.npy` | `(lags,)` |
-| `sta_noise_std.npy`, `sta_peak_values.npy`, `sta_significant.npy`, `sta_total_spikes.npy` | `(lags, neurons)` |
-| `sta_phase_gabor_params.npy` | `(lags, neurons, 11)` |
-| `sta_phase_gabor_rmse.npy` | `(lags, neurons)` |
+| `sta_images.{npy,zarr}` | `(lags, neurons, analysis_y, analysis_x)` |
+| `sta_lag_frames.{npy,zarr}`, `sta_lag_ms.{npy,zarr}` | `(lags,)` |
+| `sta_noise_std.{npy,zarr}`, `sta_peak_values.{npy,zarr}`, `sta_significant.{npy,zarr}`, `sta_total_spikes.{npy,zarr}` | `(lags, neurons)` |
+| `sta_phase_gabor_params.{npy,zarr}` | `(lags, neurons, 11)` |
+| `sta_phase_gabor_rmse.{npy,zarr}` | `(lags, neurons)` |
 | `sta_metadata.json` | movie centring/scaling, shuffle, threshold, and parameter-schema metadata |
 
 The right-side **STA Receptive Fields** tab contains a nested tab for every

@@ -263,35 +263,96 @@ def _fit_significant_gabors(images: np.ndarray, significant: np.ndarray) -> Tupl
     return params, rmse
 
 
-def _write_sta_cache(result: STAResult, output_dir: Path) -> Dict[str, Path]:
-    """Persist small STA result arrays beside the streamed image memmap."""
+def _normalize_sta_output_format(output_format: str) -> str:
+    """Validate the persistent STA array format."""
+    fmt = str(output_format).strip().lower()
+    if fmt not in {"npy", "zarr"}:
+        raise ValueError(f"Unsupported STA output format {output_format!r}; choose 'npy' or 'zarr'.")
+    return fmt
+
+
+def _write_zarr_array(
+    path: Path,
+    array: Any = None,
+    chunks: Optional[Tuple[int, ...]] = None,
+    *,
+    shape: Optional[Tuple[int, ...]] = None,
+    dtype: Optional[np.dtype] = None,
+):
+    """Create/write a compressed Zarr array while supporting Zarr v2 and v3."""
+    try:
+        import zarr
+        from numcodecs import Blosc
+    except ImportError as exc:
+        raise ImportError("STA Zarr output requires 'zarr' and 'numcodecs'; choose NPY or install project requirements.") from exc
+    if array is not None:
+        shape = tuple(int(dim) for dim in array.shape)
+        dtype = np.dtype(array.dtype)
+    elif shape is None or dtype is None:
+        raise ValueError("Zarr output needs either an array or both shape and dtype.")
+    else:
+        shape = tuple(int(dim) for dim in shape)
+        dtype = np.dtype(dtype)
+    chunks = chunks or tuple(max(1, min(dim, 256)) for dim in shape)
+    compressor = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
+    kwargs = {"mode": "w", "shape": shape, "chunks": chunks, "dtype": dtype}
+    try:
+        store = zarr.open(str(path), compressor=compressor, **kwargs)
+    except TypeError:
+        store = zarr.open(str(path), compressors=[compressor], **kwargs)
+    if array is not None:
+        store[:] = array
+    return store
+
+
+def _write_sta_cache(result: STAResult, output_dir: Path, output_format: str = "npy") -> Dict[str, Path]:
+    """Persist STA arrays in NPY or compressed Zarr format."""
+    fmt = _normalize_sta_output_format(output_format)
     output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = ".npy" if fmt == "npy" else ".zarr"
     paths = {
-        "images": output_dir / "sta_images.npy",
-        "lag_frames": output_dir / "sta_lag_frames.npy",
-        "lag_ms": output_dir / "sta_lag_ms.npy",
-        "noise_std": output_dir / "sta_noise_std.npy",
-        "peak_values": output_dir / "sta_peak_values.npy",
-        "significant": output_dir / "sta_significant.npy",
-        "total_spikes": output_dir / "sta_total_spikes.npy",
-        "gabor_params": output_dir / "sta_phase_gabor_params.npy",
-        "gabor_rmse": output_dir / "sta_phase_gabor_rmse.npy",
+        "images": output_dir / f"sta_images{suffix}",
+        "lag_frames": output_dir / f"sta_lag_frames{suffix}",
+        "lag_ms": output_dir / f"sta_lag_ms{suffix}",
+        "noise_std": output_dir / f"sta_noise_std{suffix}",
+        "peak_values": output_dir / f"sta_peak_values{suffix}",
+        "significant": output_dir / f"sta_significant{suffix}",
+        "total_spikes": output_dir / f"sta_total_spikes{suffix}",
+        "gabor_params": output_dir / f"sta_phase_gabor_params{suffix}",
+        "gabor_rmse": output_dir / f"sta_phase_gabor_rmse{suffix}",
         "metadata": output_dir / "sta_metadata.json",
     }
-    # ``images`` is normally already an on-disk memmap at this exact path.
-    if not isinstance(result.images, np.memmap):
-        np.save(paths["images"], np.asarray(result.images, dtype=np.float32))
-    np.save(paths["lag_frames"], result.lag_frames)
-    np.save(paths["lag_ms"], result.lag_ms)
-    np.save(paths["noise_std"], result.noise_std)
-    np.save(paths["peak_values"], result.peak_values)
-    np.save(paths["significant"], result.significant)
-    np.save(paths["total_spikes"], result.total_spikes)
-    np.save(paths["gabor_params"], result.gabor_params)
-    np.save(paths["gabor_rmse"], result.gabor_rmse)
+    arrays = {
+        "images": result.images,
+        "lag_frames": result.lag_frames,
+        "lag_ms": result.lag_ms,
+        "noise_std": result.noise_std,
+        "peak_values": result.peak_values,
+        "significant": result.significant,
+        "total_spikes": result.total_spikes,
+        "gabor_params": result.gabor_params,
+        "gabor_rmse": result.gabor_rmse,
+    }
+    source_image_path = result.cache_paths.get("images")
+    for name, array in arrays.items():
+        if name == "images" and source_image_path is not None:
+            try:
+                if Path(source_image_path).resolve() == paths[name].resolve():
+                    continue
+            except OSError:
+                pass
+        if fmt == "npy":
+            np.save(paths[name], np.asarray(array))
+        else:
+            _write_zarr_array(paths[name], array)
     with paths["metadata"].open("w", encoding="utf-8") as handle:
         json.dump(result.metadata, handle, indent=2)
     return paths
+
+
+def write_sta_result(result: STAResult, output_dir: Path, output_format: str = "npy") -> Dict[str, Path]:
+    """Export an in-memory STA result in the requested persistent format."""
+    return _write_sta_cache(result, Path(output_dir), output_format)
 
 
 def compute_sta(
@@ -306,6 +367,7 @@ def compute_sta(
     scale_stimulus: bool = True,
     random_seed: Optional[int] = 0,
     output_dir: Optional[Path] = None,
+    output_format: str = "npy",
     cancel_event=None,
 ) -> STAResult:
     """Compute frame-lagged, shuffle-tested ephys STAs from raw spike counts.
@@ -363,12 +425,21 @@ def compute_sta(
     del counts
 
     image_shape = (len(lag_frames), n_neurons, height, width)
+    output_format = _normalize_sta_output_format(output_format)
     image_path = None
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        image_path = output_dir / "sta_images.npy"
-        images = np.lib.format.open_memmap(image_path, mode="w+", dtype=np.float32, shape=image_shape)
+        image_path = output_dir / f"sta_images.{output_format}"
+        if output_format == "npy":
+            images = np.lib.format.open_memmap(image_path, mode="w+", dtype=np.float32, shape=image_shape)
+        else:
+            images = _write_zarr_array(
+                image_path,
+                chunks=(1, max(1, min(n_neurons, 32)), max(1, min(height, 128)), max(1, min(width, 128))),
+                shape=image_shape,
+                dtype=np.float32,
+            )
     else:
         images = np.empty(image_shape, dtype=np.float32)
 
@@ -461,7 +532,9 @@ def compute_sta(
     if isinstance(images, np.memmap):
         images.flush()
 
-    peak_values = np.max(np.abs(images.reshape(len(lag_frames), n_neurons, pixels)), axis=2).astype(np.float32)
+    peak_values = np.empty((len(lag_frames), n_neurons), dtype=np.float32)
+    for index in range(len(lag_frames)):
+        peak_values[index] = np.max(np.abs(np.asarray(images[index]).reshape(n_neurons, pixels)), axis=1)
     significant = (total_spikes > 0) & (noise_std > 0) & (peak_values >= float(significance_sd) * noise_std)
     gabor_params, gabor_rmse = _fit_significant_gabors(images, significant)
     telemetry.report()
@@ -490,11 +563,12 @@ def compute_sta(
             "significance_sd": float(significance_sd),
             "gabor_parameter_names": list(GABOR_PARAMETER_NAMES),
             "gabor_model": "baseline + envelope * (a_cos*cos(carrier) + a_sin*sin(carrier))",
+            "output_format": output_format,
         },
         cache_paths={"images": image_path} if image_path is not None else {},
     )
     if output_dir is not None:
-        result.cache_paths = _write_sta_cache(result, output_dir)
+        result.cache_paths = _write_sta_cache(result, output_dir, output_format)
     return result
 
 
@@ -502,6 +576,7 @@ __all__ = [
     "GABOR_PARAMETER_NAMES",
     "STAResult",
     "compute_sta",
+    "write_sta_result",
     "fit_phase_gabor",
     "phase_gabor_image",
 ]

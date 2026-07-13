@@ -171,14 +171,19 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
 
 def _ensure_sta_imports(label="spike-triggered averaging"):
     """Load the ephys-only STA engine only when the option is enabled."""
-    global _STA_IMPORTS_READY, compute_sta, phase_gabor_image, load_array
+    global _STA_IMPORTS_READY, compute_sta, phase_gabor_image, write_sta_result, load_array
     if _STA_IMPORTS_READY:
         return
-    from ..analysis.sta import compute_sta as _compute_sta, phase_gabor_image as _phase_gabor_image
+    from ..analysis.sta import (
+        compute_sta as _compute_sta,
+        phase_gabor_image as _phase_gabor_image,
+        write_sta_result as _write_sta_result,
+    )
     from ..storage.array_store import load_array as _load_array
 
     compute_sta = _compute_sta
     phase_gabor_image = _phase_gabor_image
+    write_sta_result = _write_sta_result
     load_array = _load_array
     _STA_IMPORTS_READY = True
 
@@ -2125,14 +2130,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return
         export_root = os.path.join(selected_dir, f"waven_sta_all_neurons_{time.strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(export_root, exist_ok=True)
+        _ensure_sta_imports("STA data export")
+        sta_output_format = sta_output_format_var.get()
         arrays_dir = os.path.join(export_root, "sta_arrays")
-        os.makedirs(arrays_dir, exist_ok=True)
-        for name in ("images", "lag_frames", "lag_ms", "total_spikes", "noise_std", "peak_values", "significant", "gabor_params", "gabor_rmse"):
-            np.save(os.path.join(arrays_dir, f"{name}.npy"), np.asarray(getattr(result, name)))
-        with open(os.path.join(export_root, "sta_metadata.json"), "w", encoding="utf-8") as handle:
-            json.dump(_json_safe(result.metadata), handle, indent=2)
+        write_sta_result(result, Path(arrays_dir), sta_output_format)
         n_neurons = int(result.images.shape[1])
-        print(f"[EXPORT] STA data and lag plots | neurons={n_neurons}")
+        print(f"[EXPORT] STA data and lag plots | format={sta_output_format} | neurons={n_neurons}")
         try:
             btn_export_all_sta.configure(state=tk.DISABLED)
         except NameError:
@@ -3851,7 +3854,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         print(
             "[STA] Computing ephys STA from raw spike counts "
             f"(lag <= {max_lag_ms:g} ms, {n_shuffles} circular shuffles, "
-            f"{significance_sd:g} SD threshold)."
+            f"{significance_sd:g} SD threshold, {sta_output_format_var.get().upper()} cache)."
         )
         result = compute_sta(
             movie,
@@ -3862,6 +3865,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             significance_sd=significance_sd,
             random_seed=random_seed,
             output_dir=sta_dir,
+            output_format=sta_output_format_var.get(),
             cancel_event=_current_cancel_event(),
         )
         _raise_if_cancelled()
@@ -5079,7 +5083,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "sta_max_lag_ms": sta_max_lag_ms_var.get(),
                 "sta_shuffle_count": sta_shuffle_count_var.get(),
                 "sta_significance_sd": sta_significance_sd_var.get(),
-                "sta_random_seed": sta_random_seed_var.get(),
+            "sta_random_seed": sta_random_seed_var.get(),
+                "sta_output_format": sta_output_format_var.get(),
                 "sta_neuron_index": sta_neuron_index_var.get(),
                 "performance": _runtime_control_values(),
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
@@ -5169,6 +5174,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             neural_cache_format = save_options.get("neural_cache_format")
             if neural_cache_format in {"npy", "zarr"}:
                 neural_cache_format_var.set(neural_cache_format)
+            sta_output_format = save_options.get("sta_output_format")
+            if sta_output_format in {"npy", "zarr"}:
+                sta_output_format_var.set(sta_output_format)
             for key, variable in (
                 ("sta_max_lag_ms", sta_max_lag_ms_var),
                 ("sta_shuffle_count", sta_shuffle_count_var),
@@ -5894,6 +5902,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     sta_shuffle_count_var = tk.StringVar(value=str(gui_options.get("sta_shuffle_count", 100)))
     sta_significance_sd_var = tk.StringVar(value=str(gui_options.get("sta_significance_sd", 3)))
     sta_random_seed_var = tk.StringVar(value=str(gui_options.get("sta_random_seed", 0)))
+    initial_sta_output_format = gui_options.get("sta_output_format", "npy")
+    sta_output_format_var = tk.StringVar(
+        value=initial_sta_output_format if initial_sta_output_format in {"npy", "zarr"} else "npy"
+    )
     sta_neuron_index_var = tk.StringVar(value=str(gui_options.get("sta_neuron_index", "")))
     suite2p_subject_dirs_var = tk.StringVar(
         value=str(
@@ -6748,6 +6760,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         entry.grid(row=row, column=1, sticky="ew", padx=(10, 10), pady=2)
         sta_entries.append(entry)
 
+    ctk.CTkLabel(sta_analysis_frame, text="STA cache format", text_color=muted_text).grid(
+        row=6, column=0, sticky="w", padx=10, pady=(5, 2)
+    )
+    sta_format_frame = ctk.CTkFrame(sta_analysis_frame, fg_color="transparent")
+    sta_format_frame.grid(row=6, column=1, sticky="w", padx=(10, 10), pady=(5, 2))
+    sta_format_npy = ctk.CTkRadioButton(
+        sta_format_frame, text="NPY", variable=sta_output_format_var, value="npy", text_color=text_color
+    )
+    sta_format_npy.pack(side=tk.LEFT)
+    sta_format_zarr = ctk.CTkRadioButton(
+        sta_format_frame, text="Zarr (compressed)", variable=sta_output_format_var, value="zarr", text_color=text_color
+    )
+    sta_format_zarr.pack(side=tk.LEFT, padx=(12, 0))
+    sta_entries.extend([sta_format_npy, sta_format_zarr])
+
     btn_run_sta = ctk.CTkButton(
         sta_analysis_frame,
         text="Run Spike-Triggered Averaging",
@@ -6757,14 +6784,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#4338CA",
         command=run_in_thread(run_sta_analysis, "Spike-triggered averaging"),
     )
-    btn_run_sta.grid(row=6, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 4))
+    btn_run_sta.grid(row=7, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 4))
     ctk.CTkLabel(sta_analysis_frame, text="STA Neuron Index", text_color=text_color).grid(
-        row=7, column=0, sticky="w", padx=10, pady=(4, 6)
+        row=8, column=0, sticky="w", padx=10, pady=(4, 6)
     )
     sta_neuron_entry = ctk.CTkEntry(
         sta_analysis_frame, textvariable=sta_neuron_index_var, height=28, corner_radius=6, border_width=1
     )
-    sta_neuron_entry.grid(row=7, column=1, sticky="ew", padx=(10, 10), pady=(4, 6))
+    sta_neuron_entry.grid(row=8, column=1, sticky="ew", padx=(10, 10), pady=(4, 6))
     btn_display_sta_neuron = ctk.CTkButton(
         sta_analysis_frame,
         text="Display STA Neuron",
@@ -6774,7 +6801,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#4F46E5",
         command=display_sta_neuron,
     )
-    btn_display_sta_neuron.grid(row=8, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 4))
+    btn_display_sta_neuron.grid(row=9, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 4))
     sta_neuron_status_label = ctk.CTkLabel(
         sta_analysis_frame,
         text="Run STA, then enter a valid index to display its lag-specific receptive fields.",
@@ -6782,7 +6809,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         wraplength=420,
         justify="left",
     )
-    sta_neuron_status_label.grid(row=9, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+    sta_neuron_status_label.grid(row=10, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
 
     def _refresh_sta_controls():
         """Expose STA only for the supported ephys/convolution workflow."""

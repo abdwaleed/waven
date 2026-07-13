@@ -59,3 +59,27 @@ def test_spike_count_cache_is_kept_separate_from_firing_rates(tmp_path):
 
     assert saved == path
     np.testing.assert_array_equal(loaded, counts)
+
+
+def test_sta_can_write_compressed_zarr_results(tmp_path):
+    import pytest
+
+    pytest.importorskip("zarr")
+    movie = np.arange(20, dtype=np.float32).reshape(5, 2, 2)
+    counts = np.ones((1, 5, 1), dtype=np.int32)
+
+    result = compute_sta(
+        movie,
+        counts,
+        fps=10.0,
+        max_lag_ms=0.0,
+        n_shuffles=1,
+        scale_stimulus=False,
+        output_dir=tmp_path / "sta",
+        output_format="zarr",
+    )
+
+    assert result.cache_paths["images"].suffix == ".zarr"
+    assert result.cache_paths["images"].exists()
+    assert (tmp_path / "sta" / "sta_lag_ms.zarr").exists()
+    np.testing.assert_allclose(np.asarray(result.images[0, 0]), (movie - movie.mean()).mean(axis=0))

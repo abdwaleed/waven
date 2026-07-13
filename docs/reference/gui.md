@@ -153,6 +153,12 @@ per lag and only fits its phase-sensitive Gabor model after the image passes
 the selected 3–5 SD shuffle threshold. See [Spike-Triggered
 Averaging](spike-triggered-averaging.md) for the method and artifacts.
 
+The STA card also has a **STA cache format** radio selector. **NPY** is the
+default for simple portable arrays and direct memory mapping; **Zarr
+(compressed)** writes chunked compressed result arrays to reduce disk use. The
+same choice is used by the explicit STA data export and persists in saved GUI
+state.
+
 After STA finishes, the GUI asks for a valid STA Neuron Index instead of
 plotting an arbitrary cell (a valid index already typed is used directly). The
 normal selected-neuron RF figure retains correlation tuning and adds a separate
