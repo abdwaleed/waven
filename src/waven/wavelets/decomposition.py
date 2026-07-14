@@ -34,12 +34,15 @@ from tqdm import tqdm
 from ..runtime.performance import (
     OperationTelemetry,
     available_ram_bytes,
+    configure_torch_cpu_threads,
+    convolution_precision_scope,
     autotuned_frame_chunk_size,
     compute_devices,
     enabled_feature,
     gpu_available_vram_bytes,
     gpu_vram_bytes,
     resolve_compute_device,
+    torch_compile_enabled,
     video_downsample_chunk_size,
     wavelet_filter_chunk_size,
 )
@@ -331,13 +334,39 @@ def _center_pad_kernels(kernels):
     return bank
 
 
+class _ConvolutionRunner(torch.nn.Module):
+    """Fixed-kernel convolution module eligible for optional ``torch.compile``."""
+
+    def __init__(self, weights, padding):
+        super().__init__()
+        self.register_buffer("weights", weights)
+        self.padding = padding
+
+    def forward(self, values):
+        return F.conv2d(values, self.weights, padding=self.padding)
+
+
+def _maybe_compile_convolution(runner):
+    """Compile a stable convolution runner only when explicitly requested."""
+    if not torch_compile_enabled():
+        return runner
+    try:
+        return torch.compile(runner, mode="reduce-overhead")
+    except Exception as exc:
+        print(f"torch.compile setup failed; using eager convolution: {exc}")
+        return runner
+
+
 @torch.no_grad()
-def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_event=None, telemetry=None):
+def _conv2d_wavelet_bank(
+    videodata, kernels, device, frame_chunk_size, cancel_event=None, telemetry=None, postprocess=None,
+):
     """Yield ``conv2d`` responses as ``(start, end, chunk, x, y, theta)`` chunks."""
     kernel_array = _center_pad_kernels(kernels)
     pad_y = int(kernel_array.shape[1] // 2)
     pad_x = int(kernel_array.shape[2] // 2)
     kernel_tensor = torch.as_tensor(kernel_array[:, None, :, :], dtype=torch.float32, device=device)
+    runner = _maybe_compile_convolution(_ConvolutionRunner(kernel_tensor, (pad_y, pad_x)))
     multi_gpu_model = None
     if str(device).startswith("cuda"):
         devices = compute_devices(allow_multi_gpu=True)
@@ -345,17 +374,8 @@ def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_ev
             try:
                 device_ids = [int(name.split(":", 1)[1]) for name in devices]
 
-                class _KernelBank(torch.nn.Module):
-                    def __init__(self, weights, padding):
-                        super().__init__()
-                        self.register_buffer("weights", weights)
-                        self.padding = padding
-
-                    def forward(self, values):
-                        return F.conv2d(values, self.weights, padding=self.padding)
-
                 multi_gpu_model = torch.nn.DataParallel(
-                    _KernelBank(kernel_tensor, (pad_y, pad_x)), device_ids=device_ids, output_device=device_ids[0]
+                    runner, device_ids=device_ids, output_device=device_ids[0]
                 )
                 print(f"Convolution using {len(device_ids)} GPUs: {devices}")
             except Exception as exc:
@@ -378,7 +398,23 @@ def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_ev
     executor = ThreadPoolExecutor(max_workers=1) if prefetch else None
     future = None
     future_end = None
+
+    def convolve_frames(frame_values):
+        """Run one resident frame block and return host output plus elapsed time."""
+        frame_tensor = response = output_tensor = None
+        compute_start = time.perf_counter()
+        try:
+            frame_tensor = torch.as_tensor(frame_values[:, None, :, :], dtype=torch.float32, device=device)
+            with convolution_precision_scope(device):
+                response = multi_gpu_model(frame_tensor) if multi_gpu_model is not None else runner(frame_tensor)
+                output_tensor = response.permute(0, 3, 2, 1) if postprocess is None else postprocess(response)
+            output = output_tensor.cpu().numpy()
+            return output, time.perf_counter() - compute_start
+        finally:
+            del frame_tensor, response, output_tensor
     try:
+        if not str(device).startswith("cuda"):
+            configure_torch_cpu_threads()
         start = 0
         while start < num_frames:
             check_cancelled(cancel_event)
@@ -402,17 +438,28 @@ def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_ev
                 frames, read_seconds = read_frames(start, end)
             if telemetry is not None:
                 telemetry.add("input", read_seconds, frames.nbytes)
-            compute_start = time.perf_counter()
-            frame_tensor = torch.as_tensor(frames[:, None, :, :], dtype=torch.float32, device=device)
-            response = (
-                multi_gpu_model(frame_tensor)
-                if multi_gpu_model is not None
-                else F.conv2d(frame_tensor, kernel_tensor, padding=(pad_y, pad_x))
-            )
-            output = response.permute(0, 3, 2, 1).cpu().numpy()
-            compute_seconds = time.perf_counter() - compute_start
-            if telemetry is not None:
-                telemetry.add("gpu_compute_and_transfer", compute_seconds, output.nbytes)
+            try:
+                outputs = [(start, end, *convolve_frames(frames))]
+            except RuntimeError as exc:
+                if not str(device).startswith("cuda") or "out of memory" not in str(exc).lower() or len(frames) <= 1:
+                    raise
+                # A busy desktop can invalidate the preflight VRAM estimate.
+                # Retry the same values in smaller blocks before failing the
+                # analysis, then retain that safer size for subsequent reads.
+                torch.cuda.empty_cache()
+                retry_size = max(1, len(frames) // 2)
+                active_frame_chunk = min(active_frame_chunk, retry_size)
+                print(f"CUDA convolution OOM; retrying {len(frames)} frames as {retry_size}-frame blocks.")
+                outputs = []
+                for local_start in range(0, len(frames), retry_size):
+                    local_end = min(local_start + retry_size, len(frames))
+                    output, compute_seconds = convolve_frames(frames[local_start:local_end])
+                    outputs.append((start + local_start, start + local_end, output, compute_seconds))
+            compute_seconds = max(item[3] for item in outputs)
+            for output_start, output_end, output, output_seconds in outputs:
+                if telemetry is not None:
+                    telemetry.add("gpu_compute_and_transfer", output_seconds, output.nbytes)
+                yield output_start, output_end, output
             if adaptive and end < num_frames:
                 # A short first-pass measurement keeps responsive systems from
                 # being underfed while reducing batch pressure on slower or
@@ -422,8 +469,6 @@ def _conv2d_wavelet_bank(videodata, kernels, device, frame_chunk_size, cancel_ev
                     active_frame_chunk = min(max_frame_chunk, max(active_frame_chunk + 1, int(active_frame_chunk * 1.25)))
                 elif compute_seconds > 2.0 and active_frame_chunk > 8:
                     active_frame_chunk = max(8, int(active_frame_chunk * 0.70))
-            yield start, end, output
-            del frame_tensor, response
             start = end
     finally:
         if executor is not None:
@@ -450,6 +495,77 @@ def _conv2d_wavelet_group(videodata, kernels, device, frame_chunk_size, n_orient
             int(n_orientations),
         )
         yield start, end, np.moveaxis(reshaped, 3, 4)
+
+
+@torch.no_grad()
+def _time_major_convolution_groups(
+    videodata, groups, device, frame_chunk_size, cancel_event=None, telemetry=None,
+):
+    """Convolve every filter group while one movie chunk is resident.
+
+    Group-major execution rereads the complete movie for every sigma/frequency
+    group.  This time-major schedule uploads each frame chunk once, evaluates
+    its bounded groups, and yields results tagged with their destination slice.
+    It is enabled only when all kernel banks fit comfortably in current RAM/
+    VRAM; callers retain the established group-major fallback otherwise.
+    """
+    prepared = []
+    kernel_bytes = 0
+    for metadata, kernels, postprocess in groups:
+        kernel_array = _center_pad_kernels(kernels)
+        kernel_bytes += kernel_array.nbytes
+        prepared.append((metadata, kernel_array, postprocess))
+    if str(device).startswith("cuda") and kernel_bytes > gpu_available_vram_bytes() * 0.12:
+        raise MemoryError("All time-major convolution kernel groups do not fit within the safe VRAM budget.")
+    if not str(device).startswith("cuda") and kernel_bytes > available_ram_bytes() * 0.12:
+        raise MemoryError("All time-major convolution kernel groups do not fit within the safe RAM budget.")
+
+    runners = []
+    for metadata, kernel_array, postprocess in prepared:
+        pad_y = int(kernel_array.shape[1] // 2)
+        pad_x = int(kernel_array.shape[2] // 2)
+        weights = torch.as_tensor(kernel_array[:, None, :, :], dtype=torch.float32, device=device)
+        runners.append((metadata, _maybe_compile_convolution(_ConvolutionRunner(weights, (pad_y, pad_x))), postprocess))
+
+    num_frames = int(videodata.shape[0])
+    active_frame_chunk = max(1, int(frame_chunk_size))
+    if not str(device).startswith("cuda"):
+        configure_torch_cpu_threads()
+    try:
+        for start in range(0, num_frames, active_frame_chunk):
+            check_cancelled(cancel_event)
+            end = min(start + active_frame_chunk, num_frames)
+            read_start = time.perf_counter()
+            frames = np.asarray(videodata[start:end], dtype=np.float32)
+            if telemetry is not None:
+                telemetry.add("input", time.perf_counter() - read_start, frames.nbytes)
+            frame_tensor = None
+            try:
+                frame_tensor = torch.as_tensor(frames[:, None, :, :], dtype=torch.float32, device=device)
+                for metadata, runner, postprocess in runners:
+                    response = output_tensor = None
+                    try:
+                        compute_start = time.perf_counter()
+                        with convolution_precision_scope(device):
+                            response = runner(frame_tensor)
+                            output_tensor = response.permute(0, 3, 2, 1) if postprocess is None else postprocess(response)
+                        output = output_tensor.cpu().numpy()
+                        if telemetry is not None:
+                            telemetry.add("gpu_compute_and_transfer", time.perf_counter() - compute_start, output.nbytes)
+                        yield metadata, start, end, output
+                    finally:
+                        del response, output_tensor
+            except RuntimeError as exc:
+                if str(device).startswith("cuda") and "out of memory" in str(exc).lower():
+                    torch.cuda.empty_cache()
+                    raise MemoryError(
+                        "Time-major convolution lost its VRAM headroom; retrying with group-major scheduling."
+                    ) from exc
+                raise
+            finally:
+                del frame_tensor
+    finally:
+        del runners
 
 
 def convolution_kernel_cache_path(folder_path, kind):
@@ -864,7 +980,8 @@ def waveletTransform(frame,phase, L):
     Returns:
         Result produced by the operation.
     """
-    output=L[:, :, :,phase]@torch.Tensor(frame.flatten()).cuda()
+    device = resolve_compute_device(prefer_gpu=True)
+    output = L[:, :, :, phase].to(device) @ torch.as_tensor(frame.flatten(), device=device, dtype=torch.float32)
     # output=torch.sum(output, axis=(0, 1))
     return output.detach().cpu().numpy()
 
@@ -879,7 +996,8 @@ def waveletTransform3D(frame, L):
     Returns:
         Result produced by the operation.
     """
-    output=L@torch.Tensor(frame.flatten()).cuda()
+    device = resolve_compute_device(prefer_gpu=True)
+    output = L.to(device) @ torch.as_tensor(frame.flatten(), device=device, dtype=torch.float32)
     # output=torch.sum(output, axis=(0, 1))
     return output.detach().cpu().numpy()
 
@@ -1372,9 +1490,8 @@ def waveletPowerDecompositionConv(
     telemetry = OperationTelemetry("Direct coarse RF power")
     writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
     total_groups = max(1, math.ceil(len(sigmas) / filter_group_size))
-    try:
-      for group_number, group_start in enumerate(range(0, len(sigmas), filter_group_size), start=1):
-        check_cancelled(cancel_event)
+    group_records = []
+    for group_number, group_start in enumerate(range(0, len(sigmas), filter_group_size), start=1):
         group_end = min(group_start + filter_group_size, len(sigmas))
         if kernel_cache is not None:
             real_kernels = kernel_cache[0, group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
@@ -1386,37 +1503,64 @@ def waveletPowerDecompositionConv(
                             for sigma in sigmas[group_start:group_end] for theta in thetas]
             imag_kernels = [_gabor_kernel_for_conv(theta, sigma, imag_phase, coupled_frequency=True)
                             for sigma in sigmas[group_start:group_end] for theta in thetas]
-        # Kernel order is [real sigma/theta groups, imaginary sigma/theta
-        # groups]. Split the output's group axis after one fused conv2d call.
-        fused_kernels = list(real_kernels) + list(imag_kernels)
-        for chunk_index, (start, end, raw_response) in enumerate(_conv2d_wavelet_bank(
-            videodata, fused_kernels, device, frame_chunk_size,
-            cancel_event=cancel_event, telemetry=telemetry,
-        ), start=1):
-            group_size = group_end - group_start
-            grouped = raw_response.reshape(
-                raw_response.shape[0], raw_response.shape[1], raw_response.shape[2],
-                group_size * 2, int(n_orientations),
+
+        def fused_power_response(values, group_size=group_end - group_start):
+            """Square/sum real and imaginary responses before crossing PCIe."""
+            shaped = values.reshape(
+                values.shape[0], 2, group_size, int(n_orientations), values.shape[2], values.shape[3]
             )
-            grouped = np.moveaxis(grouped, 3, 4)
-            real_response = grouped[..., :group_size]
-            imag_response = grouped[..., group_size:]
-            def write_power(payload, t0=start, t1=end, s0=group_start, s1=group_end):
-                real_values, imag_values = payload
-                power[t0:t1, :, :, :, s0:s1] = real_values * real_values + imag_values * imag_values
-            if writer is not None:
-                writer.submit(write_power, (real_response, imag_response), real_response.nbytes)
-            else:
-                write_start = time.perf_counter()
-                write_power((real_response, imag_response))
-                telemetry.add("output", time.perf_counter() - write_start, real_response.nbytes)
-            if chunk_index % 8 == 0 or end == num_frames:
-                print(progress_message(
-                    "Direct coarse RF power", end, num_frames, start_time, unit="frames",
-                ))
-            telemetry.maybe_report()
-        print(progress_message("Direct coarse RF power", group_number, total_groups, start_time, unit="groups"))
-        gc.collect()
+            return (shaped[:, 0].square() + shaped[:, 1].square()).permute(0, 4, 3, 2, 1).contiguous()
+
+        group_records.append(
+            ((group_number, group_start, group_end), list(real_kernels) + list(imag_kernels), fused_power_response)
+        )
+
+    def store_power(start, end, group_start, group_end, payload):
+        def write_power(values, t0=start, t1=end, s0=group_start, s1=group_end):
+            power[t0:t1, :, :, :, s0:s1] = values
+        if writer is not None:
+            writer.submit(write_power, payload, payload.nbytes)
+        else:
+            write_start = time.perf_counter()
+            write_power(payload)
+            telemetry.add("output", time.perf_counter() - write_start, payload.nbytes)
+
+    try:
+        use_time_major = (
+            len(group_records) > 1
+            and enabled_feature("TIME_MAJOR_CONV", default=True)
+            and not enabled_feature("MULTI_GPU", default=False)
+        )
+        if use_time_major:
+            try:
+                print("Direct coarse RF power using time-major filter scheduling (one movie read per frame chunk).")
+                for metadata, start, end, power_response in _time_major_convolution_groups(
+                    videodata, group_records, device, frame_chunk_size, cancel_event=cancel_event, telemetry=telemetry,
+                ):
+                    group_number, group_start, group_end = metadata
+                    store_power(start, end, group_start, group_end, power_response)
+                    if end == num_frames:
+                        print(progress_message(
+                            "Direct coarse RF power", group_number, total_groups, start_time, unit="groups",
+                        ))
+                    telemetry.maybe_report()
+            except MemoryError as exc:
+                print(f"Time-major scheduling exceeded its safe kernel budget; falling back to group-major: {exc}")
+                use_time_major = False
+        if not use_time_major:
+            for metadata, fused_kernels, fused_power_response in group_records:
+                group_number, group_start, group_end = metadata
+                for chunk_index, (start, end, power_response) in enumerate(_conv2d_wavelet_bank(
+                    videodata, fused_kernels, device, frame_chunk_size,
+                    cancel_event=cancel_event, telemetry=telemetry, postprocess=fused_power_response,
+                ), start=1):
+                    store_power(start, end, group_start, group_end, power_response)
+                    if chunk_index % 8 == 0 or end == num_frames:
+                        print(progress_message(
+                            "Direct coarse RF power", end, num_frames, start_time, unit="frames",
+                        ))
+                    telemetry.maybe_report()
+                print(progress_message("Direct coarse RF power", group_number, total_groups, start_time, unit="groups"))
     finally:
         if writer is not None:
             writer.close()

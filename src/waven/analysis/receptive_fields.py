@@ -1,6 +1,7 @@
 """Receptive-field correlation and low-level signal utilities."""
 from .common import *
 from .rf_correlation import streaming_cross_correlation as _safe_chunked_cross_corr
+from ..runtime.performance import resolve_compute_device
 
 def wavelet_feature_dims(wavelets_r, sigmas=None, frequencies=None):
     """Infer spatial and feature dimensions from a full-model wavelet tensor."""
@@ -576,12 +577,13 @@ def NeuronCorrelation(idx, spks, neuron_pos):
     Returns:
         Result produced by the operation.
     """
+    device = resolve_compute_device(prefer_gpu=True)
     try:
-        t_spks = torch.as_tensor(spks, device='cuda')
+        t_spks = torch.as_tensor(spks, device=device)
         cc_ = torch.corrcoef(t_spks.reshape(-1, t_spks.shape[2]).T)
     except:
         print('sparsenoise sp045 ?')
-        t_spks = torch.as_tensor(spks, device='cuda')
+        t_spks = torch.as_tensor(spks, device=device)
         cc_ = torch.corrcoef(t_spks)
         
     cc_f_1 = cc_[idx].detach().cpu().numpy()

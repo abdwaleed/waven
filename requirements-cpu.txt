@@ -1,0 +1,7 @@
+# CPU-only installation for systems without an NVIDIA CUDA GPU.
+# The project dependencies are resolved from PyPI through the extra index;
+# PyTorch itself is deliberately selected from the official CPU wheel index.
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+torch==2.1.2+cpu
+-e .

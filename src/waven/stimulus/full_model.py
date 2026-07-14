@@ -113,7 +113,6 @@ def load_wavelets(
                     )
                     
                     del w_r_gpu, w_i_gpu, pn_gpu, sum_wavelets
-                    torch.cuda.empty_cache()
                     success = True
                     return chunk_index, start, end, out_chunk
             except RuntimeError:
@@ -302,7 +301,6 @@ def load_stimulus(
                     res_pn = pn_res.cpu().numpy()
                     
                     del w_r_gpu, w_i_gpu, w_r_res, w_i_res, pn_res
-                    torch.cuda.empty_cache()
                     success = True
                     return start, end, res_r, res_i, res_pn
             except RuntimeError:

@@ -19,8 +19,10 @@ from ..runtime.performance import (
     OperationTelemetry,
     available_ram_bytes,
     compute_devices,
+    enabled_feature,
     gpu_available_vram_bytes,
     model_parallel_jobs,
+    sta_shuffle_batch_size,
 )
 from ..runtime.task_control import check_cancelled
 
@@ -38,6 +40,86 @@ GABOR_PARAMETER_NAMES = (
     "amplitude",
     "phase_rad",
 )
+
+
+def _fft_actual_sta(
+    movie: Any,
+    frame_counts: np.ndarray,
+    lag_frames: np.ndarray,
+    movie_mean: np.ndarray,
+    scale: float,
+    device: str,
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """Return exact actual STAs for all lags with bounded CUDA FFT blocks.
+
+    FFT is useful only for in-memory movies with many requested lags.  The
+    shuffled null still uses bounded batched GEMMs because its truncated,
+    circularly shifted windows would otherwise require an impractically large
+    frequency-domain cube.  Returning ``None`` selects the universally safe
+    streaming path for memmaps, Zarr arrays, CPUs, and small lag requests.
+    """
+    if not enabled_feature("STA_FFT", default=False) or not str(device).startswith("cuda"):
+        return None
+    if not isinstance(movie, np.ndarray) or isinstance(movie, np.memmap) or len(lag_frames) < 8:
+        return None
+    try:
+        import torch
+
+        n_frames = int(movie.shape[0])
+        pixels = int(np.prod(movie.shape[1:]))
+        n_neurons = int(frame_counts.shape[1])
+        n_fft = 1 << (2 * n_frames - 1).bit_length()
+        # Complex product plus inverse output; reserve most VRAM for the
+        # existing GUI/caches and use a neuron block if needed.
+        budget = max(1, int(gpu_available_vram_bytes() * 0.08))
+        frequency_bins = n_fft // 2 + 1
+        neuron_block = max(1, min(n_neurons, 32))
+        pixel_block = max(1, min(pixels, budget // max(1, frequency_bins * neuron_block * 32)))
+        if pixel_block < 1:
+            return None
+
+        counts_tensor = torch.as_tensor(frame_counts, dtype=torch.float32, device=device)
+        counts_fft = torch.fft.rfft(counts_tensor, n=n_fft, dim=0)
+        result = np.empty((len(lag_frames), pixels, n_neurons), dtype=np.float32)
+        movie_flat = np.asarray(movie, dtype=np.float32).reshape(n_frames, pixels)
+        centered_mean = movie_mean.reshape(1, pixels)
+        lag_tensor = torch.as_tensor(lag_frames, dtype=torch.long, device=device)
+        for pixel_start in range(0, pixels, pixel_block):
+            pixel_end = min(pixels, pixel_start + pixel_block)
+            stimulus = np.array(movie_flat[:, pixel_start:pixel_end], dtype=np.float32, copy=True)
+            stimulus -= centered_mean[:, pixel_start:pixel_end]
+            if scale != 1.0:
+                stimulus *= np.float32(scale)
+            stimulus_fft = torch.fft.rfft(
+                torch.as_tensor(stimulus, dtype=torch.float32, device=device), n=n_fft, dim=0
+            )
+            for neuron_start in range(0, n_neurons, neuron_block):
+                neuron_end = min(n_neurons, neuron_start + neuron_block)
+                products = stimulus_fft.conj().unsqueeze(-1) * counts_fft[:, None, neuron_start:neuron_end]
+                correlations = torch.fft.irfft(products, n=n_fft, dim=0)
+                result[:, pixel_start:pixel_end, neuron_start:neuron_end] = (
+                    correlations.index_select(0, lag_tensor).cpu().numpy()
+                )
+                del products, correlations
+            del stimulus_fft
+        totals = np.empty((len(lag_frames), n_neurons), dtype=np.float32)
+        count_sums = np.cumsum(frame_counts[::-1], axis=0, dtype=np.float64)[::-1]
+        for index, lag in enumerate(lag_frames):
+            totals[index] = count_sums[int(lag)]
+            result[index] = np.divide(
+                result[index],
+                totals[index][None, :],
+                out=np.zeros_like(result[index]),
+                where=totals[index][None, :] > 0,
+            )
+        return result, totals
+    except RuntimeError as exc:
+        print(f"STA FFT setup failed; using streamed GEMMs: {exc}")
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return None
 
 
 @dataclass
@@ -480,39 +562,69 @@ def compute_sta(
             block *= np.float32(scale)
         return block
 
-    def one_sta(lag: int, shift: Optional[int], device: str) -> Tuple[np.ndarray, np.ndarray]:
-        """Compute one lag's raw weighted average and count denominator."""
+    def one_sta_batch(lag: int, shifts: Sequence[Optional[int]], device: str) -> Tuple[np.ndarray, np.ndarray]:
+        """Compute one lag for several actual/circular-shuffle count vectors.
+
+        The old implementation reread every stimulus chunk once per shuffle.
+        Here a bounded batch concatenates several shifted response vectors into
+        one matrix product.  It is mathematically identical while reducing
+        movie I/O and GPU-launch overhead by the batch size.
+        """
         valid_frames = n_frames - lag
-        weighted = np.zeros((pixels, n_neurons), dtype=np.float64)
-        denominator = np.zeros(n_neurons, dtype=np.float64)
+        shifts = tuple(shifts)
+        n_draws = len(shifts)
+        weighted = np.zeros((pixels, n_draws, n_neurons), dtype=np.float64)
+        denominator = np.zeros((n_draws, n_neurons), dtype=np.float64)
         for start in range(0, valid_frames, chunk_size):
             check_cancelled(cancel_event)
             stop = min(valid_frames, start + chunk_size)
             stimulus = centered_block(start, stop)
             response_indices = np.arange(lag + start, lag + stop, dtype=np.int64)
-            if shift is not None:
-                # Exactly ``np.roll(frame_counts, shift)[lag:...]`` without
-                # allocating a new ``frames x neurons`` array per shuffle.
-                response_indices = (response_indices - int(shift)) % n_frames
-            response = np.asarray(frame_counts[response_indices], dtype=np.float32)
-            weighted += _matmul_stimulus_counts(stimulus, response, device)
+            indexed_responses = []
+            for shift in shifts:
+                indices = response_indices if shift is None else (response_indices - int(shift)) % n_frames
+                indexed_responses.append(np.asarray(frame_counts[indices], dtype=np.float32))
+            response = np.stack(indexed_responses, axis=1)
+            product = _matmul_stimulus_counts(
+                stimulus, response.reshape(stop - start, n_draws * n_neurons), device
+            ).reshape(pixels, n_draws, n_neurons)
+            weighted += product
             denominator += np.sum(response, axis=0, dtype=np.float64)
         nonzero = denominator > 0
-        weighted[:, nonzero] /= denominator[nonzero]
-        weighted[:, ~nonzero] = 0.0
+        weighted = np.divide(
+            weighted,
+            denominator[None, :, :],
+            out=np.zeros_like(weighted),
+            where=nonzero[None, :, :],
+        )
         return weighted.astype(np.float32), denominator.astype(np.float32)
+
+    fft_actual = _fft_actual_sta(
+        movie, frame_counts, lag_frames, movie_mean, scale, devices[0]
+    )
+    if fft_actual is not None:
+        print("STA using bounded CUDA FFT for the actual lagged averages; shuffled null uses batched GEMMs.")
 
     def one_lag(lag_index: int, lag: int, device: str):
         check_cancelled(cancel_event)
-        actual_flat, totals = one_sta(lag, None, device)
+        if fft_actual is None:
+            actual_batch, totals_batch = one_sta_batch(lag, (None,), device)
+            actual_flat = actual_batch[:, 0, :]
+            totals = totals_batch[0]
+        else:
+            actual_flat = fft_actual[0][lag_index]
+            totals = fft_actual[1][lag_index]
         null_sum = np.zeros(n_neurons, dtype=np.float64)
         null_sum_sq = np.zeros(n_neurons, dtype=np.float64)
-        for shuffle_index, shift in enumerate(shifts_by_lag[lag], start=1):
+        shifts = shifts_by_lag[lag]
+        batch_size = sta_shuffle_batch_size(pixels, n_neurons, len(shifts), device)
+        for shuffle_start in range(0, len(shifts), batch_size):
             check_cancelled(cancel_event)
-            shuffled_flat, _ = one_sta(lag, int(shift), device)
-            null_sum += np.sum(shuffled_flat, axis=0, dtype=np.float64)
-            null_sum_sq += np.sum(shuffled_flat * shuffled_flat, axis=0, dtype=np.float64)
-            if shuffle_index % 10 == 0:
+            batch_shifts = shifts[shuffle_start:shuffle_start + batch_size]
+            shuffled_flat, _ = one_sta_batch(lag, tuple(int(shift) for shift in batch_shifts), device)
+            null_sum += np.sum(shuffled_flat, axis=(0, 1), dtype=np.float64)
+            null_sum_sq += np.sum(shuffled_flat * shuffled_flat, axis=(0, 1), dtype=np.float64)
+            if shuffle_start and shuffle_start % max(10, batch_size) == 0:
                 telemetry.maybe_report()
         null_samples = float(int(n_shuffles) * pixels)
         variance = np.maximum(null_sum_sq / null_samples - (null_sum / null_samples) ** 2, 0.0)

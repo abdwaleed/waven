@@ -29,6 +29,11 @@ That line is the reliable way to identify whether a particular run is limited
 by decoding, GPU convolution, or storage rather than guessing from CPU/GPU
 percentages alone.
 
+Run `python scripts/benchmark_runtime.py` from the repository root for a small
+synthetic comparison of CPU/GPU Coarse RF and the STA backends on the current
+machine. It performs no experiment-cache writes and is the recommended way to
+decide whether optional FFT or fast-precision modes are worthwhile locally.
+
 ### Performance and hardware choices
 
 The GUI exposes every runtime choice in **Session Configuration → Performance &
@@ -43,8 +48,12 @@ only when diagnosing a machine-specific driver or filesystem issue.
 | `WAVEN_AUTOTUNE` | on | Measures early convolution chunks and adapts only within the safe batch ceiling. |
 | `WAVEN_PREFETCH` | on | Enables one bounded input prefetch worker and downsampling resize overlap. |
 | `WAVEN_ASYNC_WRITER` | on | Enables a single bounded wavelet-output writer. |
+| `WAVEN_TIME_MAJOR_CONV` | on | For direct coarse-RF power, reads/uploads each frame chunk once before applying its bounded filter groups. Falls back to the group-major schedule if the combined kernel banks exceed a safe live-memory budget. |
 | `WAVEN_RF_GPU` | on, if CUDA is present | Accumulates Coarse RF feature/response cross-products on GPU when the current tile fits. Each tile falls back to CPU on allocation failure. |
 | `WAVEN_MULTI_GPU` | off | Explicitly enables PyTorch batch-parallel convolution across all detected CUDA GPUs. Leave this off unless all GPUs are dedicated to the analysis. |
+| `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile` runner for long, fixed-shape convolution jobs. The first chunks are slower while the runner compiles; disable after a compiler/driver issue. |
+| `WAVEN_AMP` | off | Explicit Tensor Core float16 autocast for convolution only. It changes convolution round-off, so use only after validating a representative run against default precision. |
+| `WAVEN_STA_FFT` | off | Experimental bounded CUDA FFT calculation of the actual STA maps when the movie is already in RAM and at least eight lags are requested. The circular-shuffle null retains exact batched GEMMs. |
 
 Multi-GPU is deliberately opt-in: it distributes independent frame batches,
 then gathers them in original order. It does not change filter settings or

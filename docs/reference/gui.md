@@ -69,8 +69,12 @@ Current GUI Inputs / Parameters** under `gui.performance`.
 | Adaptive batch tuning | `WAVEN_AUTOTUNE` | on | Convolution wavelet actions |
 | Prefetch input chunks | `WAVEN_PREFETCH` | on | Downsampling and convolution wavelet reads |
 | Asynchronous cache writing | `WAVEN_ASYNC_WRITER` | on | Convolution wavelet outputs |
+| Read movie chunks once across filter groups | `WAVEN_TIME_MAJOR_CONV` | on | Direct coarse-RF power convolution; preserves the group-major fallback when kernel banks cannot safely coexist |
 | GPU Coarse RF statistics | `WAVEN_RF_GPU` | on | Coarse RF sufficient-statistics cross-products |
 | Use all available GPUs | `WAVEN_MULTI_GPU` | off | Convolution wavelets only, with two or more CUDA GPUs |
+| Compile stable convolution kernels | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile`; useful for repeated long fixed-shape jobs after its warm-up cost |
+| Tensor Core convolution | `WAVEN_AMP` | off | CUDA float16 autocast for convolution only; retain default precision for scientific-equivalence runs |
+| FFT STA actual maps | `WAVEN_STA_FFT` | off | Experimental bounded CUDA FFT backend for in-memory, many-lag STA runs; shuffle testing remains exact batched GEMM |
 
 The hardware status line reports the detected CUDA count and whether multi-GPU
 can be effective with the selected backend. Choosing multi-GPU on a one-GPU or

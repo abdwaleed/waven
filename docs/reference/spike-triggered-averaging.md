@@ -92,6 +92,14 @@ second offset (or a non-zero available frame offset for a very short movie).
 The operation is equivalent to `np.roll(counts, shift)` but is indexed in
 chunks so it does not create a full copied count tensor for each shuffle.
 
+For the normal streamed path, several circular shifts are concatenated into a
+bounded response batch and evaluated by one matrix multiplication. This avoids
+rereading the same stimulus chunk for every shuffle. The experimental
+**FFT STA actual maps** runtime option uses `torch.fft` only for an in-memory,
+CUDA, many-lag actual-STA calculation; it automatically retains the exact
+batched matrix-product implementation for the shuffle null and falls back to
+streaming when its bounded FFT conditions are not met.
+
 For each neuron and lag, the standard deviation is calculated across every
 pixel from every shuffled STA image. A real STA passes only when:
 

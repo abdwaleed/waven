@@ -5931,12 +5931,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "Uses one bounded writer so completed wavelet chunks can be saved while the next chunk computes.",
         ),
         (
+            "time_major_conv", "WAVEN_TIME_MAJOR_CONV", True, "Read movie chunks once across filter groups",
+            "Keeps a bounded frame chunk resident while applying coarse-RF filter groups, reducing repeated disk reads.",
+        ),
+        (
             "rf_gpu", "WAVEN_RF_GPU", True, "GPU Coarse RF statistics",
             "Uses GPU feature-response cross-products when the current tile fits; automatically falls back to CPU.",
         ),
         (
             "multi_gpu", "WAVEN_MULTI_GPU", False, "Use all available GPUs",
             "Opt-in batch-parallel convolution. Requires the convolution backend and at least two CUDA GPUs.",
+        ),
+        (
+            "torch_compile", "WAVEN_TORCH_COMPILE", False, "Compile stable convolution kernels (experimental)",
+            "Uses torch.compile after a one-time warm-up. Enable for repeated long convolution jobs; disable if a driver/compiler error occurs.",
+        ),
+        (
+            "amp", "WAVEN_AMP", False, "Tensor Core convolution (fast precision)",
+            "Uses CUDA float16 autocast only for wavelet convolution. Correlation and STA statistics retain their established precision.",
+        ),
+        (
+            "sta_fft", "WAVEN_STA_FFT", False, "FFT STA actual maps (experimental)",
+            "Uses bounded CUDA FFTs for many-lag in-memory STA runs; shuffled significance maps still use exact batched matrix products.",
         ),
     )
 

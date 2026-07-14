@@ -103,3 +103,26 @@ def test_sta_removes_a_static_corner_patch_from_every_lag():
 
     np.testing.assert_allclose(result.images[:, 0, 0, 0], 0.0, atol=1e-7)
     assert not np.allclose(result.images[0, 0], result.images[1, 0])
+
+
+def test_optional_cuda_fft_sta_matches_streamed_actual_maps(monkeypatch):
+    """The optional bounded FFT backend preserves the direct lag definition."""
+    import pytest
+
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA FFT STA test requires a CUDA device")
+    generator = np.random.default_rng(7)
+    movie = generator.normal(size=(16, 3, 2)).astype(np.float32)
+    counts = generator.poisson(0.4, size=(2, 16, 2)).astype(np.int32)
+    kwargs = dict(
+        fps=1000.0, max_lag_ms=7.0, n_shuffles=2,
+        scale_stimulus=False, random_seed=9,
+    )
+    monkeypatch.setenv("WAVEN_STA_FFT", "0")
+    streamed = compute_sta(movie, counts, **kwargs)
+    monkeypatch.setenv("WAVEN_STA_FFT", "1")
+    fft = compute_sta(movie, counts, **kwargs)
+
+    np.testing.assert_allclose(fft.images, streamed.images, rtol=2e-5, atol=2e-5)
+    np.testing.assert_allclose(fft.total_spikes, streamed.total_spikes)

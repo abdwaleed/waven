@@ -8,6 +8,8 @@ from .receptive_fields import *
 from .nonlinear_models import *
 from .trial_stats import *
 from .rf_correlation import streaming_cross_correlation
+from ..runtime.performance import cpu_inner_thread_count
+from joblib import parallel_config
 
 SECONDS_PER_MINUTE = 60
 
@@ -355,13 +357,16 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         ]
     else:
         n_jobs = model_parallel_jobs()
-        parallel_results = Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(_process_single_neuron)(
-                idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
-                double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
-                lastmin=lastmin, show_sem_errorbars=show_sem_errorbars
-            ) for idx in range(num_neurons)
-        )
+        # Each process may enter NumPy/SciPy/BLAS.  Limit its inner native
+        # workers so ``n_jobs`` processes do not each claim every CPU core.
+        with parallel_config(backend="loky", inner_max_num_threads=cpu_inner_thread_count(n_jobs)):
+            parallel_results = Parallel(n_jobs=n_jobs)(
+                delayed(_process_single_neuron)(
+                    idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
+                    double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
+                    lastmin=lastmin, show_sem_errorbars=show_sem_errorbars
+                ) for idx in range(num_neurons)
+            )
 
     Predictions, nonlinParams, RhoPhiParams, Metrics, interpolators = [], [], [], [], []
 
@@ -720,8 +725,6 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             x_local, y_local = int(new_x_local), int(new_y_local)
             x_global, y_global = new_x_global, new_y_global
 
-        if compute_device == "cuda":
-            torch.cuda.empty_cache()
         return (x_global, y_global, o, s, f)
     
     
@@ -766,8 +769,6 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
 
     list_neurons = selected_indices
     for idx in list_neurons:  # np.asarray(neuron_pos[:, 1]>600).nonzero()[0]:[1024, 732, 1789, 3279, 614]:#
-        if compute_device == "cuda":
-            torch.cuda.empty_cache()
         x, y, o, s = maxes1[:4, idx]
 
         x1, y1, o1, s1 = maxes0[:4, idx]

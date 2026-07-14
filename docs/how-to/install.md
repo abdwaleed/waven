@@ -79,3 +79,17 @@ drive often becomes the bottleneck even with a fast GPU. Start with at least
 size estimates in the Wavelets tab before creating full-model products. Waven
 keeps queues bounded and falls back from GPU tiles to CPU when required, but
 storage capacity remains a user responsibility.
+
+## CPU-only systems
+
+Waven's current convolution, STA, and Coarse RF implementations automatically
+fall back to CPU when CUDA is unavailable. On a system without an NVIDIA GPU,
+install the CPU PyTorch wheel rather than the CUDA requirements:
+
+```powershell
+python -m pip install -r requirements-cpu.txt
+```
+
+The GPU-only legacy helpers also use the same safe device resolver. CUDA
+options in the GUI remain saved preferences and have no effect until a CUDA GPU
+is available.

@@ -10,11 +10,17 @@ from __future__ import annotations
 import os
 import threading
 import time
+from contextlib import nullcontext
 from functools import lru_cache
 from typing import Dict, Literal, Optional
 
 import psutil
 import torch
+
+try:
+    from threadpoolctl import threadpool_limits
+except ImportError:  # pragma: no cover - optional protection for legacy installs
+    threadpool_limits = None
 
 ComputeDevice = Literal["cuda", "cpu"]
 
@@ -92,6 +98,21 @@ def autotuned_frame_chunk_size(num_frames: int, nx: int, ny: int, n_channels: in
     return max(8, min(num_frames, 512, budget // max(1, pixels * 4 * 4)))
 
 
+def sta_shuffle_batch_size(pixels: int, n_neurons: int, n_shuffles: int, device: str) -> int:
+    """Bound concurrent STA shuffle columns by live RAM/VRAM.
+
+    One batch contains the response index matrix, the matrix-product result,
+    and a float64 accumulator.  Batching makes each movie pass serve several
+    circular-shuffle draws without retaining the complete shuffle cube.
+    """
+    per_shuffle = max(1, int(pixels) * int(n_neurons) * 4 * 4)
+    if str(device).startswith("cuda"):
+        budget = int(gpu_available_vram_bytes() * 0.12)
+    else:
+        budget = int(available_ram_bytes() * 0.05)
+    return max(1, min(int(n_shuffles), 16, budget // per_shuffle))
+
+
 def get_gpu_count() -> int:
     """Return the total number of CUDA devices available on the system."""
     if not torch.cuda.is_available():
@@ -145,6 +166,59 @@ def cpu_worker_count(cap: Optional[int] = None) -> int:
     cores = os.cpu_count() or 4
     limit = cap if cap is not None else cores
     return max(1, min(cores - 1, limit))
+
+
+def cpu_inner_thread_count(workers: int = 1) -> int:
+    """Return a BLAS/OpenMP budget that avoids nested-worker oversubscription."""
+    workers = max(1, int(workers))
+    return max(1, cpu_worker_count() // workers)
+
+
+def cpu_threadpool_scope(workers: int = 1):
+    """Limit native NumPy/SciPy/BLAS threads while an outer worker pool is active.
+
+    NumPy, SciPy, PyTorch, and OpenCV may all have their own thread pools.  A
+    four-process joblib run with each process using every logical core is much
+    slower than a bounded allocation, especially on laptop CPUs.  The scope is
+    a no-op only for older environments without ``threadpoolctl``.
+    """
+    if threadpool_limits is None:
+        return nullcontext()
+    return threadpool_limits(limits=cpu_inner_thread_count(workers))
+
+
+def torch_compile_enabled() -> bool:
+    """Whether the experimental compiled convolution runner is enabled."""
+    return enabled_feature("TORCH_COMPILE", default=False) and hasattr(torch, "compile")
+
+
+def amp_enabled() -> bool:
+    """Whether opt-in Tensor Core mixed precision is enabled for convolution."""
+    return enabled_feature("AMP", default=False) and torch.cuda.is_available()
+
+
+def convolution_precision_scope(device: str):
+    """Return the safe default or explicit CUDA autocast context.
+
+    Mixed precision is deliberately not applied to correlation/STA statistics:
+    those stages preserve their established float32/float64 numerical paths.
+    """
+    if str(device).startswith("cuda") and amp_enabled():
+        return torch.autocast(device_type="cuda", dtype=torch.float16)
+    return nullcontext()
+
+
+def configure_torch_cpu_threads(workers: int = 1) -> int:
+    """Set PyTorch's CPU thread count to the available nested-work budget."""
+    threads = cpu_inner_thread_count(workers)
+    try:
+        torch.set_num_threads(threads)
+        torch.set_num_interop_threads(max(1, min(4, threads)))
+    except RuntimeError:
+        # PyTorch disallows changing inter-op threads after work has started;
+        # its existing setting is still safe, and threadpoolctl limits BLAS.
+        pass
+    return threads
 
 
 def resolve_compute_device(prefer_gpu: bool = True) -> ComputeDevice:

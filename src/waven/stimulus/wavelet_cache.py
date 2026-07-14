@@ -27,6 +27,8 @@ from ..config import coarse_grid_dimensions
 from ..runtime.performance import (
     available_ram_bytes,
     coarse_wavelet_chunk_size_gpu_or_cpu,
+    cpu_threadpool_scope,
+    cpu_worker_count,
     get_gpu_count,
     has_enough_ram,
 )
@@ -460,8 +462,10 @@ def coarseWavelet(
         w_c_downsampled = np.empty(target_shape_full, dtype=np.float32)
 
     num_gpus = get_gpu_count()
-    # Use 1 worker per GPU, or 1 worker total if falling back to pure CPU
-    max_workers = max(1, num_gpus)
+    # GPU work remains one worker per device.  CPU ``skimage.resize`` releases
+    # the GIL, so permit two bounded chunks concurrently on CPU-only systems
+    # without allowing their large output arrays to consume all RAM.
+    max_workers = max(1, num_gpus) if num_gpus else cpu_worker_count(cap=2)
 
     def process_chunk(chunk_index):
         """Worker function to process a single chunk on a specific device."""
@@ -512,7 +516,6 @@ def coarseWavelet(
                     out_c = resize_tensor_gpu(w_c_gpu).cpu().numpy()
 
                     del w_r_clean, w_i_clean, w_r_gpu, w_i_gpu, w_c_gpu
-                    torch.cuda.empty_cache() 
                     success = True
                     return chunk_index, start, end, out_r, out_i, out_c, f"GPU {device_id}", error_msg
 
@@ -537,7 +540,7 @@ def coarseWavelet(
     print(f"Dispatching to {max_workers} concurrent worker(s)...")
     progress_start = time.time()
     completed_chunks = 0
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with cpu_threadpool_scope(max_workers), ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(process_chunk, i) for i in range(n_chunks)]
         
         for future in as_completed(futures):

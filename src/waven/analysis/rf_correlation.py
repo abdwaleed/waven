@@ -50,6 +50,17 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
     tile_number = 0
     telemetry = OperationTelemetry("Coarse RF correlation")
     use_gpu = enabled_feature("RF_GPU", default=True) and torch.cuda.is_available()
+    response_gpu = None
+    if use_gpu:
+        # Response is reused for every spatial tile.  Keeping it resident
+        # removes a host-to-device transfer from every tile/time chunk when
+        # the current VRAM budget permits it.
+        response_bytes = response.nbytes
+        if response_bytes <= gpu_available_vram_bytes() * 0.15:
+            try:
+                response_gpu = torch.as_tensor(response, dtype=torch.float64, device="cuda:0")
+            except RuntimeError:
+                response_gpu = None
     print(
         "RF correlation using stable chunk-aligned covariance: "
         f"time={time_chunk}, x={x_chunk}, y={y_chunk}; {total_tiles} spatial tiles."
@@ -101,7 +112,12 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
                     try:
                         compute_start = time.perf_counter()
                         block_tensor = torch.as_tensor(centered_block, dtype=torch.float64, device="cuda:0")
-                        response_tensor = torch.as_tensor(centered_response, dtype=torch.float64, device="cuda:0")
+                        response_tensor = (
+                            response_gpu[time_start:time_end]
+                            - torch.as_tensor(response_block_mean, dtype=torch.float64, device="cuda:0")
+                            if response_gpu is not None
+                            else torch.as_tensor(centered_response, dtype=torch.float64, device="cuda:0")
+                        )
                         cross_tensor += block_tensor.T @ response_tensor
                         telemetry.add("gpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
                         del block_tensor, response_tensor
@@ -153,6 +169,8 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
                 print(f"RF correlation spatial tiles: {tile_number}/{total_tiles}")
             telemetry.maybe_report()
     telemetry.report()
+    if response_gpu is not None:
+        del response_gpu
     return result
 
 

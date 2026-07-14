@@ -2,6 +2,7 @@
 from .common import *
 from .receptive_fields import *
 from .trial_stats import circular_variance
+from ..runtime.performance import cpu_threadpool_scope, cpu_worker_count, resolve_compute_device
 
 def compute_sta(a, b, ran, nx=None, ny=None, n_orientations=None):
     """Function for compute sta.
@@ -23,9 +24,10 @@ def compute_sta(a, b, ran, nx=None, ny=None, n_orientations=None):
         if nx is None and ny is None and n_orientations is None:
             nx, ny = coarse_grid_dimensions(int(np.sqrt(total)), int(np.sqrt(total)))
             n_orientations = max(1, total // (nx * ny))
-    with torch.no_grad():
-        a_t = torch.as_tensor(a, device='cuda', dtype=torch.float32)
-        b_t = torch.as_tensor(b, device='cuda', dtype=torch.float32)
+    device = resolve_compute_device(prefer_gpu=True)
+    with cpu_threadpool_scope(), torch.no_grad():
+        a_t = torch.as_tensor(a, device=device, dtype=torch.float32)
+        b_t = torch.as_tensor(b, device=device, dtype=torch.float32)
         
         a_sub = a_t[ran:].reshape(1, -1)
         a_sum = torch.sum(a_sub)
@@ -118,10 +120,11 @@ def CovspikeTrig(spk, w, mu, ran):
     ran_val = np.max(np.abs(np.array(ran)))
     Css = np.zeros((ran_val, 54*135, ran_val, 54*135), dtype='float16')
     
-    with torch.no_grad():
-        spk_t = torch.as_tensor(spk, device='cuda', dtype=torch.float32)
-        w_t = torch.as_tensor(w, device='cuda', dtype=torch.float32)
-        mu_t = torch.as_tensor(mu, device='cuda', dtype=torch.float32)
+    device = resolve_compute_device(prefer_gpu=True)
+    with cpu_threadpool_scope(), torch.no_grad():
+        spk_t = torch.as_tensor(spk, device=device, dtype=torch.float32)
+        w_t = torch.as_tensor(w, device=device, dtype=torch.float32)
+        mu_t = torch.as_tensor(mu, device=device, dtype=torch.float32)
         
         for dt1 in range(ran_val):
             for dt2 in range(ran_val):
@@ -130,7 +133,8 @@ def CovspikeTrig(spk, w, mu, ran):
         
         # Clear main tensors and force PyTorch to dump VRAM
         del spk_t, w_t, mu_t
-        torch.cuda.empty_cache()
+        if device == "cuda":
+            torch.cuda.empty_cache()
         gc.collect()
                 
     return Css
@@ -632,21 +636,24 @@ def calculate_spike_triggered_covariance(spikes, stimulus, tau):
     # 2000-5000 is usually a great sweet spot for modern GPUs to max out cores without OOM.
     slice_size = 2000 
     
-    with torch.no_grad():
+    device = resolve_compute_device(prefer_gpu=True)
+    with cpu_threadpool_scope(), torch.no_grad():
         # Keep main tensor in pinned CPU memory. This allows max-speed async transfers to GPU 
         # without overflowing VRAM by trying to load the whole dataset at once.
-        cent_seg_t = torch.as_tensor(centered_segments, dtype=torch.float32).pin_memory()
+        cent_seg_t = torch.as_tensor(centered_segments, dtype=torch.float32)
+        if device == "cuda":
+            cent_seg_t = cent_seg_t.pin_memory()
         
         for start_i in range(0, X * tau, slice_size):
             print(f"Processing row block: {start_i}")
             end_i = min(start_i + slice_size, X * tau)
             
             # Move only the specific chunk to GPU as fast as possible
-            slice_i = cent_seg_t[:, start_i:end_i].cuda(non_blocking=True)
+            slice_i = cent_seg_t[:, start_i:end_i].to(device, non_blocking=device == "cuda")
 
             for start_j in range(start_i, X * tau, slice_size):
                 end_j = min(start_j + slice_size, X * tau)
-                slice_j = cent_seg_t[:, start_j:end_j].cuda(non_blocking=True)
+                slice_j = cent_seg_t[:, start_j:end_j].to(device, non_blocking=device == "cuda")
 
                 # GPU Matrix Math
                 partial_cov = slice_i.t().mm(slice_j) / (num_segments - 1)
@@ -661,8 +668,6 @@ def calculate_spike_triggered_covariance(spikes, stimulus, tau):
 
             # Strict RAM/VRAM management: explicitly delete the outer chunk
             del slice_i 
-            # Clear the cache to prevent PyTorch from hoarding VRAM and causing a crash
-            torch.cuda.empty_cache() 
 
     return covariance_matrix
 
@@ -1329,8 +1334,8 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
         return i, _hcs, _hcs_, _h, _h_
 
     # Dynamically allocate threads based on your CPU
-    threads = min(32, (os.cpu_count() or 1) + 4)
-    with ThreadPoolExecutor(max_workers=threads) as executor:
+    threads = cpu_worker_count(cap=min(8, n_spk))
+    with cpu_threadpool_scope(threads), ThreadPoolExecutor(max_workers=threads) as executor:
         for i, _hcs, _hcs_, _h, _h_ in executor.map(compute_hist_1, range(n_spk)):
             Hcs[i] = _hcs
             Hcs_[i] = _hcs_
@@ -1521,7 +1526,7 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
         _h_inh_, _ = np.histogramdd(data_h, bins=E)
         return i, _h_inh, _h_inh_
 
-    with ThreadPoolExecutor(max_workers=threads) as executor:
+    with cpu_threadpool_scope(threads), ThreadPoolExecutor(max_workers=threads) as executor:
         for i, _h_inh, _h_inh_ in executor.map(compute_hist_2, range(n_spk)):
             H_inhib[i] = _h_inh
             H_inhib_[i] = _h_inh_
