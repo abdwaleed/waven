@@ -31,7 +31,7 @@ def test_sta_uses_raw_frame_counts_with_requested_lag():
         random_seed=1,
     )
 
-    centered_movie = movie - movie.mean()
+    centered_movie = movie - movie.mean(axis=0, keepdims=True)
     expected = (centered_movie[:4] * counts[0, 1:, 0, None, None]).sum(axis=0) / 4.0
     np.testing.assert_allclose(result.images[1, 0], expected, rtol=1e-6, atol=1e-6)
     assert result.total_spikes[1, 0] == 4
@@ -82,4 +82,24 @@ def test_sta_can_write_compressed_zarr_results(tmp_path):
     assert result.cache_paths["images"].suffix == ".zarr"
     assert result.cache_paths["images"].exists()
     assert (tmp_path / "sta" / "sta_lag_ms.zarr").exists()
-    np.testing.assert_allclose(np.asarray(result.images[0, 0]), (movie - movie.mean()).mean(axis=0))
+    np.testing.assert_allclose(
+        np.asarray(result.images[0, 0]),
+        (movie - movie.mean(axis=0, keepdims=True)).mean(axis=0),
+    )
+
+
+def test_sta_removes_a_static_corner_patch_from_every_lag():
+    """A static display-sync patch must not appear as an STA feature."""
+    movie = np.zeros((5, 3, 3), dtype=np.float32)
+    movie[:, 0, 0] = 1.0  # fixed top-left patch
+    movie[:, 1, 1] = np.arange(5, dtype=np.float32)  # time-varying stimulus
+    counts = np.zeros((1, 5, 1), dtype=np.int32)
+    counts[0, 1:, 0] = 1
+
+    result = compute_sta(
+        movie, counts, fps=10.0, max_lag_ms=100.0, n_shuffles=1,
+        scale_stimulus=False, random_seed=1,
+    )
+
+    np.testing.assert_allclose(result.images[:, 0, 0, 0], 0.0, atol=1e-7)
+    assert not np.allclose(result.images[0, 0], result.images[1, 0])

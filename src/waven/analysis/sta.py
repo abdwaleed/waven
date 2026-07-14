@@ -61,11 +61,19 @@ class STAResult:
     cache_paths: Dict[str, Path] = field(default_factory=dict)
 
 
-def _movie_statistics(movie: Any, chunk_size: int, cancel_event=None) -> Tuple[float, float, float]:
-    """Return a streamed movie mean/min/max without materialising the movie."""
+def _movie_statistics(movie: Any, chunk_size: int, cancel_event=None) -> Tuple[np.ndarray, float, float]:
+    """Return a streamed per-pixel movie mean plus the global extrema.
+
+    STA must remove each pixel's temporal baseline, not one scalar luminance
+    baseline for the whole screen.  A scalar leaves static spatial content
+    (notably a display-sync/photodiode patch) in every lag image, where it can
+    be mistaken for a receptive field.
+    """
     n_frames = int(movie.shape[0])
-    total = 0.0
-    samples = 0
+    if n_frames < 1:
+        raise ValueError("The STA stimulus movie contains no pixels.")
+    pixel_sum = np.zeros(tuple(int(dim) for dim in movie.shape[1:]), dtype=np.float64)
+    frames_seen = 0
     minimum = np.inf
     maximum = -np.inf
     for start in range(0, n_frames, chunk_size):
@@ -73,13 +81,13 @@ def _movie_statistics(movie: Any, chunk_size: int, cancel_event=None) -> Tuple[f
         block = np.asarray(movie[start : min(n_frames, start + chunk_size)])
         if not block.size:
             continue
-        total += float(np.sum(block, dtype=np.float64))
-        samples += int(block.size)
+        pixel_sum += np.sum(block, axis=0, dtype=np.float64)
+        frames_seen += int(block.shape[0])
         minimum = min(minimum, float(np.min(block)))
         maximum = max(maximum, float(np.max(block)))
-    if samples == 0:
+    if frames_seen == 0:
         raise ValueError("The STA stimulus movie contains no pixels.")
-    return total / samples, minimum, maximum
+    return (pixel_sum / frames_seen).astype(np.float32), minimum, maximum
 
 
 def _sta_chunk_size(n_frames: int, pixels: int, n_neurons: int, device: str) -> int:
@@ -417,7 +425,13 @@ def compute_sta(
     movie_mean, movie_min, movie_max = _movie_statistics(movie, chunk_size, cancel_event)
     scale = 1.0
     if scale_stimulus:
-        scale = 1.0 / max(abs(movie_min - movie_mean), abs(movie_max - movie_mean), 1e-12)
+        # The global extrema give a safe bound on deviation from every pixel's
+        # temporal mean without reading the disk-backed movie a second time.
+        scale = 1.0 / max(
+            abs(movie_min - float(np.max(movie_mean))),
+            abs(movie_max - float(np.min(movie_mean))),
+            1e-12,
+        )
     frame_counts = np.sum(counts, axis=0, dtype=np.float32)
     # Releasing the caller's trial-sized input early matters for ephys sessions
     # with many trials. ``frame_counts`` is enough because every trial shows
@@ -461,7 +475,7 @@ def compute_sta(
         # Centre a bounded working copy so the cached stimulus is never
         # modified while STA iterates through lags and shuffles.
         block = np.asarray(movie[start:stop], dtype=np.float32).reshape(stop - start, pixels).copy()
-        block -= np.float32(movie_mean)
+        block -= movie_mean.reshape(1, pixels)
         if scale_stimulus:
             block *= np.float32(scale)
         return block
@@ -550,11 +564,12 @@ def compute_sta(
         gabor_params=gabor_params,
         gabor_rmse=gabor_rmse,
         metadata={
-            "version": 1,
+            "version": 2,
             "movie_shape": [n_movie_frames, height, width],
             "spike_count_shape": [n_trials, n_frames, n_neurons],
             "fps": float(fps),
-            "movie_mean": float(movie_mean),
+            "movie_mean": float(np.mean(movie_mean, dtype=np.float64)),
+            "movie_centering": "per_pixel_temporal_mean",
             "movie_scale": float(scale),
             "stimulus_scaled_to_minus_one_one": bool(scale_stimulus),
             "max_lag_ms": float(max_lag_ms),

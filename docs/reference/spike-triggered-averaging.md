@@ -35,14 +35,17 @@ calculation from silently changing the scientific meaning of existing analyses.
 
 STA uses the already prepared coarse stimulus cache. NPY caches are opened as
 read-only memmaps; Zarr caches remain lazy. The movie is scanned in chunks to
-get one global mean luminance, then every working chunk is centred by that
-same value. By default its largest centred magnitude is scaled to one, placing
-the working movie in approximately `[-1, 1]` without constructing a second
-full movie in RAM.
+get a temporal mean for every stimulus pixel, then every working chunk has
+that pixel-wise baseline removed. This prevents fixed screen structure—such as
+a top-left display-sync/photodiode patch—from appearing as a red or blue
+square in every STA lag. By default a safe global bound scales the centred
+working movie to approximately `[-1, 1]` without constructing a second full
+movie in RAM.
 
 ## Core computation
 
-Let `M[t, p]` be the mean-centred, flattened stimulus frame at pixel `p`,
+Let `M[t, p]` be the flattened stimulus frame after subtracting pixel `p`'s
+temporal mean,
 and let `C[trial, t, unit]` be a raw spike count. For a lag `L`, waven first
 sums counts across repeated trials at each matching frame:
 
