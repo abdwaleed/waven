@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../pipeline-2p/">
+        <link rel="prev" href="../code-mindmap/">
       
       
-        <link rel="next" href="../methods-transparency/">
+        <link rel="next" href="../pipeline-2p/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Ephys Pipeline Mindmap - waven</title>
+        <title>Code Organization - waven</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#electrophysiology-pipeline-mindmap" class="md-skip">
+        <a href="#code-organization-and-maintenance-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Ephys Pipeline Mindmap
+              Code Organization
             
           </span>
         </div>
@@ -853,10 +853,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../maintainability/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -872,6 +899,92 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#module-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module ownership
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependency-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependency direction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#array-safety-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Array safety contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#safe-editing-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safe editing rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docstring-and-terminal-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docstring and terminal rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-refactoring-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current refactoring boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -909,37 +1022,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Ephys Pipeline Mindmap
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../pipeline-ephys/" class="md-nav__link">
         
   
   
@@ -955,70 +1041,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#input-contracts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Input contracts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#scientific-sequence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Scientific sequence
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#assumptions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Assumptions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#outputs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Outputs
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1792,10 +1814,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#input-contracts" class="md-nav__link">
+  <a href="#module-ownership" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Input contracts
+        Module ownership
       
     </span>
   </a>
@@ -1803,10 +1825,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#scientific-sequence" class="md-nav__link">
+  <a href="#dependency-direction" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Scientific sequence
+        Dependency direction
       
     </span>
   </a>
@@ -1814,10 +1836,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#assumptions" class="md-nav__link">
+  <a href="#array-safety-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Assumptions
+        Array safety contract
       
     </span>
   </a>
@@ -1825,10 +1847,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#outputs" class="md-nav__link">
+  <a href="#safe-editing-rules" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Outputs
+        Safe editing rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docstring-and-terminal-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docstring and terminal rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-refactoring-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current refactoring boundary
       
     </span>
   </a>
@@ -1855,112 +1899,116 @@
   
 
 
-<h1 id="electrophysiology-pipeline-mindmap">Electrophysiology pipeline mindmap<a class="headerlink" href="#electrophysiology-pipeline-mindmap" title="Permanent link">&para;</a></h1>
-<p>This map follows extracellular events to firing-rate receptive fields. Actual
-unit keys from the pickle are preserved and used as OSI/gOSI unit labels.</p>
-<p><img alt="Code Mindmap" src="../images/ephys_mindmap.svg" /></p>
-<div class="highlight"><pre><span></span><code>flowchart TD
-    M[&quot;Stimulus movie and configuration&quot;]
-    K[&quot;Ephys pickle&lt;br/&gt;sample rate, units, spike trains, positions&quot;]
-    D[&quot;Photodiode digital input&lt;br/&gt;sample timestamps and states&quot;]
-    W[&quot;Explicit stimulus cache and Gabor wavelets&quot;]
-    B[&quot;Trial-edge detection&lt;br/&gt;frequency and duration validation&quot;]
-    F[&quot;Dropped-pulse repair&lt;br/&gt;median frame interval&quot;]
-    H[&quot;Per-frame spike histogram&lt;br/&gt;count / exact bin duration&quot;]
-    R[&quot;Firing rate in Hz&lt;br/&gt;trial x frame x unit&quot;]
-    I[&quot;Preserved acquisition unit IDs&lt;br/&gt;unit_ids.json&quot;]
-    P[&quot;Pearson RF correlation&lt;br/&gt;unit x x x y x orientation x size x frequency&quot;]
-    O[&quot;Non-negative firing-rate tuning&lt;br/&gt;orientation x trial x unit&quot;]
-    S[&quot;OSI, gOSI, and trial SEM&quot;]
-    E[&quot;Outputs&lt;br/&gt;unit/shank distributions, RFs, models, exports&quot;]
-    M --&gt; W --&gt; P
-    K --&gt; B
-    D --&gt; B --&gt; F --&gt; H --&gt; R
-    K --&gt; I --&gt; E
-    R --&gt; P --&gt; E
-    W --&gt; O
-    R --&gt; O --&gt; S --&gt; E
-</code></pre></div>
-<h2 id="input-contracts">Input contracts<a class="headerlink" href="#input-contracts" title="Permanent link">&para;</a></h2>
+<h1 id="code-organization-and-maintenance-guide">Code organization and maintenance guide<a class="headerlink" href="#code-organization-and-maintenance-guide" title="Permanent link">&para;</a></h1>
+<p><code>waven</code> separates the scientific pipeline from user-interface orchestration.
+The separation matters because arrays can be many gigabytes: a small UI change
+must not accidentally turn a disk-backed operation into a full-memory copy.</p>
+<h2 id="module-ownership">Module ownership<a class="headerlink" href="#module-ownership" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Input</th>
-<th>Shape or unit</th>
-<th>Meaning</th>
+<th>Area</th>
+<th>Primary modules</th>
+<th>Responsibility</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>sampling frequency</td>
-<td>samples per second</td>
-<td>Converts acquisition-sample intervals to seconds.</td>
+<td>GUI</td>
+<td><code>app/gui.py</code></td>
+<td>Widget construction, user-visible progress, and sequencing actions. It should delegate scientific work rather than implement it.</td>
 </tr>
 <tr>
-<td>unit spike train</td>
-<td>one timestamp vector per pickle unit key</td>
-<td>Extracellular event times in the acquisition clock.</td>
+<td>Pipeline</td>
+<td><code>pipeline.py</code></td>
+<td>Scriptable high-level workflow with typed result containers.</td>
 </tr>
 <tr>
-<td>unit position</td>
-<td>up to three numeric coordinates</td>
-<td>Physical/electrode position; discrete metadata may identify shanks.</td>
+<td>Stimulus</td>
+<td><code>stimulus/metadata.py</code></td>
+<td>Authoritative video metadata, derived grid geometry, and coverage ratios.</td>
 </tr>
 <tr>
-<td>photodiode stream</td>
-<td>timestamps plus binary/state values</td>
-<td>Observed display transitions used to define frame bins.</td>
+<td>Wavelets</td>
+<td><code>wavelets/decomposition.py</code></td>
+<td>Legacy and convolution wavelet generation, chunking, and cache writing.</td>
 </tr>
 <tr>
-<td>movie/Gabor inputs</td>
-<td>same visual units as the 2p path</td>
-<td>Candidate frame-wise visual features.</td>
+<td>Storage</td>
+<td><code>storage/array_store.py</code>, <code>storage/binary_movie.py</code>, <code>storage/neural_cache.py</code></td>
+<td>NPY/Zarr opening, safe disk-backed views, and neural-cache persistence.</td>
+</tr>
+<tr>
+<td>RF correlation</td>
+<td><code>analysis/rf_correlation.py</code></td>
+<td>Bounded-memory correlation of disk-backed wavelets and neural responses.</td>
+</tr>
+<tr>
+<td>RF tuning extraction</td>
+<td><code>analysis/tuning.py</code></td>
+<td>Validated direct axis slices for programmatic RF consumers and exports. The GUI keeps the established SVD spatial projection for azimuth/elevation displays.</td>
+</tr>
+<tr>
+<td>Legacy analysis</td>
+<td><code>analysis/receptive_fields.py</code></td>
+<td>Existing public RF, plotting, prediction, and signal-analysis API.</td>
 </tr>
 </tbody>
 </table>
-<h2 id="scientific-sequence">Scientific sequence<a class="headerlink" href="#scientific-sequence" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Photodiode transitions define candidate frame edges. Candidate trial spans
-   are checked against expected duration before use.</li>
-<li>Missing pulses are inserted using the median observed frame interval until a
-   trial has <code>n_frames + 1</code> edges. This is a repair for isolated missing events,
-   not a correction for an incorrect or drifting clock.</li>
-<li>Each unit's spikes are histogrammed between consecutive frame edges. Counts
-   are divided by each measured bin duration in seconds, producing firing rate
-   in Hz. A tiny guard prevents division by an exactly zero interval.</li>
-<li>Cortical-response-lag correction and calcium deconvolution are skipped. Ephys
-   already records event timing and does not have a calcium indicator kernel.</li>
-<li>Pearson RF correlation locates preferred visual features. The correlation
-   values may be negative and are never passed blindly to OSI/gOSI.</li>
-<li>Non-negative firing rate is weighted by wavelet energy at the preferred RF
-   slice to form per-trial orientation tuning. Those trials provide SEM.</li>
-<li>The pickle <code>units</code> mapping keys are written to <code>unit_ids.json</code> and label the
-   by-unit histograms. Older caches without this metadata use an explicitly
-   reported fallback. Shank grouping remains position-derived unless explicit
-   shank metadata is present.</li>
-<li>Spatial-frequency tuning is shown only when more than one frequency was
-   actually decomposed.</li>
-</ol>
-<h2 id="assumptions">Assumptions<a class="headerlink" href="#assumptions" title="Permanent link">&para;</a></h2>
+<h2 id="dependency-direction">Dependency direction<a class="headerlink" href="#dependency-direction" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>flowchart LR
+    GUI[&quot;app/gui.py&quot;] --&gt; Pipeline[&quot;pipeline.py&quot;]
+    GUI --&gt; Stimulus[&quot;stimulus metadata&quot;]
+    GUI --&gt; Storage[&quot;storage adapters&quot;]
+    Pipeline --&gt; Wavelets[&quot;wavelets&quot;]
+    Pipeline --&gt; RF[&quot;analysis/rf_correlation.py&quot;]
+    Wavelets --&gt; Storage
+    RF --&gt; Storage
+</code></pre></div>
+<p>The GUI may know about actions and paths, but numerical modules must not import
+GUI code. Storage modules must not import analysis or GUI code.</p>
+<h2 id="array-safety-contract">Array safety contract<a class="headerlink" href="#array-safety-contract" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Spike, digital-input, and metadata sample rates share one acquisition clock.</li>
-<li>The selected digital input is the photodiode channel and its transitions map
-  to displayed frame boundaries.</li>
-<li>GUI frame count and trial duration describe the recorded stimulus.</li>
-<li>Frame binning intentionally discards sub-frame timing for RF correlation.</li>
-<li>Trials are exchangeable repeats for the purpose of mean and SEM.</li>
-<li>Unit IDs are stable inside this acquisition; they are not automatically
-  biological identities across sessions.</li>
-<li>Position-derived shanks are valid only when the relevant metadata column is
-  discrete and correctly encoded.</li>
-<li>Correlation is descriptive association, and the quality mask is not a
-  hypothesis test.</li>
+<li>Use <code>storage.load_array(..., mmap_mode="r")</code> for large NPY inputs.</li>
+<li>Use Zarr directly as a disk-backed array; do not call <code>np.asarray</code> on the
+  complete store.</li>
+<li>Use <code>SignedBinaryMovie</code> when convolution needs a <code>{-1, 1}</code> view of a binary
+  disk-backed movie.</li>
+<li>Use <code>streaming_cross_correlation</code> for RF correlations. It reads feature
+  tiles, never <code>reshape(time, -1)</code> on a whole Zarr tensor.</li>
+<li>Before creating an unavoidable dense result, use the runtime memory guard and
+  raise a clear, actionable error rather than letting the operating system run
+  out of memory.</li>
 </ul>
-<h2 id="outputs">Outputs<a class="headerlink" href="#outputs" title="Permanent link">&para;</a></h2>
-<p>Alignment writes <code>spikes.npy</code>/<code>.zarr</code>, <code>pos.npy</code>/<code>.zarr</code>, and <code>unit_ids.json</code>.
-Analysis adds RF correlations, preferred features, repeatability, skewness,
-firing-rate orientation tuning, OSI/gOSI, SEM, model artifacts, figures, and
-reusable NPY/Zarr export arrays.</p>
+<h2 id="safe-editing-rules">Safe editing rules<a class="headerlink" href="#safe-editing-rules" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Keep user-facing behavior in <code>app/gui.py</code>; place reusable non-widget logic
+   in the owning domain module.</li>
+<li>Preserve compatibility imports when moving a public legacy function. The
+   old module can delegate to the new focused module.</li>
+<li>Treat array shape as part of an artifact contract. Validate time, x, y,
+   orientation, sigma, and frequency axes at module boundaries.</li>
+<li>Add a focused test or smoke check whenever a cache layout, dimension rule,
+   or loading policy changes.</li>
+<li>Prefer a small new module with one responsibility over another large helper
+   block inside <code>gui.py</code> or <code>receptive_fields.py</code>.</li>
+</ol>
+<h2 id="docstring-and-terminal-rules">Docstring and terminal rules<a class="headerlink" href="#docstring-and-terminal-rules" title="Permanent link">&para;</a></h2>
+<p>Public or reusable functions use Google-style docstrings. Describe the
+scientific purpose first, then required and optional inputs, units, array shape
+and dtype where they matter, output shape, and raised errors. Do not use generic
+phrases such as “input value for this operation.” GUI-local callbacks may have a
+short purpose docstring when their enclosing widget context makes full API
+documentation unnecessary.</p>
+<p>Every long GUI action is launched through the shared task wrapper. It emits the
+same timestamped <strong>Starting</strong>, progress, resource summary, and final status
+format. Numerical modules should use <code>progress_message()</code> for repeated work;
+that gives elapsed time, ETA, and throughput without importing Tkinter.</p>
+<h2 id="current-refactoring-boundary">Current refactoring boundary<a class="headerlink" href="#current-refactoring-boundary" title="Permanent link">&para;</a></h2>
+<p>The GUI remains the orchestration entry point for backwards compatibility. New
+work should not add more numerical algorithms or file-format handling there.
+Instead, add focused functions to <code>stimulus</code>, <code>storage</code>, <code>wavelets</code>, or
+<code>analysis</code>, then call them from the relevant GUI action.</p>
 
 
 

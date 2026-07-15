@@ -40,8 +40,13 @@ def read_movie_metadata(path: MoviePath) -> Dict[str, float]:
 
 
 def downsampled_grid_dimensions(metadata: Dict[str, float], percent: float) -> Tuple[int, int]:
-    """Return ``(width, height)`` from authoritative movie metadata and a percentage."""
-    percent = max(0.0, min(100.0, float(percent)))
+    """Return ``(width, height)`` from movie metadata and a usable percentage.
+
+    A zero-sized stimulus grid has no scientific interpretation and previously
+    collapsed to a misleading one-pixel cache.  Clamp legacy zero-percent
+    configurations to the smallest supported setting (1%) instead.
+    """
+    percent = max(1.0, min(100.0, float(percent)))
     return (
         max(1, int(round(float(metadata["width"]) * percent / 100.0))),
         max(1, int(round(float(metadata["height"]) * percent / 100.0))),

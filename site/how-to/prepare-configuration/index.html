@@ -905,6 +905,8 @@
       
         
       
+        
+      
     
     
     
@@ -1002,6 +1004,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1201,6 +1231,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1326,6 +1362,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1522,6 +1614,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -2001,12 +2121,12 @@ folder and keeps the GUI field pointed at the conventional folder.</p>
 <tr>
 <td><code>gui</code></td>
 <td>optional</td>
-<td>Initial scale, backend, fresh/continue source, and output-format selectors.</td>
+<td>Initial scale, backend, fresh/continue source, output-format selectors, optional Suite2p discovery roots, and runtime scheduling choices.</td>
 </tr>
 <tr>
 <td><code>gabor_param</code></td>
 <td>optional for launch</td>
-<td>Filter axes, analysis grid, and coarse/full cache folders.</td>
+<td>Filter axes and coarse/full cache folders. Grid dimensions are read from movie metadata.</td>
 </tr>
 <tr>
 <td><code>common</code></td>
@@ -2034,11 +2154,6 @@ folder and keeps the GUI field pointed at the conventional folder.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>analysis_scale</code></td>
-<td><code>"coarse"</code>, <code>"full"</code></td>
-<td>Chooses which scale-specific folders and parameters are visible.</td>
-</tr>
-<tr>
 <td><code>wavelet_backend</code></td>
 <td><code>"legacy"</code>, <code>"convolution"</code></td>
 <td>Selects the decomposition implementation.</td>
@@ -2049,22 +2164,48 @@ folder and keeps the GUI field pointed at the conventional folder.</p>
 <td><code>data_dir</code> means fresh/raw acquisition; <code>spks_path</code> means continue from an existing cache.</td>
 </tr>
 <tr>
-<td><code>downsample_mode</code></td>
-<td><code>"legacy"</code>, <code>"precompute"</code></td>
-<td>Uses the historical grid or the percentage selector.</td>
-</tr>
-<tr>
 <td><code>downsample_percent</code></td>
 <td>number from 0 through 100</td>
-<td>Spatial percentage used by precompute mode.</td>
+<td>Spatial percentage applied to movie-metadata width and height. Coarse RF, Run Model, and Run Full Model all share this one grid.</td>
 </tr>
 <tr>
-<td>format fields</td>
+<td><code>gabor_format</code>, <code>downsample_format</code>, <code>neural_cache_format</code>, <code>wavelet_format</code></td>
 <td><code>"npy"</code> or <code>"zarr"</code></td>
-<td>Initial cache formats for the corresponding stage.</td>
+<td>Initial cache formats for the corresponding stage. <code>wavelet_format</code> controls the three consumer-specific wavelet-product buttons.</td>
+</tr>
+<tr>
+<td><code>performance</code></td>
+<td>object of booleans</td>
+<td>GUI runtime choices: <code>autotune</code>, <code>prefetch</code>, <code>async_writer</code>, <code>time_major_conv</code>, <code>rf_gpu</code>, <code>multi_gpu</code>, <code>torch_compile</code>, and <code>amp</code>. They control scheduling/hardware only; <code>amp</code> is explicitly a fast-precision convolution option.</td>
+</tr>
+<tr>
+<td><code>suite2p_subject_dirs</code></td>
+<td>string</td>
+<td>Optional two-photon timeline dataset roots, separated by the platform path separator (<code>;</code> on Windows, <code>:</code> on Linux/macOS). Leave <code>""</code> unless Suite2p timeline discovery needs folders outside <code>Dir</code>.</td>
 </tr>
 </tbody>
 </table>
+<p>Example performance block:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">&quot;performance&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;autotune&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;prefetch&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;async_writer&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;time_major_conv&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;rf_gpu&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;multi_gpu&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;torch_compile&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;amp&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Enable <code>multi_gpu</code> only when using the convolution backend with at least two
+CUDA GPUs dedicated to Waven. The GUI automatically excludes mixed or markedly
+unequal cards from synchronous DataParallel work and explains its one-GPU
+fallback in the terminal.</p>
+<p><code>suite2p_subject_dirs</code> is intentionally empty in the portable example
+configuration. It is a machine-specific data-discovery convenience, not a
+project-relative input or an analysis parameter. The GUI's <strong>Advanced
+2-photon data discovery</strong> card can apply it for the current process and stores
+it with the rest of the current GUI inputs when you save them.</p>
 <h2 id="gabor_param"><code>gabor_param</code><a class="headerlink" href="#gabor_param" title="Permanent link">&para;</a></h2>
 <p>These fields define the Gabor filters before they are applied to the movie.</p>
 <table>
@@ -2101,24 +2242,10 @@ folder and keeps the GUI field pointed at the conventional folder.</p>
 </tr>
 <tr>
 <td><code>Phases</code></td>
-<td>list string, e.g. <code>"[0, 1.57079632679]"</code></td>
-<td>radians</td>
+<td>list string, e.g. <code>"[0, 90]"</code></td>
+<td>degrees</td>
 <td>no</td>
-<td>Gabor phase offsets. <code>1.57079632679</code> is pi/2, the common quadrature phase. Do not type <code>90</code> unless you intentionally mean 90 radians.</td>
-</tr>
-<tr>
-<td><code>NX</code></td>
-<td>integer string</td>
-<td>analysis pixels</td>
-<td>no</td>
-<td>Full-grid horizontal samples. Must match <code>common.NX</code>.</td>
-</tr>
-<tr>
-<td><code>NY</code></td>
-<td>integer string</td>
-<td>analysis pixels</td>
-<td>no</td>
-<td>Full-grid vertical samples. Must match <code>common.NY</code>.</td>
+<td>Gabor phase offsets. The GUI converts degrees to radians immediately before Gabor-kernel construction.</td>
 </tr>
 <tr>
 <td><code>Coarse Library Path</code></td>
@@ -2237,18 +2364,6 @@ folder and keeps the GUI field pointed at the conventional folder.</p>
 <td>Last block considered during alignment. Use <code>"0"</code> when your workflow does not need a later block.</td>
 </tr>
 <tr>
-<td><code>Hz</code></td>
-<td>integer string</td>
-<td>frames per second</td>
-<td>Stimulus frame rate after movie presentation. Used for frames-per-minute and holdout windows.</td>
-</tr>
-<tr>
-<td><code>Number of Frames</code></td>
-<td>integer string</td>
-<td>frames</td>
-<td>Expected or maximum stimulus frames. RF analysis uses the minimum of config frames, spike frames, and wavelet frames.</td>
-</tr>
-<tr>
 <td><code>Train Trial Indices</code></td>
 <td><code>"auto"</code> or list string</td>
 <td>zero-based trial indices</td>
@@ -2310,6 +2425,10 @@ to <code>-56</code> degrees elevation, type:</p>
 <p>If you only want to analyze the central visual field, type a smaller crop:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">&quot;Analysis Coverage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;[-35, 35, 35, -35]&quot;</span>
 </code></pre></div>
+<p>The stimulus cache converts these coverage limits to pixel bounds before
+resizing. Changing either coverage field invalidates the prepared stimulus
+cache; run <strong>Prepare Stimulus Cache</strong> again before rerunning the wavelets or
+STA.</p>
 <h2 id="workflow-specific-sections">Workflow-specific sections<a class="headerlink" href="#workflow-specific-sections" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2369,7 +2488,7 @@ to <code>-56</code> degrees elevation, type:</p>
 <tbody>
 <tr>
 <td><code>n_frames</code></td>
-<td>movie length and <code>Number of Frames</code></td>
+<td>movie metadata</td>
 <td>downsampled movies, wavelets, spikes</td>
 </tr>
 <tr>
@@ -2383,14 +2502,14 @@ to <code>-56</code> degrees elevation, type:</p>
 <td><code>spikes</code>, RF tensors, plots</td>
 </tr>
 <tr>
-<td><code>NX</code>, <code>NY</code></td>
-<td>config grid</td>
-<td>fine library and full wavelets</td>
+<td><code>analysis_x</code>, <code>analysis_y</code></td>
+<td>movie metadata × <code>downsample_percent</code></td>
+<td>Gabor assets, wavelets, RF tensor</td>
 </tr>
 <tr>
-<td>coarse <code>nx</code>, <code>ny</code></td>
-<td>derived from <code>NX</code>, <code>NY</code></td>
-<td>coarse library, coarse wavelets, RF tensor</td>
+<td>coarse <code>x</code>, <code>y</code></td>
+<td>derived from the shared analysis grid</td>
+<td>coarse assets, Coarse RF cache, RF tensor</td>
 </tr>
 <tr>
 <td><code>n_orientations</code></td>
@@ -2412,7 +2531,7 @@ to <code>-56</code> degrees elevation, type:</p>
 <p>When a run is expensive, start by estimating the largest output. Full-model
 wavelets are usually the limiting object because each phase is a dense
 <code>float32</code> tensor:</p>
-<div class="highlight"><pre><span></span><code>bytes_per_phase = n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies * 4
+<div class="highlight"><pre><span></span><code>bytes_per_phase = n_frames * analysis_x * analysis_y * n_orientations * n_sigmas * n_frequencies * 4
 </code></pre></div>
 <p>Coarse RF search is intentionally smaller because it uses the derived coarse
 grid and usually one coupled size/frequency relationship.</p>

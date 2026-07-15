@@ -747,6 +747,8 @@
       
         
       
+        
+      
     
     
     
@@ -844,6 +846,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1043,6 +1073,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1168,6 +1204,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1364,6 +1456,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1603,13 +1723,21 @@
 
 
 <h1 id="export-results">Export results<a class="headerlink" href="#export-results" title="Permanent link">&para;</a></h1>
-<p>The GUI has four export buttons:</p>
+<p>The Export tab has two clearly separated sections.</p>
+<p><strong>Section A — Current Display</strong> exports the graphs that are currently visible:</p>
 <ul>
-<li><strong>Export All Displayed Results</strong></li>
-<li><strong>Export All Neurons Tab</strong></li>
-<li><strong>Export Individual Neuron Tab</strong></li>
-<li><strong>Export All Individual Neurons</strong></li>
+<li><strong>Export Current GUI: All + Individual</strong>;</li>
+<li><strong>Export Current Display: All-Neuron Graphs</strong>;</li>
+<li><strong>Export Current Display: Individual-Neuron Graphs</strong>.</li>
 </ul>
+<p>Tick the graph-type checkboxes above each action to control the contents. The
+current all-neuron and individual-neuron selections are independent, so a
+combined export includes only the checked graph types from each view.</p>
+<p><strong>Section B — Every Analyzed Neuron</strong> has <strong>Export Selected Single-Graph Files
+for Every Neuron</strong>. Its checkboxes select spike trains, RF maps, elevation,
+azimuth, orientation/size/frequency tuning, and PSTH-weighted STA lag maps. It creates one
+folder per graph: a multi-panel tuning dashboard is never stored as a single
+graph-data bundle.</p>
 <p>Each exported graph can include:</p>
 <ul>
 <li>PNG image;</li>
@@ -1619,9 +1747,18 @@
 <li>JSON manifest describing files, axes, and array keys.</li>
 </ul>
 <p>Use exports when you need a figure and the numerical data that produced it.
-The selected array format does not alter PNG, SVG, JSON, or pickle outputs. The
-all-individual-neurons export creates one directory per neuron and can therefore
-be large for recordings with many cells or units.</p>
+The selected array format does not alter PNG, SVG, JSON, or pickle outputs.
+The all-neuron single-graph export creates a directory for every selected graph
+of every neuron and can therefore be large for recordings with many cells.</p>
+<p>For a selected STA export, Waven calculates a small RAM-bounded group of
+neurons at a time using vectorized matrix products, then writes each neuron's
+usual PNG, SVG, pickle, array, and manifest files. Batch export also avoids
+unneeded Tk canvas refreshes; the saved graph contents are unchanged.</p>
+<p>Export folders use compact, collision-safe directory names so batch exports
+remain below typical Windows path-length limits. The complete graph title and
+the list of generated files remain in each graph's <code>manifest.json</code>; a batch
+<code>export_manifest.json</code> records any individual neurons that could not be
+exported without interrupting the remaining neurons.</p>
 
 
 

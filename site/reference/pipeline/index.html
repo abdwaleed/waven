@@ -14,7 +14,7 @@
         <link rel="prev" href="../config/">
       
       
-        <link rel="next" href="../wavelets/">
+        <link rel="next" href="../data-contracts/">
       
       
         
@@ -735,6 +735,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1005,6 +1035,12 @@
       
         
           
+        
+      
+        
+      
+        
+      
         
       
         
@@ -1500,6 +1536,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../wavelets/" class="md-nav__link">
         
   
@@ -1676,6 +1768,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -3651,7 +3771,11 @@ to validate than a long top-level script.</p>
 <span class="normal">487</span>
 <span class="normal">488</span>
 <span class="normal">489</span>
-<span class="normal">490</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_rf_analysis</span><span class="p">(</span>
+<span class="normal">490</span>
+<span class="normal">491</span>
+<span class="normal">492</span>
+<span class="normal">493</span>
+<span class="normal">494</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_rf_analysis</span><span class="p">(</span>
     <span class="n">analysis</span><span class="p">:</span> <span class="n">AnalysisConfig</span><span class="p">,</span>
     <span class="n">gabor</span><span class="p">:</span> <span class="n">GaborConfig</span><span class="p">,</span>
     <span class="n">spike_data</span><span class="p">:</span> <span class="n">SpikeData</span><span class="p">,</span>
@@ -3673,7 +3797,10 @@ to validate than a long top-level script.</p>
         <span class="n">wavelets</span><span class="o">.</span><span class="n">wavelets_complex</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
         <span class="n">spike_data</span><span class="o">.</span><span class="n">spikes</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
     <span class="p">)</span>
-    <span class="n">stimulus</span> <span class="o">=</span> <span class="n">wavelets</span><span class="o">.</span><span class="n">wavelets_complex</span><span class="p">[:</span><span class="n">n_frames</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_frames</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="c1"># Retain the structured disk-backed tensor.  PearsonCorrelationPinkNoise</span>
+    <span class="c1"># streams it in feature blocks, whereas flattening a Zarr cache materializes</span>
+    <span class="c1"># the entire wavelet product in RAM.</span>
+    <span class="n">stimulus</span> <span class="o">=</span> <span class="n">wavelets</span><span class="o">.</span><span class="n">wavelets_complex</span>
     <span class="n">response</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">spike_data</span><span class="o">.</span><span class="n">spikes</span><span class="p">[:,</span> <span class="p">:</span><span class="n">n_frames</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">wavelets</span><span class="o">.</span><span class="n">wavelets_complex</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">6</span><span class="p">:</span>
         <span class="n">rf_nf</span> <span class="o">=</span> <span class="n">wavelets</span><span class="o">.</span><span class="n">wavelets_complex</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">5</span><span class="p">]</span>
@@ -3695,6 +3822,7 @@ to validate than a long top-level script.</p>
         <span class="n">rf_frequencies</span><span class="p">,</span>                <span class="c1"># frequencies present in coarse cache</span>
         <span class="n">n_orientations</span><span class="o">=</span><span class="n">gabor</span><span class="o">.</span><span class="n">n_thetas</span><span class="p">,</span> 
         <span class="n">plotting</span><span class="o">=</span><span class="n">plotting</span><span class="p">,</span>
+        <span class="n">n_time</span><span class="o">=</span><span class="n">n_frames</span><span class="p">,</span>
     <span class="p">)</span>
 
     <span class="k">if</span> <span class="p">(</span>
@@ -3749,11 +3877,7 @@ to validate than a long top-level script.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\pipeline.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">493</span>
-<span class="normal">494</span>
-<span class="normal">495</span>
-<span class="normal">496</span>
-<span class="normal">497</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">497</span>
 <span class="normal">498</span>
 <span class="normal">499</span>
 <span class="normal">500</span>
@@ -3769,7 +3893,11 @@ to validate than a long top-level script.</p>
 <span class="normal">510</span>
 <span class="normal">511</span>
 <span class="normal">512</span>
-<span class="normal">513</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">smooth_best_positions</span><span class="p">(</span>
+<span class="normal">513</span>
+<span class="normal">514</span>
+<span class="normal">515</span>
+<span class="normal">516</span>
+<span class="normal">517</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">smooth_best_positions</span><span class="p">(</span>
     <span class="n">raw_best_params</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
     <span class="n">neuron_pos</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
     <span class="n">radius_um</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">30.0</span><span class="p">,</span>
@@ -3824,11 +3952,7 @@ to validate than a long top-level script.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\pipeline.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">516</span>
-<span class="normal">517</span>
-<span class="normal">518</span>
-<span class="normal">519</span>
-<span class="normal">520</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">520</span>
 <span class="normal">521</span>
 <span class="normal">522</span>
 <span class="normal">523</span>
@@ -3872,7 +3996,11 @@ to validate than a long top-level script.</p>
 <span class="normal">561</span>
 <span class="normal">562</span>
 <span class="normal">563</span>
-<span class="normal">564</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_simple_model</span><span class="p">(</span>
+<span class="normal">564</span>
+<span class="normal">565</span>
+<span class="normal">566</span>
+<span class="normal">567</span>
+<span class="normal">568</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_simple_model</span><span class="p">(</span>
     <span class="n">rf_analysis</span><span class="p">:</span> <span class="n">RFAnalysisResult</span><span class="p">,</span>
     <span class="n">spike_data</span><span class="p">:</span> <span class="n">SpikeData</span><span class="p">,</span>
     <span class="n">dt1</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">9000</span><span class="p">,</span>
@@ -3952,11 +4080,7 @@ to validate than a long top-level script.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\pipeline.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">567</span>
-<span class="normal">568</span>
-<span class="normal">569</span>
-<span class="normal">570</span>
-<span class="normal">571</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">571</span>
 <span class="normal">572</span>
 <span class="normal">573</span>
 <span class="normal">574</span>
@@ -3999,7 +4123,11 @@ to validate than a long top-level script.</p>
 <span class="normal">611</span>
 <span class="normal">612</span>
 <span class="normal">613</span>
-<span class="normal">614</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_full_model</span><span class="p">(</span>
+<span class="normal">614</span>
+<span class="normal">615</span>
+<span class="normal">616</span>
+<span class="normal">617</span>
+<span class="normal">618</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_full_model</span><span class="p">(</span>
     <span class="n">config</span><span class="p">:</span> <span class="n">PipelineConfig</span><span class="p">,</span>
     <span class="n">spike_data</span><span class="p">:</span> <span class="n">SpikeData</span><span class="p">,</span>
     <span class="n">rf_analysis</span><span class="p">:</span> <span class="n">RFAnalysisResult</span><span class="p">,</span>
@@ -4080,11 +4208,7 @@ to validate than a long top-level script.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\pipeline.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">617</span>
-<span class="normal">618</span>
-<span class="normal">619</span>
-<span class="normal">620</span>
-<span class="normal">621</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">621</span>
 <span class="normal">622</span>
 <span class="normal">623</span>
 <span class="normal">624</span>
@@ -4147,7 +4271,11 @@ to validate than a long top-level script.</p>
 <span class="normal">681</span>
 <span class="normal">682</span>
 <span class="normal">683</span>
-<span class="normal">684</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_pipeline</span><span class="p">(</span>
+<span class="normal">684</span>
+<span class="normal">685</span>
+<span class="normal">686</span>
+<span class="normal">687</span>
+<span class="normal">688</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run_pipeline</span><span class="p">(</span>
     <span class="n">config</span><span class="p">:</span> <span class="n">PipelineConfig</span><span class="p">,</span>
     <span class="o">*</span><span class="p">,</span>
     <span class="n">run_gabor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>

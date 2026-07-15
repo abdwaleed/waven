@@ -630,6 +630,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#legacy-library-versus-convolution-kernels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legacy library versus convolution kernels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-gets-written" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -817,6 +828,8 @@
       
         
       
+        
+      
     
     
     
@@ -914,6 +927,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1113,6 +1154,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1238,6 +1285,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1434,6 +1537,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1661,6 +1792,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#legacy-library-versus-convolution-kernels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legacy library versus convolution kernels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-gets-written" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1727,23 +1869,35 @@
 </code></pre></div>
 <p>The coarse library is used for fast receptive-field screening. The fine library
 is used for full-resolution model fitting.</p>
-<p>In the GUI, choose <strong>Analysis scale</strong> first, then click <strong>Build Gabor Library</strong>.</p>
+<p>In the GUI, first complete <strong>1 Stimulus &amp; Metadata</strong>, then click <strong>Prepare
+Gabor Assets (Coarse RF + Full Model)</strong>. The displayed grid is read-only: it is
+calculated from movie metadata and the selected percentage. Enter phase offsets in
+degrees (for example <code>[0, 90]</code>); the application converts them to radians only
+when constructing Gabor kernels.</p>
+<h2 id="legacy-library-versus-convolution-kernels">Legacy library versus convolution kernels<a class="headerlink" href="#legacy-library-versus-convolution-kernels" title="Permanent link">&para;</a></h2>
+<p>The active wavelet backend changes what the Gabor action does. With <strong>legacy</strong>,
+the action creates the flattened Gabor library described below; therefore the
+GUI displays the NPY/Zarr library selector and its size estimate. With
+<strong>convolution</strong>, the action builds a compact convolution-kernel cache instead.
+The library format and large-library estimate are intentionally hidden because
+no flattened library is produced. This prevents a displayed size estimate from
+being mistaken for the size of the convolution cache.</p>
 <table>
 <thead>
 <tr>
-<th>Scale</th>
+<th>Product</th>
 <th>Built library</th>
 <th>Folder field used</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>coarse</code></td>
+<td>Coarse RF / Run Model</td>
 <td>coarse coupled library</td>
 <td><code>Coarse Library Path</code></td>
 </tr>
 <tr>
-<td><code>full</code></td>
+<td>Run Full Model</td>
 <td>fine independent-frequency library</td>
 <td><code>Fine Library Path</code> and <code>Library Path</code></td>
 </tr>
@@ -1779,14 +1933,14 @@ large bank of filters.</p>
 <tr>
 <td>Fine with independent frequencies</td>
 <td><code>cache/gabor/full/gabor_library_fine.npy</code></td>
-<td><code>(NX, NY, n_orientations, n_sigmas_total, n_frequencies, n_phases, NX * NY)</code></td>
+<td><code>(x, y, n_orientations, n_sigmas_total, n_frequencies, n_phases, x * y)</code></td>
 <td><code>float16</code></td>
 <td>full-model wavelets</td>
 </tr>
 <tr>
 <td>Fine without independent frequencies</td>
 <td><code>cache/gabor/full/gabor_library_fine.npy</code></td>
-<td><code>(NX, NY, n_orientations, n_sigmas_total, n_phases, NX * NY)</code></td>
+<td><code>(x, y, n_orientations, n_sigmas_total, n_phases, x * y)</code></td>
 <td><code>float16</code></td>
 <td>full-model wavelets with one coupled frequency</td>
 </tr>

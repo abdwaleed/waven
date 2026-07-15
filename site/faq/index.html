@@ -733,6 +733,8 @@
       
         
       
+        
+      
     
     
     
@@ -830,6 +832,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1029,6 +1059,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1154,6 +1190,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1350,6 +1442,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1645,10 +1765,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-does-a-movie-shape-look-like-frames-ny-nx-but-wavelets-use-frames-nx-ny" class="md-nav__link">
+  <a href="#why-does-a-movie-shape-look-like-frames-y-x-but-wavelets-use-frames-x-y" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why does a movie shape look like (frames, NY, NX) but wavelets use (frames, NX, NY, ...)?
+        Why does a movie shape look like (frames, y, x) but wavelets use (frames, x, y, ...)?
       
     </span>
   </a>
@@ -1778,10 +1898,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-does-a-movie-shape-look-like-frames-ny-nx-but-wavelets-use-frames-nx-ny" class="md-nav__link">
+  <a href="#why-does-a-movie-shape-look-like-frames-y-x-but-wavelets-use-frames-x-y" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why does a movie shape look like (frames, NY, NX) but wavelets use (frames, NX, NY, ...)?
+        Why does a movie shape look like (frames, y, x) but wavelets use (frames, x, y, ...)?
       
     </span>
   </a>
@@ -1846,9 +1966,9 @@
 <p>Use local storage. Reading and writing from a server or network drive can make
 wavelet decomposition and model fitting much slower.</p>
 <h2 id="can-gabor-libraries-be-reused">Can Gabor libraries be reused?<a class="headerlink" href="#can-gabor-libraries-be-reused" title="Permanent link">&para;</a></h2>
-<p>Yes. Reuse them when <code>NX</code>, <code>NY</code>, orientations, sigmas, phases, and frequencies
-match the experiment configuration. The GUI now checks output shapes before
-reusing artifacts.</p>
+<p>Yes. Reuse them when the movie metadata, downsampling percentage, orientations,
+sigmas, phases, frequencies, and backend match the experiment configuration.
+The GUI checks output shapes and parameter fingerprints before reuse.</p>
 <h2 id="why-does-preprocessing-take-so-long">Why does preprocessing take so long?<a class="headerlink" href="#why-does-preprocessing-take-so-long" title="Permanent link">&para;</a></h2>
 <p>Wavelet decomposition projects every stimulus frame onto many filters. The first
 run is expensive, but durable <code>.npy</code> or <code>.zarr</code> outputs are reused by later runs.</p>
@@ -1858,7 +1978,7 @@ numeric arrays and metadata.</p>
 <h2 id="what-is-the-difference-between-osi-and-gosi">What is the difference between OSI and gOSI?<a class="headerlink" href="#what-is-the-difference-between-osi-and-gosi" title="Permanent link">&para;</a></h2>
 <p>OSI compares the preferred and orthogonal orientation responses. gOSI summarizes
 the whole orientation tuning curve with a vector sum.</p>
-<h2 id="why-does-a-movie-shape-look-like-frames-ny-nx-but-wavelets-use-frames-nx-ny">Why does a movie shape look like <code>(frames, NY, NX)</code> but wavelets use <code>(frames, NX, NY, ...)</code>?<a class="headerlink" href="#why-does-a-movie-shape-look-like-frames-ny-nx-but-wavelets-use-frames-nx-ny" title="Permanent link">&para;</a></h2>
+<h2 id="why-does-a-movie-shape-look-like-frames-y-x-but-wavelets-use-frames-x-y">Why does a movie shape look like <code>(frames, y, x)</code> but wavelets use <code>(frames, x, y, ...)</code>?<a class="headerlink" href="#why-does-a-movie-shape-look-like-frames-y-x-but-wavelets-use-frames-x-y" title="Permanent link">&para;</a></h2>
 <p>Downsampled movies are image arrays, so their spatial axes are row then column:
 <code>(y, x)</code>. Gabor libraries and RF tensors use feature coordinates: <code>(x, y)</code>.
 Both are expected. The safest check is to compare the file with the documented
@@ -1867,7 +1987,7 @@ stage that produced it.</p>
 <p>Wavelet arrays are dense <code>float32</code> tensors. Every extra frame, grid point,
 orientation, sigma, and frequency multiplies the total size. One full-model
 phase is:</p>
-<div class="highlight"><pre><span></span><code>n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies * 4 bytes
+<div class="highlight"><pre><span></span><code>n_frames * analysis_x * analysis_y * n_orientations * n_sigmas * n_frequencies * 4 bytes
 </code></pre></div>
 <p>Real and imaginary phases are separate files.</p>
 <h2 id="when-should-i-use-zarr">When should I use Zarr?<a class="headerlink" href="#when-should-i-use-zarr" title="Permanent link">&para;</a></h2>

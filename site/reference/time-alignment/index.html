@@ -14,7 +14,7 @@
         <link rel="prev" href="../runtime/">
       
       
-        <link rel="next" href="../neural-data/">
+        <link rel="next" href="../psth-spike-triggered-averaging/">
       
       
         
@@ -735,6 +735,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1033,6 +1063,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1158,6 +1194,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1508,6 +1600,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1879,6 +1999,9 @@ neural arrays. The rest of the pipeline assumes this step has produced a stable
 <p>Frame alignment is high stakes: a one-frame offset changes correlations and RF
 locations. If RF maps look noisy across all neurons, inspect alignment before
 tuning model parameters.</p>
+<p>For ephys cache creation, <code>spikes</code> is the firing-rate (Hz) array consumed by
+the RF/OSI/model workflow and the PSTH-weighted STA shown during individual
+Coarse RF inspection.</p>
 
 
 <div class="doc doc-object doc-module">
@@ -2003,10 +2126,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\time_alignment.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">41</span>
-<span class="normal">42</span>
-<span class="normal">43</span>
-<span class="normal">44</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">44</span>
 <span class="normal">45</span>
 <span class="normal">46</span>
 <span class="normal">47</span>
@@ -2051,7 +2171,10 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
 <span class="normal">86</span>
 <span class="normal">87</span>
 <span class="normal">88</span>
-<span class="normal">89</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_two_photon_spikes</span><span class="p">(</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_two_photon_spikes</span><span class="p">(</span>
     <span class="n">experiment_info</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
     <span class="n">data_dirs</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
     <span class="n">suite2p_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
@@ -2120,6 +2243,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
     <span class="n">sampling_rate</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
     <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
+    <span class="n">stimulus_duration</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span>
 </code></pre></div>
@@ -2254,10 +2378,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\time_alignment.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 92</span>
-<span class="normal"> 93</span>
-<span class="normal"> 94</span>
-<span class="normal"> 95</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 95</span>
 <span class="normal"> 96</span>
 <span class="normal"> 97</span>
 <span class="normal"> 98</span>
@@ -2516,12 +2637,21 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
 <span class="normal">351</span>
 <span class="normal">352</span>
 <span class="normal">353</span>
-<span class="normal">354</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">align_ephys_data</span><span class="p">(</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">align_ephys_data</span><span class="p">(</span>
     <span class="n">data_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
     <span class="n">nb_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
     <span class="n">sampling_rate</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
     <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
+    <span class="n">stimulus_duration</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span><span class="p">:</span>
 
@@ -2609,7 +2739,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
 
                 <span class="n">trial_spikes</span> <span class="o">=</span> <span class="n">spike_train</span><span class="p">[(</span><span class="n">spike_train</span> <span class="o">&gt;=</span> <span class="n">start_time</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">spike_train</span> <span class="o">&lt;=</span> <span class="n">end_time</span><span class="p">)]</span>
 
-                <span class="c1"># 1. Get raw counts per bin</span>
+                <span class="c1"># Count events in each photodiode-defined frame bin.</span>
                 <span class="n">binned_counts</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">trial_spikes</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">frame_edges</span><span class="p">)</span>
 
                 <span class="c1"># 2. Calculate the exact duration of each bin in seconds</span>
@@ -2758,20 +2888,24 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
         <span class="n">SAMPLING_RATE</span> <span class="o">=</span> <span class="n">pkl_data</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">][</span><span class="s1">&#39;sampling_frequencies&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
         <span class="n">units</span> <span class="o">=</span> <span class="n">pkl_data</span><span class="p">[</span><span class="s1">&#39;units&#39;</span><span class="p">]</span>
 
-    <span class="n">STIMULUS_DURATION</span> <span class="o">=</span> <span class="mi">10</span> <span class="o">*</span> <span class="mi">60</span> <span class="c1"># IN SECONDS</span>
+    <span class="k">if</span> <span class="n">stimulus_duration</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">stimulus_duration</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Ephys alignment requires the stimulus movie duration from metadata.&quot;</span><span class="p">)</span>
 
     <span class="n">dio_files</span> <span class="o">=</span> <span class="n">get_dio_files</span><span class="p">(</span><span class="n">data_dir</span><span class="p">)</span>
     <span class="n">pd_time</span><span class="p">,</span> <span class="n">pd_state</span> <span class="o">=</span> <span class="n">choose_correct_din_file</span><span class="p">(</span><span class="n">dio_files</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
     <span class="n">freq</span> <span class="o">=</span> <span class="n">get_frequency</span><span class="p">(</span><span class="n">pd_time</span><span class="p">,</span> <span class="n">SAMPLING_RATE</span><span class="p">)</span>
 
     <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span> <span class="o">=</span> <span class="n">get_possible_trial_edges</span><span class="p">(</span><span class="n">freq</span><span class="p">,</span> <span class="n">pd_time</span><span class="p">)</span> 
-    <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span> <span class="o">=</span> <span class="n">validate_edges</span><span class="p">(</span><span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span><span class="p">,</span> <span class="n">STIMULUS_DURATION</span><span class="p">,</span> <span class="n">SAMPLING_RATE</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">)</span>
+    <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span> <span class="o">=</span> <span class="n">validate_edges</span><span class="p">(</span><span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span><span class="p">,</span> <span class="n">stimulus_duration</span><span class="p">,</span> <span class="n">SAMPLING_RATE</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">)</span>
 
-    <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">unit_ids</span> <span class="o">=</span> <span class="n">extract_pos_and_spikes</span><span class="p">(</span><span class="n">units</span><span class="p">,</span> <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span><span class="p">,</span> <span class="n">pd_time</span><span class="p">,</span> <span class="n">pd_state</span><span class="p">,</span> <span class="n">nb_frames</span><span class="p">)</span>
+    <span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">unit_ids</span> <span class="o">=</span> <span class="n">extract_pos_and_spikes</span><span class="p">(</span>
+        <span class="n">units</span><span class="p">,</span> <span class="n">start_times</span><span class="p">,</span> <span class="n">end_times</span><span class="p">,</span> <span class="n">pd_time</span><span class="p">,</span> <span class="n">pd_state</span><span class="p">,</span> <span class="n">nb_frames</span>
+    <span class="p">)</span>
 
     <span class="nb">print</span><span class="p">(</span><span class="n">neuron_pos</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
     <span class="nb">print</span><span class="p">(</span><span class="n">spikes</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
-    <span class="n">_save_aligned_outputs</span><span class="p">(</span><span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">save_dir</span> <span class="ow">or</span> <span class="n">data_dir</span><span class="p">,</span> <span class="n">output_format</span><span class="p">,</span> <span class="n">unit_ids</span><span class="o">=</span><span class="n">unit_ids</span><span class="p">)</span>
+    <span class="n">cache_dir</span> <span class="o">=</span> <span class="n">save_dir</span> <span class="ow">or</span> <span class="n">data_dir</span>
+    <span class="n">_save_aligned_outputs</span><span class="p">(</span><span class="n">neuron_pos</span><span class="p">,</span> <span class="n">spikes</span><span class="p">,</span> <span class="n">cache_dir</span><span class="p">,</span> <span class="n">output_format</span><span class="p">,</span> <span class="n">unit_ids</span><span class="o">=</span><span class="n">unit_ids</span><span class="p">)</span>
 
     <span class="k">return</span> <span class="n">AlignedNeuralData</span><span class="p">(</span>
         <span class="n">spikes</span><span class="o">=</span><span class="n">spikes</span><span class="p">,</span>
@@ -2811,6 +2945,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
     <span class="n">correct_positions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
+    <span class="n">stimulus_duration</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span>
 </code></pre></div>
 
@@ -2821,14 +2956,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\time_alignment.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">367</span>
-<span class="normal">368</span>
-<span class="normal">369</span>
-<span class="normal">370</span>
-<span class="normal">371</span>
-<span class="normal">372</span>
-<span class="normal">373</span>
-<span class="normal">374</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">374</span>
 <span class="normal">375</span>
 <span class="normal">376</span>
 <span class="normal">377</span>
@@ -2890,7 +3018,17 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
 <span class="normal">433</span>
 <span class="normal">434</span>
 <span class="normal">435</span>
-<span class="normal">436</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_aligned_spikes</span><span class="p">(</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span>
+<span class="normal">443</span>
+<span class="normal">444</span>
+<span class="normal">445</span>
+<span class="normal">446</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_aligned_spikes</span><span class="p">(</span>
     <span class="n">workflow</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
     <span class="o">*</span><span class="p">,</span>
     <span class="n">experiment_info</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
@@ -2908,6 +3046,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
     <span class="n">correct_positions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="n">save_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">output_format</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;npy&quot;</span><span class="p">,</span>
+    <span class="n">stimulus_duration</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignedNeuralData</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Dispatch spike loading to the workflow-specific alignment routine.&quot;&quot;&quot;</span>
     <span class="n">cache_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">save_dir</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">Path</span><span class="p">(</span><span class="n">save_dir</span><span class="p">)</span>
@@ -2943,6 +3082,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
             <span class="n">correct_positions</span><span class="o">=</span><span class="n">correct_positions</span><span class="p">,</span>
             <span class="n">save_dir</span><span class="o">=</span><span class="n">cache_dir</span><span class="p">,</span>
             <span class="n">output_format</span><span class="o">=</span><span class="n">output_format</span><span class="p">,</span>
+            <span class="n">stimulus_duration</span><span class="o">=</span><span class="n">stimulus_duration</span><span class="p">,</span>
         <span class="p">)</span>
 
     <span class="k">if</span> <span class="n">workflow</span> <span class="o">==</span> <span class="n">WORKFLOW_EPHYS</span><span class="p">:</span>
@@ -2954,6 +3094,7 @@ caches in either NPY or Zarr format and skips suite2p alignment.</p>
             <span class="n">sampling_rate</span><span class="p">,</span>
             <span class="n">save_dir</span><span class="o">=</span><span class="n">cache_dir</span><span class="p">,</span>
             <span class="n">output_format</span><span class="o">=</span><span class="n">output_format</span><span class="p">,</span>
+            <span class="n">stimulus_duration</span><span class="o">=</span><span class="n">stimulus_duration</span><span class="p">,</span>
             <span class="n">experiment_info</span><span class="o">=</span><span class="n">experiment_info</span><span class="p">,</span>
             <span class="n">threshold</span><span class="o">=</span><span class="n">threshold</span><span class="p">,</span>
             <span class="n">method</span><span class="o">=</span><span class="n">method</span><span class="p">,</span>

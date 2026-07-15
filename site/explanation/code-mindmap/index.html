@@ -14,7 +14,7 @@
         <link rel="prev" href="../pipeline-intuition/">
       
       
-        <link rel="next" href="../pipeline-2p/">
+        <link rel="next" href="../maintainability/">
       
       
         
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#code-mindmap" class="md-skip">
+        <a href="#code-and-data-flow" class="md-skip">
           Skip to content
         </a>
       
@@ -737,6 +737,8 @@
       
         
       
+        
+      
     
     
     
@@ -886,10 +888,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#end-to-end-flow" class="md-nav__link">
+  <a href="#artifact-contracts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        End-to-end flow
+        Artifact contracts
       
     </span>
   </a>
@@ -897,32 +899,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gui-scale-selector" class="md-nav__link">
+  <a href="#dimension-ownership" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GUI scale selector
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#function-contracts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Function contracts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mental-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mental model
+        Dimension ownership
       
     </span>
   </a>
@@ -933,6 +913,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1124,6 +1132,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1249,6 +1263,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1445,6 +1515,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1672,10 +1770,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#end-to-end-flow" class="md-nav__link">
+  <a href="#artifact-contracts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        End-to-end flow
+        Artifact contracts
       
     </span>
   </a>
@@ -1683,32 +1781,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gui-scale-selector" class="md-nav__link">
+  <a href="#dimension-ownership" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GUI scale selector
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#function-contracts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Function contracts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mental-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mental model
+        Dimension ownership
       
     </span>
   </a>
@@ -1735,146 +1811,92 @@
   
 
 
-<h1 id="code-mindmap">Code mindmap<a class="headerlink" href="#code-mindmap" title="Permanent link">&para;</a></h1>
-<p>This page maps the main user-facing inputs to the functions that consume them
-and the files or arrays they produce. It is meant as a bridge between the
-tutorials and the generated API reference.</p>
-<h2 id="end-to-end-flow">End-to-end flow<a class="headerlink" href="#end-to-end-flow" title="Permanent link">&para;</a></h2>
-<p><img alt="Codebase Mindmap" src="../../images/mindmap.svg" /></p>
+<h1 id="code-and-data-flow">Code and data flow<a class="headerlink" href="#code-and-data-flow" title="Permanent link">&para;</a></h1>
+<p>This page maps the current GUI workflow to the durable artifacts it creates.</p>
+<p><img alt="Code Mindmap" src="../images/code_mindmap.svg" /></p>
 <div class="highlight"><pre><span></span><code>flowchart TD
-    Config[&quot;pipeline_config.json&lt;br/&gt;PipelineConfig&quot;]
-    Movie[&quot;Stimulus movie&lt;br/&gt;(frames, screen_y, screen_x)&quot;]
-    Neural[&quot;Neural data&lt;br/&gt;Suite2p or ephys&quot;]
+    M[&quot;Stimulus movie metadata\nwidth, height, frames, FPS, duration&quot;]
+    D[&quot;Stimulus cache\n(time, y, x)&quot;]
+    N[&quot;Aligned neural cache\n(trials, frames, neurons)&quot;]
+    G[&quot;Legacy libraries or convolution kernels&quot;]
+    P[&quot;Coarse RF power.zarr&quot;]
+    C[&quot;Coarse model real/imag.zarr&quot;]
+    F[&quot;Full-model real/imag.zarr&quot;]
+    R[&quot;Coarse RF analysis&quot;]
+    SM[&quot;Run Model&quot;]
+    FM[&quot;Run Full Model&quot;]
 
-    GaborCfg[&quot;GaborConfig&lt;br/&gt;NX, NY, N_thetas, Sigmas, Frequencies&quot;]
-    AnalysisCfg[&quot;AnalysisConfig&lt;br/&gt;paths, coverage, frames, trials&quot;]
-
-    CoarseLib[&quot;create_coarse_gabor_library&lt;br/&gt;coarse Gabor library&quot;]
-    FineLib[&quot;create_fine_gabor_library&lt;br/&gt;fine Gabor library&quot;]
-
-    CoarseWave[&quot;prepare_stimulus_wavelets&lt;br/&gt;coarse movie, phases, cache&quot;]
-    FullWave[&quot;prepare_full_model_wavelets&lt;br/&gt;full real and imaginary phases&quot;]
-
-    Align[&quot;load_spikes_and_positions&lt;br/&gt;spikes and neuron_pos&quot;]
-    RF[&quot;run_rf_analysis&lt;br/&gt;RF tensor, repeatability, OSI/gOSI&quot;]
-    Simple[&quot;run_simple_model / run_Model&lt;br/&gt;coarse model plots&quot;]
-    Full[&quot;run_full_model / run_Full_Model&lt;br/&gt;full model plots and metrics&quot;]
-
-    Config --&gt; GaborCfg
-    Config --&gt; AnalysisCfg
-    GaborCfg --&gt; CoarseLib
-    GaborCfg --&gt; FineLib
-    Movie --&gt; CoarseWave
-    Movie --&gt; FullWave
-    AnalysisCfg --&gt; CoarseWave
-    AnalysisCfg --&gt; FullWave
-    CoarseLib --&gt; CoarseWave
-    FineLib --&gt; FullWave
-    Neural --&gt; Align
-    AnalysisCfg --&gt; Align
-    Align --&gt; RF
-    CoarseWave --&gt; RF
-    RF --&gt; Simple
-    CoarseWave --&gt; Simple
-    RF --&gt; Full
-    FullWave --&gt; Full
+    M --&gt; D
+    M --&gt; N
+    D --&gt; G
+    G --&gt; P
+    G --&gt; C
+    G --&gt; F
+    P --&gt; R
+    N --&gt; R
+    R --&gt; SM
+    C --&gt; SM
+    R --&gt; FM
+    F --&gt; FM
 </code></pre></div>
-<h2 id="gui-scale-selector">GUI scale selector<a class="headerlink" href="#gui-scale-selector" title="Permanent link">&para;</a></h2>
-<p>The GUI has one <code>Analysis scale</code> selector:</p>
+<h2 id="artifact-contracts">Artifact contracts<a class="headerlink" href="#artifact-contracts" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Selected scale</th>
-<th>Gabor button builds</th>
-<th>Wavelet button writes</th>
-<th>Model button runs</th>
+<th>GUI action</th>
+<th>Input</th>
+<th>Durable output</th>
+<th>Consumer</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>coarse</code></td>
-<td>coarse coupled library</td>
-<td>coarse downsampled movie, real/imaginary phases, durable RF cache</td>
-<td><code>run_Model</code> simple/coarse model plots</td>
+<td>Prepare Stimulus Cache</td>
+<td>movie metadata + percentage</td>
+<td><code>(time, y, x)</code> binary movie</td>
+<td>alignment, Gabor, wavelets</td>
 </tr>
 <tr>
-<td><code>full</code></td>
-<td>fine independent-frequency library</td>
-<td>full-grid downsampled movie, full real/imaginary wavelets</td>
-<td><code>run_Full_Model</code> full model plots</td>
+<td>Create neural cache</td>
+<td>raw neural data + movie frames/duration</td>
+<td><code>spikes</code>, <code>pos</code></td>
+<td>RF, OSI/gOSI, models</td>
+</tr>
+<tr>
+<td>Prepare Gabor Assets</td>
+<td>shared movie-derived grid</td>
+<td>legacy libraries or convolution kernels</td>
+<td>matching wavelet action</td>
+</tr>
+<tr>
+<td>Prepare Coarse RF Power Cache</td>
+<td>stimulus cache + coarse filters</td>
+<td><code>coarse_rf_power.zarr</code>, <code>(time, x, y, orientation, sigma)</code></td>
+<td>Coarse RF only</td>
+</tr>
+<tr>
+<td>Prepare Run Model Phase Caches</td>
+<td>stimulus cache + coarse filters</td>
+<td><code>coarse_model_real.zarr</code>, <code>coarse_model_imag.zarr</code></td>
+<td>Run Model only</td>
+</tr>
+<tr>
+<td>Prepare Run Full Model Phase Caches</td>
+<td>stimulus cache + fine filters</td>
+<td><code>dwt_videodata2_r.zarr</code>, <code>dwt_videodata2_i.zarr</code></td>
+<td>Run Full Model only</td>
 </tr>
 </tbody>
 </table>
-<p><code>Run Coarse RF Analysis</code> remains explicitly coarse because it finds the
-preferred feature indices that both the coarse model and full model use as
-starting structure.</p>
-<h2 id="function-contracts">Function contracts<a class="headerlink" href="#function-contracts" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Stage</th>
-<th>Main function</th>
-<th>Inputs</th>
-<th>Outputs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>configuration</td>
-<td><code>PipelineConfig.from_json()</code></td>
-<td>JSON path; optional <code>{PROJECT_ROOT}</code> placeholder</td>
-<td><code>PipelineConfig(gabor, analysis, workflow)</code></td>
-</tr>
-<tr>
-<td>coarse library</td>
-<td><code>create_coarse_gabor_library()</code></td>
-<td><code>GaborConfig</code></td>
-<td><code>*_coarse.npy</code> or <code>.zarr</code>; shape <code>(coarse_nx, coarse_ny, n_orientations, n_sigmas, n_phases, coarse_nx * coarse_ny)</code></td>
-</tr>
-<tr>
-<td>fine library</td>
-<td><code>create_fine_gabor_library()</code></td>
-<td><code>GaborConfig</code>, <code>Sigmas Full Model</code></td>
-<td><code>*_fine.npy</code> or <code>.zarr</code>; shape <code>(NX, NY, n_orientations, n_sigmas_total, n_frequencies, n_phases, NX * NY)</code></td>
-</tr>
-<tr>
-<td>coarse wavelets</td>
-<td><code>prepare_stimulus_wavelets()</code> or GUI coarse wavelet path</td>
-<td>movie, coverage, coarse library</td>
-<td><code>dwt_downsampled_videodata.npy</code>; shape <code>(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)</code></td>
-</tr>
-<tr>
-<td>full wavelets</td>
-<td><code>prepare_full_model_wavelets()</code> or GUI full wavelet path</td>
-<td>movie, coverage, fine library</td>
-<td><code>dwt_videodata2_r/i.npy</code> or <code>.zarr</code>; shape <code>(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)</code></td>
-</tr>
-<tr>
-<td>alignment</td>
-<td><code>load_spikes_and_positions()</code></td>
-<td>acquisition files or <code>Spks Path</code></td>
-<td><code>spikes</code> <code>(n_trials, n_frames, n_neurons)</code> and <code>neuron_pos</code></td>
-</tr>
-<tr>
-<td>RF analysis</td>
-<td><code>run_rf_analysis()</code></td>
-<td><code>SpikeData</code>, coarse wavelet cache</td>
-<td>RF tensor, preferred feature indices, repeatability, OSI/gOSI</td>
-</tr>
-<tr>
-<td>model plots</td>
-<td><code>run_simple_model()</code> or <code>run_full_model()</code></td>
-<td>RF result, spikes, selected wavelets</td>
-<td>predictions, parameters, metrics, figures</td>
-</tr>
-</tbody>
-</table>
-<h2 id="mental-model">Mental model<a class="headerlink" href="#mental-model" title="Permanent link">&para;</a></h2>
-<p>The coarse path is the fast screening path. It reduces the grid, computes the
-RF tensor, and gives interpretable retinotopy and tuning curves. The full path
-is the expensive modeling path. It keeps the configured grid and frequency axis,
-but it still relies on coarse RF analysis to decide which neurons and preferred
-features are worth modeling.</p>
+<p>The RF tensor is a correlation diagnostic. It chooses preferred features, but
+OSI/gOSI are calculated from the aligned neural responses in <code>spikes</code>, using
+wavelet energy only as a frame weight to form firing-rate orientation tuning.</p>
+<h2 id="dimension-ownership">Dimension ownership<a class="headerlink" href="#dimension-ownership" title="Permanent link">&para;</a></h2>
+<p>The movie owns width, height, frame count, FPS, and duration. The user owns one
+downsampling percentage. The grid is derived as <code>round(width * percentage /
+100)</code> by <code>round(height * percentage / 100)</code>. Consequently, no GUI input can
+silently give a library, stimulus cache, RF tensor, or model product a different
+spatial meaning.</p>
 
 
 

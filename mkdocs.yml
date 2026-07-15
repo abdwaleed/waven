@@ -86,6 +86,8 @@ nav:
       - Project Layout: reference/project-layout.md
       - Configuration: reference/config.md
       - Pipeline: reference/pipeline.md
+      - Data Contracts and Scientific Interpretation: reference/data-contracts.md
+      - Source Architecture and Ownership: reference/source-architecture.md
       - Wavelets: reference/wavelets.md
       - Stimulus: reference/stimulus.md
       - Analysis: reference/analysis.md

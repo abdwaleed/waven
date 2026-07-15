@@ -735,6 +735,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1033,6 +1063,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1158,6 +1194,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1354,6 +1446,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1664,9 +1784,9 @@ ownership boundaries that signatures alone cannot convey.</p>
 <td>Suite2p/ephys input</td>
 </tr>
 <tr>
-<td><code>NX</code>, <code>NY</code></td>
-<td>full configured analysis grid</td>
-<td><code>PipelineConfig</code></td>
+<td><code>analysis_x</code>, <code>analysis_y</code></td>
+<td>movie-metadata dimensions scaled by the GUI percentage</td>
+<td>stimulus metadata</td>
 </tr>
 <tr>
 <td><code>coarse_nx</code>, <code>coarse_ny</code></td>
@@ -1709,19 +1829,19 @@ ownership boundaries that signatures alone cannot convey.</p>
 </tr>
 <tr>
 <td>downsampled movie</td>
-<td><code>(n_frames, NY, NX)</code></td>
+<td><code>(n_frames, analysis_y, analysis_x)</code></td>
 <td><code>bool</code></td>
 <td>image-space stimulus frames</td>
 </tr>
 <tr>
-<td>coarse wavelet cache</td>
-<td><code>(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)</code></td>
+<td>Coarse RF power</td>
+<td><code>(n_frames, coarse_x, coarse_y, n_orientations, n_sigmas)</code></td>
 <td><code>float32</code></td>
-<td>real, imaginary, and combined coarse features</td>
+<td>power-only Zarr feature cache used by RF correlation</td>
 </tr>
 <tr>
 <td>full-model phase</td>
-<td><code>(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)</code></td>
+<td><code>(n_frames, analysis_x, analysis_y, n_orientations, n_sigmas, n_frequencies)</code></td>
 <td><code>float32</code></td>
 <td>dense real or imaginary wavelet coefficients</td>
 </tr>
@@ -1753,6 +1873,14 @@ Gabor-library arrays use feature order <code>(x, y)</code>.</p>
 <td>high-level orchestration and dataclass outputs</td>
 </tr>
 <tr>
+<td><a href="data-contracts/">Data Contracts and Scientific Interpretation</a></td>
+<td>required inputs, dtypes, shapes, outputs, units, and scientific rationale</td>
+</tr>
+<tr>
+<td><a href="source-architecture/">Source Architecture and Ownership</a></td>
+<td>where functions/classes belong and supported public entry points</td>
+</tr>
+<tr>
 <td><a href="wavelets/">Wavelets</a></td>
 <td>Gabor libraries, downsampling, wavelet decomposition</td>
 </tr>
@@ -1775,6 +1903,10 @@ Gabor-library arrays use feature order <code>(x, y)</code>.</p>
 <tr>
 <td><a href="time-alignment/">Time Alignment</a></td>
 <td>conversion from acquisition timing to frame-aligned spikes</td>
+</tr>
+<tr>
+<td><a href="psth-spike-triggered-averaging/">PSTH-weighted Spike-Triggered Averaging</a></td>
+<td>standard Coarse RF STA maps, lag window, and exports</td>
 </tr>
 <tr>
 <td><a href="neural-data/">Neural Data</a></td>

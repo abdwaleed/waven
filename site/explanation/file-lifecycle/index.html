@@ -737,6 +737,8 @@
       
         
       
+        
+      
     
     
     
@@ -834,6 +836,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -975,24 +1005,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    File Lifecycle
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -1009,58 +1021,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#durable-outputs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Durable outputs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#temporary-outputs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Temporary outputs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#practical-storage-advice" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Practical storage advice
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1085,6 +1045,12 @@
       
         
           
+        
+      
+        
+      
+        
+      
         
       
         
@@ -1238,6 +1204,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1434,6 +1456,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1654,47 +1704,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#durable-outputs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Durable outputs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#temporary-outputs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Temporary outputs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#practical-storage-advice" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Practical storage advice
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -1714,125 +1723,71 @@
 
 
 <h1 id="file-lifecycle">File lifecycle<a class="headerlink" href="#file-lifecycle" title="Permanent link">&para;</a></h1>
-<p>Large files are intentionally reused across runs.</p>
-<h2 id="durable-outputs">Durable outputs<a class="headerlink" href="#durable-outputs" title="Permanent link">&para;</a></h2>
+<p>The GUI keeps generated data inside the project layout and records a small
+shape/parameter sidecar beside reusable artifacts. A product is reused only when
+its logical shape and fingerprint match the current movie metadata, percentage,
+backend, and filter settings.</p>
 <table>
 <thead>
 <tr>
-<th>Output</th>
-<th>Typical shape or contents</th>
-<th>dtype/format</th>
-<th>Keep?</th>
+<th>Artifact</th>
+<th>Shape</th>
+<th>Storage</th>
+<th>Lifecycle</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>coarse Gabor library</td>
-<td><code>(coarse_nx, coarse_ny, n_orientations, n_sigmas, n_phases, coarse_nx * coarse_ny)</code></td>
-<td><code>.npy</code>, <code>float16</code></td>
-<td>Yes, if config axes match.</td>
+<td>stimulus cache</td>
+<td><code>(time, y, x)</code></td>
+<td>user-selected NPY or Zarr</td>
+<td>reusable input to all later stimulus work</td>
 </tr>
 <tr>
-<td>fine Gabor library</td>
-<td><code>(NX, NY, n_orientations, n_sigmas, n_frequencies, n_phases, NX * NY)</code></td>
-<td><code>.npy</code>, <code>float16</code></td>
-<td>Yes, but it can be very large.</td>
+<td>neural <code>spikes</code> + <code>pos</code> cache</td>
+<td><code>(trials, frames, units)</code> + positions</td>
+<td>selected NPY or Zarr</td>
+<td>reusable aligned neural source</td>
 </tr>
 <tr>
-<td><code>&lt;movie&gt;_coarse_downsampled.npy</code></td>
-<td><code>(n_frames, coarse_ny, coarse_nx)</code></td>
-<td><code>bool</code></td>
-<td>Yes, cheap and useful for resume.</td>
+<td>legacy Gabor library</td>
+<td>feature-grid lookup table</td>
+<td>NPY or Zarr</td>
+<td>reusable only by Legacy backend</td>
 </tr>
 <tr>
-<td><code>&lt;movie&gt;_downsampled.npy</code></td>
-<td><code>(n_frames, NY, NX)</code></td>
-<td><code>bool</code></td>
-<td>Yes, cheap relative to wavelets.</td>
+<td>convolution kernel cache</td>
+<td>compact filters</td>
+<td>cache artifact</td>
+<td>reusable only by Convolution backend</td>
 </tr>
 <tr>
-<td><code>dwt_downsampled_videodata.npy</code></td>
-<td><code>(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)</code></td>
-<td><code>.npy</code>, <code>float32</code></td>
-<td>Yes, this is the durable coarse RF cache.</td>
+<td>Coarse RF power</td>
+<td><code>(time, x, y, orientation, sigma)</code></td>
+<td><code>coarse_rf_power.zarr</code></td>
+<td>used only by Coarse RF analysis</td>
 </tr>
 <tr>
-<td><code>dwt_videodata2_r.npy</code> / <code>.zarr</code></td>
-<td><code>(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)</code></td>
-<td><code>float32</code></td>
-<td>Yes when running full models.</td>
+<td>Run Model phases</td>
+<td>same coarse phase shape, real + imaginary</td>
+<td>named Zarr pair</td>
+<td>used only by Run Model</td>
 </tr>
 <tr>
-<td><code>dwt_videodata2_i.npy</code> / <code>.zarr</code></td>
-<td>same as real phase</td>
-<td><code>float32</code></td>
-<td>Yes when running full models.</td>
-</tr>
-<tr>
-<td>aligned <code>spikes.npy</code> / <code>spikes.zarr</code> and <code>pos.npy</code> / <code>pos.zarr</code></td>
-<td>spikes: <code>(n_trials, n_frames, n_neurons)</code>; positions: <code>(n_neurons, 2 or 3)</code></td>
-<td>numeric <code>.npy</code> or <code>.zarr</code></td>
-<td>Yes, these make reruns reproducible.</td>
-</tr>
-<tr>
-<td><code>plot_cache.pkl.gz</code></td>
-<td>precomputed GUI plotting payload</td>
-<td>compressed pickle</td>
-<td>Optional; keep for faster GUI startup.</td>
-</tr>
-<tr>
-<td><code>model_results/</code></td>
-<td>parameters, predictions, metrics, exports</td>
-<td>mixed arrays and metadata</td>
-<td>Yes for analysis records.</td>
-</tr>
-<tr>
-<td>explicit exports</td>
-<td>PNG/SVG/NPZ/JSON/Pickle bundles</td>
-<td>mixed</td>
-<td>Yes for figures and paper provenance.</td>
+<td>Run Full Model phases</td>
+<td><code>(time, x, y, orientation, full_sigma, frequency)</code>, real + imaginary</td>
+<td>named Zarr pair</td>
+<td>used only by Run Full Model</td>
 </tr>
 </tbody>
 </table>
-<h2 id="temporary-outputs">Temporary outputs<a class="headerlink" href="#temporary-outputs" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Output</th>
-<th>Why it exists</th>
-<th>Removal rule</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>dwt_videodata_0.npy</code>, <code>dwt_videodata_1.npy</code></td>
-<td>Intermediate coarse real/imaginary phase files used to build the durable cache.</td>
-<td>Can be regenerated from the coarse downsampled movie and coarse library.</td>
-</tr>
-<tr>
-<td><code>dwt_r_downsampled.mmap</code>, <code>dwt_i_downsampled.mmap</code>, <code>dwt_c_downsampled.mmap</code></td>
-<td>Low-RAM scratch arrays for coarse cache construction.</td>
-<td>Remove after successful cache creation.</td>
-</tr>
-<tr>
-<td>plot-cache temporary files</td>
-<td>Atomic writes for GUI cache updates.</td>
-<td>Remove after successful cache write.</td>
-</tr>
-<tr>
-<td>recovery checkpoint folders</td>
-<td>Resume metadata for long GUI tasks.</td>
-<td>Removed after success/cancel; kept after failure for debugging.</td>
-</tr>
-</tbody>
-</table>
-<p>Interrupted long tasks can usually be resumed by rerunning the same button.</p>
-<h2 id="practical-storage-advice">Practical storage advice<a class="headerlink" href="#practical-storage-advice" title="Permanent link">&para;</a></h2>
-<p>Keep durable outputs on a local SSD when possible. Network drives can make
-wavelet decomposition look stalled because every chunk read/write crosses the
-network. If disk space is limited, delete full-model phase files before deleting
-libraries or downsampled movies; the phase files are usually the largest and can
-be regenerated from smaller inputs.</p>
+<p>RF-only real/imaginary phases are temporary Zarr stores. They are converted to
+the power product in bounded chunks and removed after successful completion.
+This prevents the prior three-plane combined NPY cache from being created and
+keeps hidden large cache work disk-backed.</p>
+<p>The GUI never treats a same-named cache as valid solely because it exists. A
+movie with a changed frame count, a new percentage, or a changed feature axis
+must regenerate the dependent product.</p>
 
 
 

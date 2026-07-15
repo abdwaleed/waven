@@ -328,6 +328,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#recommended-gui-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended GUI path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#core-data-model" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -339,10 +350,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#recommended-first-path" class="md-nav__link">
+  <a href="#reading-selectivity" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recommended first path
+        Reading selectivity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation map
       
     </span>
   </a>
@@ -802,6 +824,8 @@
       
         
       
+        
+      
     
     
     
@@ -899,6 +923,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1098,6 +1150,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1223,6 +1281,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1419,6 +1533,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1646,6 +1788,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#recommended-gui-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended GUI path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#core-data-model" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1657,10 +1810,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#recommended-first-path" class="md-nav__link">
+  <a href="#reading-selectivity" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recommended first path
+        Reading selectivity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation map
       
     </span>
   </a>
@@ -1688,108 +1852,81 @@
 
 
 <h1 id="waven-documentation">waven documentation<a class="headerlink" href="#waven-documentation" title="Permanent link">&para;</a></h1>
-<p><code>waven</code> analyzes neural responses to visual stimuli with Gabor-wavelet features.
-It supports a GUI workflow for exploratory analysis and a scriptable Python
-pipeline for reproducible runs.</p>
-<p>The documentation is organized with the Divio structure:</p>
-<ul>
-<li><strong>Tutorials</strong> walk through complete workflows for new users.</li>
-<li><strong>How-to guides</strong> solve focused tasks such as installing the package, building
-  Gabor libraries, or exporting plots.</li>
-<li><strong>Explanation</strong> pages describe the intuition behind the stimulus transform,
-  receptive-field search, model fitting, and file lifecycle.</li>
-<li><strong>Reference</strong> pages are generated from Google-style docstrings with
-  <code>mkdocstrings</code>.</li>
-</ul>
+<p><code>waven</code> analyzes neural responses to visual stimuli with Gabor-wavelet
+features. The GUI is organized around one principle: stimulus metadata comes
+first and provides the dimensions, frame count, timing, and duration used by
+every downstream stage.</p>
+<h2 id="recommended-gui-path">Recommended GUI path<a class="headerlink" href="#recommended-gui-path" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Stimulus &amp; Metadata</strong> — select the movie, choose a downsampling
+   percentage, and prepare the stimulus cache.</li>
+<li><strong>Session Setup</strong> — create or validate the aligned neural <code>spikes</code>/<code>pos</code>
+   cache. Ephys <code>spikes</code> values are frame-bin firing rates in Hz.</li>
+<li><strong>Gabor</strong> — create legacy libraries or convolution kernel caches.</li>
+<li><strong>Wavelet Products</strong> — make only the named Zarr product required by Coarse
+   RF, Run Model, or Run Full Model.</li>
+<li><strong>Analysis</strong> — run coarse RF, then either model path.</li>
+</ol>
 <h2 id="core-data-model">Core data model<a class="headerlink" href="#core-data-model" title="Permanent link">&para;</a></h2>
-<p>Most analysis stages share a small set of array conventions:</p>
 <table>
 <thead>
 <tr>
 <th>Object</th>
 <th>Shape</th>
-<th>dtype</th>
 <th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>spikes</code></td>
-<td><code>(n_trials, n_frames, n_neurons)</code></td>
-<td>floating numeric</td>
-<td>Neural activity aligned to stimulus frames. Axis 1 is always the stimulus-frame axis used for correlations and models.</td>
-</tr>
-<tr>
-<td><code>neuron_pos</code></td>
-<td><code>(n_neurons, 2)</code> or <code>(n_neurons, 3)</code></td>
-<td>floating numeric</td>
-<td>Anatomical positions. Two-photon data usually stores imaging-plane coordinates; electrophysiology data can include shank/depth metadata.</td>
+<td>aligned neural responses</td>
+<td><code>(trials, frames, neurons)</code></td>
+<td>Ephys frame-bin firing rate in Hz; other workflows store aligned non-negative activity.</td>
 </tr>
 <tr>
 <td>downsampled movie</td>
-<td><code>(n_frames, ny, nx)</code></td>
-<td><code>bool</code></td>
-<td>Binary stimulus after cropping to <code>Analysis Coverage</code> and resizing to the analysis grid. Movie files keep image order as row, column.</td>
+<td><code>(frames, y, x)</code></td>
+<td>Binary stimulus image sequence.</td>
 </tr>
 <tr>
-<td>Gabor library</td>
-<td>coarse: <code>(nx, ny, n_orientations, n_sigmas, n_phases, nx * ny)</code></td>
-<td><code>float16</code></td>
-<td>Spatial filters flattened over pixels. Libraries are large but reusable when the grid and feature axes match.</td>
+<td>Coarse RF power</td>
+<td><code>(frames, x, y, orientations, sigmas)</code></td>
+<td>Zarr product used only for receptive-field correlation.</td>
 </tr>
 <tr>
-<td>fine Gabor library</td>
-<td><code>(NX, NY, n_orientations, n_sigmas, n_frequencies, n_phases, NX * NY)</code></td>
-<td><code>float16</code></td>
-<td>Full-model filter bank when frequencies are independent from size.</td>
+<td>Run Model real/imaginary phases</td>
+<td><code>(frames, x, y, orientations, sigmas)</code> each</td>
+<td>Separate Zarr pair for the coarse model.</td>
 </tr>
 <tr>
-<td>coarse wavelet cache</td>
-<td><code>(3, n_frames, nx, ny, n_orientations, n_sigmas)</code></td>
-<td><code>float32</code></td>
-<td>Durable cache containing real phase, imaginary phase, and combined energy-like coefficients.</td>
-</tr>
-<tr>
-<td>full wavelets</td>
-<td><code>(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)</code></td>
-<td><code>float32</code></td>
-<td>Full-resolution wavelet arrays for nonlinear model fitting; written separately for real and imaginary phases.</td>
+<td>Run Full Model real/imaginary phases</td>
+<td><code>(frames, x, y, orientations, full_sigmas, frequencies)</code> each</td>
+<td>Separate Zarr pair for local refinement.</td>
 </tr>
 <tr>
 <td>RF tensor</td>
-<td><code>(n_neurons, nx, ny, n_orientations, n_sigmas, n_frequencies)</code></td>
-<td><code>float32</code> or <code>float64</code></td>
-<td>Pearson-correlation receptive fields. Tuning curves are slices through this tensor around each neuron's preferred feature.</td>
+<td><code>(neurons, x, y, orientations, sigmas, frequencies)</code></td>
+<td>Pearson-correlation RF diagnostic tensor.</td>
 </tr>
 </tbody>
 </table>
-<p>The docs use uppercase <code>NX</code>/<code>NY</code> for the full analysis grid from the
-configuration and lowercase <code>nx</code>/<code>ny</code> for a concrete array after any coarse
-downsampling. Movie arrays use image order <code>(y, x)</code>, while Gabor and RF tensors
-use feature order <code>(x, y)</code>. When a shape looks transposed, check which family the
-array belongs to before assuming it is wrong.</p>
-<p>For uncompressed arrays, size is approximately:</p>
-<div class="highlight"><pre><span></span><code>number_of_values * dtype_bytes
-</code></pre></div>
-<p>For example, a full wavelet phase with
-<code>n_frames=54000</code>, <code>NX=135</code>, <code>NY=54</code>, <code>n_orientations=8</code>, <code>n_sigmas=6</code>, and
-<code>n_frequencies=4</code> contains about 75.6 billion <code>float32</code> values, or roughly
-302 GB before filesystem and compression effects. This is why <code>waven</code> reuses
-existing files, shape-validates caches, and supports Zarr for full-model
-wavelets.</p>
-<h2 id="recommended-first-path">Recommended first path<a class="headerlink" href="#recommended-first-path" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Read <a href="how-to/install/">Install waven</a>.</li>
-<li>Follow <a href="tutorials/first-gui-analysis/">First GUI Analysis</a>.</li>
-<li>Review <a href="explanation/pipeline-intuition/">Pipeline Intuition</a>.</li>
-<li>Use the <a href="reference/">Reference</a> when extending code or writing scripts.</li>
-</ol>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Authored documentation lives in <code>docs/</code>. The rendered static site is written
-to <code>site/</code>, and the previous Sphinx <code>source/</code> tree has been retired in favor
-of MkDocs plus <code>mkdocstrings</code>.</p>
-</div>
+<p>Movie arrays use image order <code>(y, x)</code> while Gabor/RF arrays use feature order
+<code>(x, y)</code>. Width and height always originate from movie metadata; no manual
+<code>NX</code>, <code>NY</code>, stimulus FPS, or duration is used by the GUI.</p>
+<h2 id="reading-selectivity">Reading selectivity<a class="headerlink" href="#reading-selectivity" title="Permanent link">&para;</a></h2>
+<p>RF maps and individual tuning displays use correlation to make the preferred
+feature understandable. OSI/gOSI use the separate firing-rate tuning extracted
+from the aligned neural cache—not correlation amplitudes. See
+<a href="explanation/orientation-selectivity/">Orientation Selectivity</a>.</p>
+<h2 id="documentation-map">Documentation map<a class="headerlink" href="#documentation-map" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="tutorials/first-gui-analysis/">First GUI Analysis</a></li>
+<li><a href="how-to/run-wavelet-decomposition/">Prepare Wavelet Products</a></li>
+<li><a href="reference/gui/">GUI Reference</a></li>
+<li><a href="reference/data-contracts/">Data Contracts and Scientific Interpretation</a></li>
+<li><a href="reference/source-architecture/">Source Architecture and Ownership</a></li>
+<li><a href="reference/project-layout/">Project Layout</a></li>
+<li><a href="explanation/pipeline-intuition/">Pipeline Intuition</a></li>
+</ul>
 
 
 

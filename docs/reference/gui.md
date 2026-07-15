@@ -170,7 +170,9 @@ The `Stimulus & Metadata` section controls movie downsampling before neural
 alignment and Gabor projection. Its only spatial control is a percentage slider that scales
 dimensions read from the movie:
 `20%` creates each axis at roughly one fifth of the source, while `100%`
-preserves source dimensions. Both NPY and Zarr cache formats are available.
+preserves source dimensions. The usable slider range is **1–100%**: zero is
+not a meaningful stimulus grid and older saved zero values are normalized to
+1% before cache creation. Both NPY and Zarr cache formats are available.
 Artifacts carry small `.waven.json` sidecars, so reruns reuse only outputs whose
 shape and parameter fingerprint still match the current movie and GUI settings.
 

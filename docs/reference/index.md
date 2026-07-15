@@ -37,6 +37,8 @@ Gabor-library arrays use feature order `(x, y)`.
 | --- | --- |
 | [Configuration](config.md) | typed config objects, default axes, path fields |
 | [Pipeline](pipeline.md) | high-level orchestration and dataclass outputs |
+| [Data Contracts and Scientific Interpretation](data-contracts.md) | required inputs, dtypes, shapes, outputs, units, and scientific rationale |
+| [Source Architecture and Ownership](source-architecture.md) | where functions/classes belong and supported public entry points |
 | [Wavelets](wavelets.md) | Gabor libraries, downsampling, wavelet decomposition |
 | [Stimulus](stimulus.md) | loading/reusing coarse and full-model wavelet caches |
 | [Analysis](analysis.md) | RF tensors, OSI/gOSI, model fitting, trial statistics |

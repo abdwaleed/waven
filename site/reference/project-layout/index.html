@@ -735,6 +735,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1005,6 +1035,12 @@
       
         
           
+        
+      
+        
+      
+        
+      
         
       
         
@@ -1269,6 +1305,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../wavelets/" class="md-nav__link">
         
   
@@ -1445,6 +1537,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1816,13 +1936,13 @@ project tree without copying large source data.</p>
 </tr>
 <tr>
 <td><code>cache/wavelets/coarse/</code></td>
-<td>Coarse downsample cache, phase scratch files, and <code>dwt_downsampled_videodata.npy</code>.</td>
-<td>RF analysis reads this folder.</td>
+<td>Stimulus cache, <code>coarse_rf_power.zarr</code>, and named coarse-model real/imaginary Zarr phases.</td>
+<td>RF and Run Model each read only their own product.</td>
 </tr>
 <tr>
 <td><code>cache/wavelets/full/</code></td>
-<td>Full-model real and imaginary wavelet phases.</td>
-<td>Full model reads this folder.</td>
+<td><code>dwt_videodata2_r.zarr</code> and <code>dwt_videodata2_i.zarr</code>.</td>
+<td>Run Full Model reads this folder.</td>
 </tr>
 </tbody>
 </table>
@@ -1853,11 +1973,11 @@ still compatible with the GUI inputs.</p>
 </tbody>
 </table>
 <h2 id="metadata-sanity-checks">Metadata sanity checks<a class="headerlink" href="#metadata-sanity-checks" title="Permanent link">&para;</a></h2>
-<p>When the GUI resolves the stimulus movie, it reads only lightweight metadata:
-frame count, frame rate, width, and height. If those disagree with <code>Number of
-Frames</code>, <code>Hz</code>, <code>NX</code>, or <code>NY</code>, the GUI shows a Yes/No warning. Choosing <strong>Yes</strong>
-updates the GUI fields to match the movie metadata; choosing <strong>No</strong> leaves your
-typed values unchanged.</p>
+<p>When the GUI resolves the stimulus movie, it reads lightweight metadata: frame
+count, frame rate, width, height, and duration. These are authoritative. The
+user supplies only the downsampling percentage, from which the shared analysis
+grid is derived; there are no competing <code>NX</code>, <code>NY</code>, FPS, frame-count, or
+duration inputs to reconcile.</p>
 
 
 

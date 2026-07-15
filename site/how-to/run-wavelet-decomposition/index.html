@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#run-wavelet-decomposition" class="md-skip">
+        <a href="#prepare-wavelet-products" class="md-skip">
           Skip to content
         </a>
       
@@ -658,10 +658,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#outputs-and-shapes" class="md-nav__link">
+  <a href="#backend-specific-behavior" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Outputs and shapes
+        Backend-specific behavior
       
     </span>
   </a>
@@ -669,10 +669,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-and-disk-intuition" class="md-nav__link">
+  <a href="#axis-convention-and-safety" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Memory and disk intuition
+        Axis convention and safety
       
     </span>
   </a>
@@ -680,10 +680,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#resume-points" class="md-nav__link">
+  <a href="#performance-and-responsiveness" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Resume points
+        Performance and responsiveness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disk-intuition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disk intuition
       
     </span>
   </a>
@@ -817,6 +828,8 @@
       
         
       
+        
+      
     
     
     
@@ -914,6 +927,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1113,6 +1154,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1238,6 +1285,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1434,6 +1537,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1661,10 +1792,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#outputs-and-shapes" class="md-nav__link">
+  <a href="#backend-specific-behavior" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Outputs and shapes
+        Backend-specific behavior
       
     </span>
   </a>
@@ -1672,10 +1803,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-and-disk-intuition" class="md-nav__link">
+  <a href="#axis-convention-and-safety" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Memory and disk intuition
+        Axis convention and safety
       
     </span>
   </a>
@@ -1683,10 +1814,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#resume-points" class="md-nav__link">
+  <a href="#performance-and-responsiveness" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Resume points
+        Performance and responsiveness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disk-intuition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disk intuition
       
     </span>
   </a>
@@ -1713,148 +1855,107 @@
   
 
 
-<h1 id="run-wavelet-decomposition">Run wavelet decomposition<a class="headerlink" href="#run-wavelet-decomposition" title="Permanent link">&para;</a></h1>
-<p>In the GUI, choose <strong>Analysis scale</strong> first, then click <strong>Run Wavelet
-Decomposition</strong>. The button changes its work according to the selected scale.</p>
-<p>Use <strong>Stimulus Downsample Cache</strong> when you want to make the movie cache as a
-separate step. This stage is required: wavelet decomposition reports a missing
-prerequisite instead of silently downsampling. Leave the mode on <code>legacy</code> to use
-the historical grid, or choose <code>precompute</code> to set a percentage. Both modes can
-write <code>.npy</code> or <code>.zarr</code>. <code>20%</code> is the historical coarse RF grid; <code>100%</code> keeps the
-configured <code>NX</code> by <code>NY</code> grid.</p>
-<p>Stage 2's <strong>Cache array format</strong> selector is always visible and controls the
-downsampled stimulus cache. Stage 4 has a separate full-wavelet output format,
-which appears only in full mode because the durable coarse RF cache has its
-established NPY representation.</p>
-<p>When Stage 4 starts, it searches for the exact selected cache first, then a
-shape-compatible sibling format, then legacy names such as
-<code>&lt;movie&gt;_coarse_downsampled.npy</code> and <code>&lt;movie&gt;_downsampled.npy</code> beside the movie
-or in the configured wavelet folder. The terminal reports the exact NPY/Zarr
-artifact reused. This lets projects created by older versions continue without
-duplicating a large stimulus cache.</p>
-<p>The stimulus movie itself lives in <code>input/stimulus_movie</code>. Generated wavelet
-caches are written under <code>cache/wavelets/coarse</code> or <code>cache/wavelets/full</code>, not
-next to the movie file.</p>
-<p>With <code>coarse</code>, it prepares:</p>
-<ul>
-<li>coarse downsampled stimulus movie;</li>
-<li>coarse real phase wavelets;</li>
-<li>coarse imaginary phase wavelets;</li>
-<li>durable coarse RF cache.</li>
-</ul>
-<p>With <code>full</code>, it prepares:</p>
-<ul>
-<li>full-resolution downsampled stimulus movie;</li>
-<li>full-model real and imaginary wavelets as <code>.npy</code> or <code>.zarr</code>.</li>
-</ul>
-<p>The same work can be run from Python:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">waven</span>
-
-<span class="n">config</span> <span class="o">=</span> <span class="n">waven</span><span class="o">.</span><span class="n">PipelineConfig</span><span class="o">.</span><span class="n">from_json</span><span class="p">(</span><span class="s2">&quot;pipeline_config.json&quot;</span><span class="p">)</span>
-
-<span class="n">waven</span><span class="o">.</span><span class="n">prepare_stimulus_wavelets</span><span class="p">(</span>
-    <span class="n">config</span><span class="o">.</span><span class="n">analysis</span><span class="p">,</span>
-    <span class="n">library_path</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">gabor</span><span class="o">.</span><span class="n">coarse_save_path</span><span class="p">,</span>
-<span class="p">)</span>
-<span class="n">waven</span><span class="o">.</span><span class="n">prepare_full_model_wavelets</span><span class="p">(</span>
-    <span class="n">config</span><span class="o">.</span><span class="n">analysis</span><span class="p">,</span>
-    <span class="n">config</span><span class="o">.</span><span class="n">gabor</span><span class="p">,</span>
-    <span class="n">library_path</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">gabor</span><span class="o">.</span><span class="n">fine_save_path</span><span class="p">,</span>
-<span class="p">)</span>
-</code></pre></div>
-<p>If a long run is interrupted, keep the same <strong>Analysis scale</strong> selected and run
-the GUI button again. Existing outputs are shape-validated and checked against a
-small parameter fingerprint sidecar before reuse. Changing the movie path,
-backend, grid percentage, <code>NX</code>/<code>NY</code>, orientations, sigmas, phases, frequencies,
-or output format causes the relevant step to regenerate instead of reporting
-"already complete."</p>
-<h2 id="outputs-and-shapes">Outputs and shapes<a class="headerlink" href="#outputs-and-shapes" title="Permanent link">&para;</a></h2>
-<p>The wavelet stage writes several large arrays. The names are historical, but the
-axis meanings are stable:</p>
+<h1 id="prepare-wavelet-products">Prepare wavelet products<a class="headerlink" href="#prepare-wavelet-products" title="Permanent link">&para;</a></h1>
+<p>The GUI uses one analysis grid for the whole session. It reads the stimulus
+movie metadata (width, height, frame count, FPS, and duration) in <strong>Stimulus &amp;
+Metadata</strong> and applies the selected percentage to both image dimensions. There are no
+manual <code>NX</code>, <code>NY</code>, stimulus-FPS, or separate coarse/full-grid settings.</p>
+<p>This stage is also the prerequisite for <strong>Session Setup</strong> neural alignment.
+Ephys alignment refuses to guess the stimulus duration: it receives the exact
+metadata duration from the selected movie after this stage is completed.</p>
+<p>First click <strong>Prepare Stimulus Cache</strong> in <strong>1 Stimulus &amp; Metadata</strong>. It writes one binary movie cache with
+image order <code>(time, y, x)</code>. The three buttons in <strong>4 Wavelet Products</strong> then prepare
+independent, Zarr-backed products for their consumers:</p>
 <table>
 <thead>
 <tr>
-<th>Output</th>
+<th>Button</th>
+<th>Consumer</th>
+<th>Durable artifact(s)</th>
 <th>Shape</th>
-<th>dtype</th>
-<th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>cache/wavelets/coarse/stimulus_coarse_downsampled_p020.npy</code> or selected <code>.zarr</code></td>
-<td><code>(n_frames, coarse_ny, coarse_nx)</code></td>
-<td><code>bool</code></td>
-<td>Cropped binary movie for coarse RF analysis. Image arrays keep row/column order.</td>
+<td><strong>Prepare Coarse RF Power Cache</strong></td>
+<td>Run Coarse RF Analysis</td>
+<td><code>coarse_rf_power.zarr</code></td>
+<td><code>(time, x, y, orientation, sigma)</code></td>
 </tr>
 <tr>
-<td><code>dwt_videodata_0.npy</code></td>
-<td><code>(n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)</code></td>
-<td><code>float32</code></td>
-<td>Coarse real-phase coefficients.</td>
+<td><strong>Prepare Run Model Phase Caches</strong></td>
+<td>Run Model (Coarse RF)</td>
+<td><code>coarse_model_real.zarr</code>, <code>coarse_model_imag.zarr</code></td>
+<td><code>(time, x, y, orientation, sigma)</code> each</td>
 </tr>
 <tr>
-<td><code>dwt_videodata_1.npy</code></td>
-<td><code>(n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)</code></td>
-<td><code>float32</code></td>
-<td>Coarse imaginary-phase coefficients.</td>
-</tr>
-<tr>
-<td><code>dwt_downsampled_videodata.npy</code></td>
-<td><code>(3, n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)</code></td>
-<td><code>float32</code></td>
-<td>Durable RF cache: real, imaginary, and combined coefficients.</td>
-</tr>
-<tr>
-<td><code>cache/wavelets/full/stimulus_full_downsampled_p100.npy</code> or selected <code>.zarr</code></td>
-<td><code>(n_frames, NY, NX)</code></td>
-<td><code>bool</code></td>
-<td>Full-grid or selected-percentage binary movie for full-model wavelets.</td>
-</tr>
-<tr>
-<td><code>dwt_videodata2_r.npy</code> or <code>.zarr</code></td>
-<td><code>(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)</code></td>
-<td><code>float32</code></td>
-<td>Full-model real phase.</td>
-</tr>
-<tr>
-<td><code>dwt_videodata2_i.npy</code> or <code>.zarr</code></td>
-<td><code>(n_frames, NX, NY, n_orientations, n_sigmas, n_frequencies)</code></td>
-<td><code>float32</code></td>
-<td>Full-model imaginary phase.</td>
+<td><strong>Prepare Run Full Model Phase Caches</strong></td>
+<td>Run Full Model</td>
+<td><code>dwt_videodata2_r.zarr</code>, <code>dwt_videodata2_i.zarr</code></td>
+<td><code>(time, x, y, orientation, sigma_full, frequency)</code> each</td>
 </tr>
 </tbody>
 </table>
-<p>The downsampled movie axes are <code>(frame, y, x)</code> because they are image arrays.
-The wavelet axes are <code>(frame, x, y, feature...)</code> because they follow the Gabor
-library convention. This difference is expected.</p>
-<h2 id="memory-and-disk-intuition">Memory and disk intuition<a class="headerlink" href="#memory-and-disk-intuition" title="Permanent link">&para;</a></h2>
-<p>Downsampled movies are compact because they are boolean:</p>
-<div class="highlight"><pre><span></span><code>movie_bytes = n_frames * ny * nx * 1
+<p>This split is intentional. Coarse RF correlates neural activity with wavelet
+power; it does not need to keep real and imaginary model phases. Run Model
+uses only its named real/imaginary pair. Run Full Model uses its own
+higher-feature-count pair while taking the preferred coarse RF locations as
+seeds. Preparing one product therefore does not create the combined three-plane
+<code>dwt_downsampled_videodata.npy</code> cache used by older releases.</p>
+<h2 id="backend-specific-behavior">Backend-specific behavior<a class="headerlink" href="#backend-specific-behavior" title="Permanent link">&para;</a></h2>
+<p><strong>Legacy</strong> needs the flattened Gabor libraries. <strong>Prepare Gabor Assets</strong> builds
+the coarse coupled library and the fine independent-frequency library before
+the relevant phase product is made. Its displayed size estimate refers to those
+libraries.</p>
+<p><strong>Convolution</strong> does not materialize those flattened libraries. The same button
+instead creates compact coarse and fine kernel caches. The Wavelet Products tab still
+shows the same three consumer-oriented buttons, but its size estimate describes
+the Zarr phase/power products rather than a legacy library.</p>
+<h2 id="axis-convention-and-safety">Axis convention and safety<a class="headerlink" href="#axis-convention-and-safety" title="Permanent link">&para;</a></h2>
+<p>The downsampled movie is <code>(time, y, x)</code> because it is an image sequence. Every
+wavelet product is <code>(time, x, y, ...)</code> because it follows the Gabor feature
+convention. The GUI derives both from the same metadata-based grid and validates
+the full expected shape before reuse. A stale artifact with a different movie,
+percentage, backend, orientation count, sigma list, phase list, or frequency
+list is regenerated rather than passed downstream.</p>
+<p>Internal wavelet artifacts are Zarr. They are chunked and streamed so a large
+product remains disk-backed; the application never promotes an entire product
+to RAM merely because it is being reused. The terminal reports the exact
+artifact, logical shape, and resume decision. Temporary RF phases are Zarr too
+and are removed after <code>coarse_rf_power.zarr</code> is safely completed.</p>
+<h2 id="performance-and-responsiveness">Performance and responsiveness<a class="headerlink" href="#performance-and-responsiveness" title="Permanent link">&para;</a></h2>
+<p>The convolution backend fuses the two real/imaginary phases when preparing
+<strong>Coarse RF Power</strong>. It performs one convolution bank per frame chunk and
+computes <code>real² + imaginary²</code> before writing the final power cache. This avoids
+the former duplicate movie read, transfer, and temporary phase products while
+preserving the same power definition and output shape. As with any reordered
+float32 GPU convolution, least-significant-bit roundoff may vary by hardware.</p>
+<p>For all three convolution products, Waven overlaps a bounded next-chunk read
+with the current GPU convolution and uses one bounded writer for completed
+chunks. The application never queues an unbounded number of frames. It also
+derives a conservative batch ceiling from currently free RAM/VRAM and adapts
+the first measured batches within that ceiling. At the end of the action, the
+terminal reports input, compute/transfer, and output throughput so a slow run
+can be attributed to decoding, GPU compute, or disk writes.</p>
+<p>On a multi-GPU workstation, enable <strong>Use compatible GPUs</strong> in <strong>Session
+Configuration → Performance &amp; Hardware</strong> before starting a convolution action.
+This is off by default because leaving a display or shared-workload GPU
+saturated can reduce desktop responsiveness. Waven only combines cards with
+matching CUDA compute capability and at least 75% of the primary card's
+estimated convolution throughput and VRAM, preventing a slower card from
+holding up every synchronous DataParallel batch. The same choice is saved with
+the current GUI inputs (and remains available as <code>WAVEN_MULTI_GPU=1</code> for
+unattended launches). If the cards are not a suitable group, the terminal
+reports why and the action continues on the primary GPU.</p>
+<h2 id="disk-intuition">Disk intuition<a class="headerlink" href="#disk-intuition" title="Permanent link">&para;</a></h2>
+<p>For a float32 coarse product, the uncompressed logical size is</p>
+<div class="highlight"><pre><span></span><code>time * x * y * orientations * sigmas * 4 bytes
 </code></pre></div>
-<p>Wavelets are dense <code>float32</code>, so every value is 4 bytes. A full-model phase uses:</p>
-<div class="highlight"><pre><span></span><code>full_phase_bytes =
-  n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies * 4
-</code></pre></div>
-<p>The real and imaginary phases are separate, so keeping both as <code>.npy</code> requires
-twice that amount. Zarr stores the same logical array in chunks and can compress
-repeated structure. It is usually easier to resume, inspect, and move in pieces,
-but the uncompressed logical shape is unchanged.</p>
-<h2 id="resume-points">Resume points<a class="headerlink" href="#resume-points" title="Permanent link">&para;</a></h2>
-<p>The GUI checks completed artifacts before doing expensive work again. A rerun
-can resume after:</p>
-<ul>
-<li>coarse movie downsampling;</li>
-<li>coarse real phase;</li>
-<li>coarse imaginary phase;</li>
-<li>durable coarse cache creation;</li>
-<li>full-grid movie downsampling;</li>
-<li>full real phase;</li>
-<li>full imaginary phase.</li>
-</ul>
-<p>If a file exists with the wrong shape, regenerate it rather than using it. A
-same-name file from a different <code>NX</code>, <code>NY</code>, orientation, sigma, or frequency
-configuration can silently distort downstream plots if it is not rejected.</p>
+<p><code>coarse_rf_power.zarr</code> stores one such product. Run Model stores two, and Run
+Full Model stores two products with an additional frequency axis. Zarr
+compression can reduce on-disk use, but planning should use the uncompressed
+equivalent shown by the GUI. Higher percentages grow both <code>x</code> and <code>y</code>, so disk
+growth is approximately quadratic in the percentage.</p>
 
 
 

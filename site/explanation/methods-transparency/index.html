@@ -737,6 +737,8 @@
       
         
       
+        
+      
     
     
     
@@ -834,6 +836,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1135,6 +1165,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1260,6 +1296,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1456,6 +1548,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1850,8 +1970,10 @@ correlations and can be negative, the implementation shifts each curve to a
 nonnegative baseline before computing ratios.</p>
 <h2 id="caching-and-recovery">Caching and recovery<a class="headerlink" href="#caching-and-recovery" title="Permanent link">&para;</a></h2>
 <p>Long-running buttons reuse completed outputs when shapes match the current
-configuration. Recovery checkpoints are removed after successful or cancelled
-runs and kept after failures for debugging.</p>
+configuration. Cancellation retains convolution-wavelet partial caches and the
+recovery checkpoint, allowing completed phases (and direct Coarse RF output
+tiles) to be reused on the next run. Recovery checkpoints are removed only
+after successful runs and are kept after cancellations or failures.</p>
 <p>Shape validation is the main safety rule. If <code>NX</code>, <code>NY</code>, <code>N_thetas</code>, <code>Sigmas</code>,
 or <code>Frequencies</code> change, a previous cache can have the right filename but the
 wrong scientific meaning. The GUI tries to reject wrong-shaped artifacts and

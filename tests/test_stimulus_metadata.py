@@ -2,7 +2,7 @@
 
 import pytest
 
-from waven.stimulus.metadata import coverage_crop_bounds
+from waven.stimulus.metadata import coverage_crop_bounds, downsampled_grid_dimensions
 
 
 def test_coverage_crop_bounds_selects_the_requested_central_field():
@@ -24,3 +24,8 @@ def test_coverage_crop_bounds_rejects_analysis_outside_the_visual_field():
             visual_coverage=(-10, 10, 10, -10),
             analysis_coverage=(-12, 10, 10, -10),
         )
+
+
+def test_zero_downsample_percent_is_normalized_to_the_smallest_usable_grid():
+    """Legacy saved GUI values of zero must not create a one-pixel cache."""
+    assert downsampled_grid_dimensions({"width": 1920, "height": 1080}, 0) == (19, 11)

@@ -2740,12 +2740,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return value if value in {"npy", "zarr"} else "npy"
 
     def _selected_downsample_percent():
-        """Return the selected spatial downsample percentage."""
+        """Return the selected spatial downsample percentage (1--100%)."""
         try:
             value = float(downsample_percent_var.get())
         except Exception:
             return 20.0
-        return max(0.0, min(100.0, value))
+        return max(1.0, min(100.0, value))
 
     def _movie_metadata(path=None):
         """Return authoritative stimulus dimensions, frame count, and FPS."""
@@ -6607,7 +6607,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     downsample_percent_label.grid(row=1, column=0, sticky="w", pady=(8, 2))
     downsample_slider = ctk.CTkSlider(
         frame_downsample,
-        from_=0,
+        from_=1,
         to=100,
         number_of_steps=100,
         variable=downsample_percent_var,

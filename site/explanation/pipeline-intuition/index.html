@@ -737,6 +737,8 @@
       
         
       
+        
+      
     
     
     
@@ -914,6 +916,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1113,6 +1143,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1238,6 +1274,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1434,6 +1526,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1747,9 +1867,11 @@ bright-on-dark or dark-on-bright at exactly one pixel alignment. The coarse
 cache also stores a combined coefficient derived from the two phases, which is
 the array used by the coarse RF search.</p>
 <h2 id="coarse-versus-full-paths">Coarse versus full paths<a class="headerlink" href="#coarse-versus-full-paths" title="Permanent link">&para;</a></h2>
-<p>The coarse path reduces the spatial grid before correlation. If the configured
-grid is <code>NX</code> by <code>NY</code>, the coarse grid is derived from the configuration helper
-and written as lowercase <code>nx</code> by <code>ny</code> in the docs. This stage is meant to answer:</p>
+<p>The coarse path reduces the metadata-derived analysis grid before correlation.
+The user chooses one downsampling percentage; movie width and height determine
+the shared grid, and the coarse grid is derived from it. There are no GUI
+entries for <code>NX</code>, <code>NY</code>, movie FPS, or a fixed movie duration. This stage is
+meant to answer:</p>
 <ul>
 <li>where is the receptive field approximately?</li>
 <li>which orientation and size look plausible?</li>
@@ -1758,7 +1880,7 @@ and written as lowercase <code>nx</code> by <code>ny</code> in the docs. This st
 <p>The full path keeps the configured grid and allows the model to use independent
 spatial frequencies. This is much larger because the output grows with every
 axis:</p>
-<div class="highlight"><pre><span></span><code>n_frames * NX * NY * n_orientations * n_sigmas * n_frequencies
+<div class="highlight"><pre><span></span><code>n_frames * full_x * full_y * n_orientations * n_sigmas * n_frequencies
 </code></pre></div>
 <p>That value is per phase. Real and imaginary full-model outputs are separate
 files, so the storage requirement is effectively doubled when both are kept as
@@ -1770,10 +1892,23 @@ neuron tends to be active when that feature is strong. Negative values mean the
 neuron tends to be less active when that feature is strong. The preferred
 feature is selected by maximum absolute correlation so strongly negative
 relationships are still visible instead of being discarded.</p>
-<p>Orientation tuning curves are slices through the RF tensor at the preferred
-position, size, and frequency. OSI and gOSI summarize those slices. They are
-descriptive statistics for the fitted tuning curve, not replacement evidence for
-trial reliability, signal quality, or model performance.</p>
+<p>The individual RF orientation curve is a correlation slice through the RF
+tensor at the preferred position, size, and frequency. It is useful for
+understanding why that feature was selected, but it is <strong>not</strong> used for OSI or
+gOSI. Those metrics first use the RF search to choose the preferred feature
+location, then form an orientation-by-orientation weighted mean from the
+aligned firing-rate array. This keeps the selectivity measurement in neural
+response units rather than correlation units.</p>
+<p>For each orientation (o), Waven computes a non-negative weighted mean
+firing rate (R_o):</p>
+<div class="highlight"><pre><span></span><code>R_o = sum_t(power[t, preferred_x, preferred_y, o, preferred_size] * rate[t])
+      / sum_t(power[t, preferred_x, preferred_y, o, preferred_size])
+</code></pre></div>
+<p>OSI compares the preferred orientation with its orthogonal orientation; gOSI
+is the magnitude of the doubled-angle vector sum of the same rates. Both range
+from zero (no orientation preference) toward one (strong preference). They are
+descriptive statistics, not a replacement for repeatability, signal quality,
+or model performance.</p>
 
 
 

@@ -574,10 +574,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#analysis-environment" class="md-nav__link">
+  <a href="#first-time-setup-windows-macos-or-linux" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Analysis environment
+        First-time setup (Windows, macOS, or Linux)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-and-cpu-installations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU and CPU installations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#developer-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Developer workflow
       
     </span>
   </a>
@@ -596,10 +618,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#hardware-notes" class="md-nav__link">
+  <a href="#hardware-and-storage-preflight" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hardware notes
+        Hardware and storage preflight
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cpu-only-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU-only systems
       
     </span>
   </a>
@@ -817,6 +850,8 @@
       
         
       
+        
+      
     
     
     
@@ -914,6 +949,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1113,6 +1176,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1238,6 +1307,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1434,6 +1559,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1661,10 +1814,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#analysis-environment" class="md-nav__link">
+  <a href="#first-time-setup-windows-macos-or-linux" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Analysis environment
+        First-time setup (Windows, macOS, or Linux)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-and-cpu-installations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU and CPU installations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#developer-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Developer workflow
       
     </span>
   </a>
@@ -1683,10 +1858,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#hardware-notes" class="md-nav__link">
+  <a href="#hardware-and-storage-preflight" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hardware notes
+        Hardware and storage preflight
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cpu-only-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU-only systems
       
     </span>
   </a>
@@ -1714,27 +1900,74 @@
 
 
 <h1 id="install-waven">Install waven<a class="headerlink" href="#install-waven" title="Permanent link">&para;</a></h1>
-<h2 id="analysis-environment">Analysis environment<a class="headerlink" href="#analysis-environment" title="Permanent link">&para;</a></h2>
+<p>This page is for both a first-time analyst and a developer modifying the code.
+Use the repository's <code>environment.yml</code>: it pins a compatible scientific stack,
+Tk GUI support, Zarr, and the CUDA-enabled PyTorch build used by the current
+wavelet backend.</p>
+<h2 id="first-time-setup-windows-macos-or-linux">First-time setup (Windows, macOS, or Linux)<a class="headerlink" href="#first-time-setup-windows-macos-or-linux" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Install <a href="https://docs.conda.io/projects/miniconda/">Miniconda or Anaconda</a>.</li>
+<li>Open an Anaconda Prompt or terminal in the repository root—the folder that
+   contains <code>environment.yml</code> and <code>ui.py</code>.</li>
+<li>Create and activate the environment:</li>
+</ol>
 <div class="highlight"><pre><span></span><code>conda<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>--solver<span class="w"> </span>libmamba<span class="w"> </span>-f<span class="w"> </span>environment.yml
 conda<span class="w"> </span>activate<span class="w"> </span>waven
-pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
 </code></pre></div>
-<h2 id="documentation-environment">Documentation environment<a class="headerlink" href="#documentation-environment" title="Permanent link">&para;</a></h2>
+<p><code>-e</code> means <em>editable</em>: imports point at <code>src/waven</code>, so a developer can change
+code without reinstalling the package.</p>
+<ol>
+<li>Launch the GUI from that same root:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>ui.py
+</code></pre></div>
+<p>If the GUI reports a missing package, confirm the interpreter is the activated
+environment with <code>python -c "import sys; print(sys.executable)"</code>, then rerun
+<code>python -m pip install -e .</code>.</p>
+<h2 id="gpu-and-cpu-installations">GPU and CPU installations<a class="headerlink" href="#gpu-and-cpu-installations" title="Permanent link">&para;</a></h2>
+<p>The checked-in Conda environment requests CUDA 12.1 PyTorch. It is the
+recommended route for NVIDIA systems. The application remains functional on a
+CPU-only computer: convolution and Coarse RF fall back safely, but long wavelet
+and model jobs will take longer. Do not install CUDA separately merely to run
+the GUI; PyTorch supplies the needed runtime when the driver is compatible.</p>
+<p>For a CPU-only developer environment, create the Conda environment and replace
+the PyTorch dependency with the CPU build appropriate for your platform before
+running <code>pip install -e .</code>. Keep <code>numpy</code> below 2.0 when using Suite2p/Numba
+components.</p>
+<h2 id="developer-workflow">Developer workflow<a class="headerlink" href="#developer-workflow" title="Permanent link">&para;</a></h2>
+<p>Run these checks before handing off a change:</p>
 <div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[docs]&quot;</span>
+python<span class="w"> </span>-m<span class="w"> </span>mkdocs<span class="w"> </span>build
+python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import ast, pathlib; [ast.parse(p.read_text(encoding=&#39;utf-8&#39;)) for p in pathlib.Path(&#39;src&#39;).rglob(&#39;*.py&#39;)]; print(&#39;syntax OK&#39;)&quot;</span>
 </code></pre></div>
-<p>This installs MkDocs, Material for MkDocs, and mkdocstrings.</p>
-<p>If extras installation is awkward in your shell, use:</p>
-<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>requirements-docs.txt
+<p>For a GUI change, also start <code>python ui.py</code>, select a small test movie, and run
+the staged smoke path: prepare stimulus cache → neural cache → Gabor assets →
+the required wavelet product → Coarse RF. Never validate a large cache change
+by first running an experiment-scale movie.</p>
+<h2 id="documentation-environment">Documentation environment<a class="headerlink" href="#documentation-environment" title="Permanent link">&para;</a></h2>
+<p>The editable docs extra installs MkDocs, Material, and mkdocstrings:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[docs]&quot;</span>
+python<span class="w"> </span>-m<span class="w"> </span>mkdocs<span class="w"> </span>serve
 </code></pre></div>
-<h2 id="hardware-notes">Hardware notes<a class="headerlink" href="#hardware-notes" title="Permanent link">&para;</a></h2>
-<p>Use local SSD/NVMe storage for movies, wavelets, and model outputs. Network
-drives are often the limiting factor for this project.</p>
-<p>Recommended starting point:</p>
-<ul>
-<li>at least 64 GB RAM;</li>
-<li>at least 100 GB free disk space for a real experiment;</li>
-<li>CUDA GPU when running large wavelet/model jobs.</li>
-</ul>
+<p>Use <code>python -m mkdocs build</code> for a static site in <code>site/</code>. If extras quoting is
+awkward in a Windows shell, use <code>python -m pip install -r requirements-docs.txt</code>.</p>
+<h2 id="hardware-and-storage-preflight">Hardware and storage preflight<a class="headerlink" href="#hardware-and-storage-preflight" title="Permanent link">&para;</a></h2>
+<p>Use a local SSD/NVMe for the movie, <code>cache/</code>, and <code>output/</code> folders; a network
+drive often becomes the bottleneck even with a fast GPU. Start with at least
+64 GB RAM and 100 GB free storage for a real experiment, then use the logical
+size estimates in the Wavelets tab before creating full-model products. Waven
+keeps queues bounded and falls back from GPU tiles to CPU when required, but
+storage capacity remains a user responsibility.</p>
+<h2 id="cpu-only-systems">CPU-only systems<a class="headerlink" href="#cpu-only-systems" title="Permanent link">&para;</a></h2>
+<p>Waven's current convolution and Coarse RF implementations automatically
+fall back to CPU when CUDA is unavailable. On a system without an NVIDIA GPU,
+install the CPU PyTorch wheel rather than the CUDA requirements:</p>
+<div class="highlight"><pre><span></span><code><span class="n">python</span> <span class="n">-m</span> <span class="n">pip</span> <span class="n">install</span> <span class="n">-r</span> <span class="n">requirements-cpu</span><span class="p">.</span><span class="n">txt</span>
+</code></pre></div>
+<p>The GPU-only legacy helpers also use the same safe device resolver. CUDA
+options in the GUI remain saved preferences and have no effect until a CUDA GPU
+is available.</p>
 
 
 

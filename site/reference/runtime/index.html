@@ -735,6 +735,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1033,6 +1063,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1158,6 +1194,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1378,6 +1470,56 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#sustained-throughput-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sustained-throughput controls
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sustained-throughput controls">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#performance-and-hardware-choices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance and hardware choices
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cancellation-and-resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cancellation and resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-two-photon-timeline-roots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional two-photon timeline roots
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#why-this-matters" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1400,6 +1542,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#waven.runtime.performance.OperationTelemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OperationTelemetry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OperationTelemetry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#waven.runtime.performance.OperationTelemetry.maybe_report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        maybe_report
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.enabled_feature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enabled_feature
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.select_compatible_multi_gpu_ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        select_compatible_multi_gpu_ids
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.compute_devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compute_devices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.autotuned_frame_chunk_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        autotuned_frame_chunk_size
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#waven.runtime.performance.get_gpu_count" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1415,6 +1629,17 @@
     <span class="md-ellipsis">
       
         gpu_vram_bytes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.gpu_available_vram_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gpu_available_vram_bytes
       
     </span>
   </a>
@@ -1448,6 +1673,72 @@
     <span class="md-ellipsis">
       
         cpu_worker_count
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.cpu_inner_thread_count" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cpu_inner_thread_count
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.cpu_threadpool_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cpu_threadpool_scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.torch_compile_enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        torch_compile_enabled
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.amp_enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        amp_enabled
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.convolution_precision_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        convolution_precision_scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.configure_torch_cpu_threads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        configure_torch_cpu_threads
       
     </span>
   </a>
@@ -1587,6 +1878,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#waven.runtime.task_control.task_start_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task_start_message
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.task_control.task_finish_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task_finish_message
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#waven.runtime.keep_awake" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1682,6 +1995,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1909,6 +2250,56 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#sustained-throughput-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sustained-throughput controls
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sustained-throughput controls">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#performance-and-hardware-choices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance and hardware choices
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cancellation-and-resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cancellation and resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-two-photon-timeline-roots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional two-photon timeline roots
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#why-this-matters" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1931,6 +2322,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#waven.runtime.performance.OperationTelemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OperationTelemetry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OperationTelemetry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#waven.runtime.performance.OperationTelemetry.maybe_report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        maybe_report
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.enabled_feature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enabled_feature
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.select_compatible_multi_gpu_ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        select_compatible_multi_gpu_ids
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.compute_devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compute_devices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.autotuned_frame_chunk_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        autotuned_frame_chunk_size
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#waven.runtime.performance.get_gpu_count" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1946,6 +2409,17 @@
     <span class="md-ellipsis">
       
         gpu_vram_bytes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.gpu_available_vram_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gpu_available_vram_bytes
       
     </span>
   </a>
@@ -1979,6 +2453,72 @@
     <span class="md-ellipsis">
       
         cpu_worker_count
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.cpu_inner_thread_count" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cpu_inner_thread_count
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.cpu_threadpool_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cpu_threadpool_scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.torch_compile_enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        torch_compile_enabled
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.amp_enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        amp_enabled
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.convolution_precision_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        convolution_precision_scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.performance.configure_torch_cpu_threads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        configure_torch_cpu_threads
       
     </span>
   </a>
@@ -2118,6 +2658,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#waven.runtime.task_control.task_start_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task_start_message
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#waven.runtime.task_control.task_finish_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task_finish_message
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#waven.runtime.keep_awake" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2213,6 +2775,112 @@
 <p>Runtime helpers keep long scientific jobs practical. They estimate safe chunk
 sizes, detect usable RAM/GPU resources, support cancellation, and keep the host
 awake during long GUI tasks.</p>
+<h2 id="sustained-throughput-controls">Sustained-throughput controls<a class="headerlink" href="#sustained-throughput-controls" title="Permanent link">&para;</a></h2>
+<p>The convolution wavelet actions use a bounded three-stage schedule. One worker
+prefetches the next movie/Zarr chunk while the current chunk is convolved; a
+single bounded writer commits completed chunks. The queues intentionally retain
+only a few chunks. This overlaps disk/CPU/GPU work without allowing a fast
+producer to consume all RAM or make Windows unresponsive.</p>
+<p>At the start of each convolution action, the frame batch is derived from
+<em>currently free</em> RAM/VRAM rather than installed memory. The first real chunks
+then adjust the batch within that preflight ceiling: quick batches grow toward
+the ceiling; slow batches shrink. Changing a batch boundary changes scheduling
+only. A convolution is still evaluated independently for every frame with the
+same kernels, so the scientific definition and array layout are unchanged. As
+with any reordered float32 GPU/CPU convolution, least-significant-bit roundoff
+can vary across hardware or batch plans; it is not a change in the model or
+analysis inputs.</p>
+<p>The terminal prints a rate-limited live telemetry line during downsampling,
+convolution, and Coarse RF correlation, followed by a final summary. It reports
+wall-clock time and measured input, compute/transfer, and output throughput.
+That line is the reliable way to identify whether a particular run is limited
+by decoding, GPU convolution, or storage rather than guessing from CPU/GPU
+percentages alone.</p>
+<p>Run <code>python scripts/benchmark_runtime.py</code> from the repository root for a small
+synthetic comparison of CPU/GPU Coarse RF and PSTH-weighted STA timing on the
+current machine. It performs no experiment-cache writes and is useful for
+checking whether fast-precision convolution modes are worthwhile locally.</p>
+<h3 id="performance-and-hardware-choices">Performance and hardware choices<a class="headerlink" href="#performance-and-hardware-choices" title="Permanent link">&para;</a></h3>
+<p>The GUI exposes every runtime choice in <strong>Session Configuration → Performance &amp;
+Hardware</strong>.  The safe defaults require no configuration, apply to the next
+action without restarting the GUI, and are saved in <code>gui.performance</code> when you
+save the current GUI inputs and parameters. The matching environment variables
+remain supported for unattended or command-line launches. Set a value to <code>0</code>
+only when diagnosing a machine-specific driver or filesystem issue.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WAVEN_AUTOTUNE</code></td>
+<td>on</td>
+<td>Measures early convolution chunks and adapts only within the safe batch ceiling.</td>
+</tr>
+<tr>
+<td><code>WAVEN_PREFETCH</code></td>
+<td>on</td>
+<td>Enables one bounded input prefetch worker and downsampling resize overlap.</td>
+</tr>
+<tr>
+<td><code>WAVEN_ASYNC_WRITER</code></td>
+<td>on</td>
+<td>Enables a single bounded wavelet-output writer.</td>
+</tr>
+<tr>
+<td><code>WAVEN_TIME_MAJOR_CONV</code></td>
+<td>on</td>
+<td>For direct coarse-RF power, reads/uploads each frame chunk once before applying its bounded filter groups. Its Zarr output is chunked to the frame/filter write tiles, avoiding repeated compression of the same output chunk; it falls back to group-major if the combined kernel banks exceed a safe live-memory budget.</td>
+</tr>
+<tr>
+<td><code>WAVEN_RF_GPU</code></td>
+<td>on, if CUDA is present</td>
+<td>Accumulates Coarse RF feature/response cross-products on GPU when the current tile fits. Each tile falls back to CPU on allocation failure.</td>
+</tr>
+<tr>
+<td><code>WAVEN_MULTI_GPU</code></td>
+<td>off</td>
+<td>Enables PyTorch batch-parallel convolution only across compatible CUDA GPUs. Cards with different compute capability, or less than 75% of the primary card's estimated throughput or VRAM, are excluded automatically.</td>
+</tr>
+<tr>
+<td><code>WAVEN_TORCH_COMPILE</code></td>
+<td>off</td>
+<td>Experimental <code>torch.compile</code> runner for long, fixed-shape convolution jobs. The first chunks are slower while the runner compiles; disable after a compiler/driver issue.</td>
+</tr>
+<tr>
+<td><code>WAVEN_AMP</code></td>
+<td>off</td>
+<td>Explicit Tensor Core float16 autocast for convolution only. It changes convolution round-off, so use only after validating a representative run against default precision.</td>
+</tr>
+</tbody>
+</table>
+<p>Multi-GPU is deliberately opt-in: it distributes independent frame batches,
+then gathers them in original order. It does not change filter settings or
+array layout, and a setup failure automatically continues on the primary GPU.
+GPU RF acceleration also preserves the CPU algorithm's sufficient statistics;
+only the floating-point matrix multiply location changes.</p>
+<h3 id="cancellation-and-resume">Cancellation and resume<a class="headerlink" href="#cancellation-and-resume" title="Permanent link">&para;</a></h3>
+<p>Cancellation is cooperative: the active chunk finishes, then the task stops at
+the next safe checkpoint. Convolution-backed <strong>Prepare Coarse RF</strong>, <strong>Prepare
+Run Model</strong>, and <strong>Prepare Run Full Model</strong> retain their partial Zarr caches and
+their recovery manifest. A rerun reuses completed phase artifacts and, for the
+direct Coarse RF cache, skips every completed frame/filter output tile. Partial
+caches are never considered analysis-ready until their normal artifact metadata
+is written after a successful run.</p>
+<h3 id="optional-two-photon-timeline-roots">Optional two-photon timeline roots<a class="headerlink" href="#optional-two-photon-timeline-roots" title="Permanent link">&para;</a></h3>
+<p>The GUI also exposes <strong>Advanced 2-photon data discovery</strong> in Session
+Configuration. It supplies the optional <code>WAVEN_SUBJECT_DIRS</code> process setting
+used by the Suite2p timeline adapter. Enter one or more dataset-root folders,
+separated by the operating system's path separator (<code>;</code> on Windows, <code>:</code> on
+Linux/macOS), then choose <strong>Apply Suite2p Folders</strong>. This is only needed when a
+two-photon timeline must be discovered outside the project <code>Dir</code>; it does not
+alter neural data, alignment mathematics, cache content, or any model input.
+Leaving it empty removes the temporary override, which avoids carrying paths
+from another computer into a new session.</p>
 <h2 id="why-this-matters">Why this matters<a class="headerlink" href="#why-this-matters" title="Permanent link">&para;</a></h2>
 <p>Wavelet decomposition streams through arrays that can be hundreds of gigabytes
 logically. Chunk sizing controls peak RAM and GPU memory use. The goal is to
@@ -2278,6 +2946,367 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
 
 
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="waven.runtime.performance.OperationTelemetry" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">OperationTelemetry</span>
+
+
+<a href="#waven.runtime.performance.OperationTelemetry" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">OperationTelemetry</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Low-overhead timing and throughput counters for one pipeline operation.</p>
+
+
+
+
+
+
+
+
+                  <details class="mkdocstrings-source">
+                    <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+                    <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">32</span>
+<span class="normal">33</span>
+<span class="normal">34</span>
+<span class="normal">35</span>
+<span class="normal">36</span>
+<span class="normal">37</span>
+<span class="normal">38</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">label</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">label</span><span class="p">)</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">started</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">seconds</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">bytes</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_last_live_report</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">started</span>
+</code></pre></div></td></tr></table></div>
+                  </details>
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="waven.runtime.performance.OperationTelemetry.maybe_report" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">maybe_report</span>
+
+
+<a href="#waven.runtime.performance.OperationTelemetry.maybe_report" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">maybe_report</span><span class="p">(</span><span class="n">interval_seconds</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">10.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Print a rate-limited live throughput snapshot for a long operation.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">maybe_report</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">interval_seconds</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">10.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print a rate-limited live throughput snapshot for a long operation.&quot;&quot;&quot;</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">now</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_live_report</span> <span class="o">&lt;</span> <span class="nb">float</span><span class="p">(</span><span class="n">interval_seconds</span><span class="p">):</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_live_report</span> <span class="o">=</span> <span class="n">now</span>
+    <span class="nb">print</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_message</span><span class="p">(</span><span class="s2">&quot; (live)&quot;</span><span class="p">))</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.enabled_feature" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">enabled_feature</span>
+
+
+<a href="#waven.runtime.performance.enabled_feature" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">enabled_feature</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Read a conservative runtime feature flag from <code>WAVEN_&lt;NAME&gt;</code>.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">enabled_feature</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read a conservative runtime feature flag from ``WAVEN_&lt;NAME&gt;``.&quot;&quot;&quot;</span>
+    <span class="n">value</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;WAVEN_</span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">bool</span><span class="p">(</span><span class="n">default</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">value</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;1&quot;</span><span class="p">,</span> <span class="s2">&quot;true&quot;</span><span class="p">,</span> <span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;on&quot;</span><span class="p">}</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.select_compatible_multi_gpu_ids" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">select_compatible_multi_gpu_ids</span>
+
+
+<a href="#waven.runtime.performance.select_compatible_multi_gpu_ids" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">select_compatible_multi_gpu_ids</span><span class="p">(</span>
+    <span class="n">descriptors</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]],</span>
+    <span class="n">minimum_relative_score</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.75</span><span class="p">,</span>
+    <span class="n">minimum_relative_memory</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.75</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Keep only GPUs that can usefully share synchronous <code>DataParallel</code> work.</p>
+<p><code>DataParallel</code> splits each frame chunk, then waits for every GPU before
+gathering. A substantially slower/smaller card therefore throttles the
+whole batch. Different CUDA architectures also make mixed-precision and
+kernel behaviour less predictable, so they are deliberately not combined.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">select_compatible_multi_gpu_ids</span><span class="p">(</span>
+    <span class="n">descriptors</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]],</span>
+    <span class="n">minimum_relative_score</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.75</span><span class="p">,</span>
+    <span class="n">minimum_relative_memory</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.75</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Keep only GPUs that can usefully share synchronous ``DataParallel`` work.</span>
+
+<span class="sd">    ``DataParallel`` splits each frame chunk, then waits for every GPU before</span>
+<span class="sd">    gathering. A substantially slower/smaller card therefore throttles the</span>
+<span class="sd">    whole batch. Different CUDA architectures also make mixed-precision and</span>
+<span class="sd">    kernel behaviour less predictable, so they are deliberately not combined.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">available</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">((</span><span class="nb">dict</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">descriptors</span><span class="p">),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">item</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">item</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]))</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">available</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(),</span> <span class="p">()</span>
+    <span class="n">primary</span> <span class="o">=</span> <span class="n">available</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">accepted</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">primary</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">])]</span>
+    <span class="n">rejected</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="n">available</span><span class="p">[</span><span class="mi">1</span><span class="p">:]:</span>
+        <span class="n">device_id</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">candidate</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">])</span>
+        <span class="n">reasons</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">candidate</span><span class="p">[</span><span class="s2">&quot;capability&quot;</span><span class="p">])</span> <span class="o">!=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">primary</span><span class="p">[</span><span class="s2">&quot;capability&quot;</span><span class="p">]):</span>
+            <span class="n">reasons</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;compute capability </span><span class="si">{</span><span class="n">candidate</span><span class="p">[</span><span class="s1">&#39;capability&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> differs from cuda:</span><span class="si">{</span><span class="n">primary</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">primary</span><span class="p">[</span><span class="s1">&#39;capability&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="n">score_ratio</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">candidate</span><span class="p">[</span><span class="s2">&quot;throughput_score&quot;</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">primary</span><span class="p">[</span><span class="s2">&quot;throughput_score&quot;</span><span class="p">]))</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span>
+            <span class="nb">float</span><span class="p">(</span><span class="n">candidate</span><span class="p">[</span><span class="s2">&quot;throughput_score&quot;</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">primary</span><span class="p">[</span><span class="s2">&quot;throughput_score&quot;</span><span class="p">])</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">score_ratio</span> <span class="o">&lt;</span> <span class="nb">float</span><span class="p">(</span><span class="n">minimum_relative_score</span><span class="p">):</span>
+            <span class="n">reasons</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;estimated convolution throughput is </span><span class="si">{</span><span class="n">score_ratio</span><span class="si">:</span><span class="s2">.0%</span><span class="si">}</span><span class="s2"> of the primary GPU&quot;</span><span class="p">)</span>
+        <span class="n">memory_ratio</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">candidate</span><span class="p">[</span><span class="s2">&quot;vram_bytes&quot;</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">primary</span><span class="p">[</span><span class="s2">&quot;vram_bytes&quot;</span><span class="p">]))</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span>
+            <span class="nb">float</span><span class="p">(</span><span class="n">candidate</span><span class="p">[</span><span class="s2">&quot;vram_bytes&quot;</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">primary</span><span class="p">[</span><span class="s2">&quot;vram_bytes&quot;</span><span class="p">])</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">memory_ratio</span> <span class="o">&lt;</span> <span class="nb">float</span><span class="p">(</span><span class="n">minimum_relative_memory</span><span class="p">):</span>
+            <span class="n">reasons</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;VRAM is </span><span class="si">{</span><span class="n">memory_ratio</span><span class="si">:</span><span class="s2">.0%</span><span class="si">}</span><span class="s2"> of the primary GPU&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">reasons</span><span class="p">:</span>
+            <span class="n">rejected</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;cuda:</span><span class="si">{</span><span class="n">device_id</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">candidate</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">): &quot;</span> <span class="o">+</span> <span class="s2">&quot;; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">reasons</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">accepted</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">device_id</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">accepted</span><span class="p">),</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">rejected</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.compute_devices" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">compute_devices</span>
+
+
+<a href="#waven.runtime.performance.compute_devices" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">compute_devices</span><span class="p">(</span><span class="n">allow_multi_gpu</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return safe compute devices, rejecting imbalanced DataParallel groups.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">compute_devices</span><span class="p">(</span><span class="n">allow_multi_gpu</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return safe compute devices, rejecting imbalanced DataParallel groups.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">():</span>
+        <span class="k">return</span> <span class="p">[</span><span class="s2">&quot;cpu&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">allow_multi_gpu</span> <span class="ow">and</span> <span class="n">enabled_feature</span><span class="p">(</span><span class="s2">&quot;MULTI_GPU&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">available_ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">idx</span> <span class="k">for</span> <span class="n">idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">())</span> <span class="k">if</span> <span class="n">gpu_available_vram_bytes</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">available_ids</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">accepted_ids</span><span class="p">,</span> <span class="n">rejected</span> <span class="o">=</span> <span class="n">select_compatible_multi_gpu_ids</span><span class="p">(</span>
+                <span class="n">_gpu_descriptor</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span> <span class="k">for</span> <span class="n">idx</span> <span class="ow">in</span> <span class="n">available_ids</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">accepted_ids</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">return</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;cuda:</span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">idx</span> <span class="ow">in</span> <span class="n">accepted_ids</span><span class="p">]</span>
+            <span class="n">decision_key</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">available_ids</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">decision_key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_reported_multi_gpu_decisions</span><span class="p">:</span>
+                <span class="n">_reported_multi_gpu_decisions</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">decision_key</span><span class="p">)</span>
+                <span class="n">detail</span> <span class="o">=</span> <span class="s2">&quot; | &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">rejected</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;no compatible peer GPU was available&quot;</span>
+                <span class="nb">print</span><span class="p">(</span>
+                    <span class="s2">&quot;Multi-GPU requested, but synchronous DataParallel would be bottlenecked; &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;using cuda:0 only. </span><span class="si">{</span><span class="n">detail</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+    <span class="k">return</span> <span class="p">[</span><span class="s2">&quot;cuda:0&quot;</span><span class="p">]</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.autotuned_frame_chunk_size" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">autotuned_frame_chunk_size</span>
+
+
+<a href="#waven.runtime.performance.autotuned_frame_chunk_size" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">autotuned_frame_chunk_size</span><span class="p">(</span>
+    <span class="n">num_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">nx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">ny</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">n_channels</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Choose a bounded convolution batch from current free device memory.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">autotuned_frame_chunk_size</span><span class="p">(</span><span class="n">num_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">nx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">ny</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">n_channels</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Choose a bounded convolution batch from current free device memory.&quot;&quot;&quot;</span>
+    <span class="n">num_frames</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">num_frames</span><span class="p">))</span>
+    <span class="n">pixels</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">nx</span><span class="p">)</span> <span class="o">*</span> <span class="nb">int</span><span class="p">(</span><span class="n">ny</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">():</span>
+        <span class="n">budget</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">gpu_available_vram_bytes</span><span class="p">()</span> <span class="o">*</span> <span class="mf">0.20</span><span class="p">))</span>
+        <span class="c1"># input, convolution workspace, output, and transfer headroom</span>
+        <span class="n">estimate_per_frame</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">pixels</span> <span class="o">*</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">n_channels</span><span class="p">))</span> <span class="o">*</span> <span class="mi">4</span> <span class="o">*</span> <span class="mi">8</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">16</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">num_frames</span><span class="p">,</span> <span class="mi">1024</span><span class="p">,</span> <span class="n">budget</span> <span class="o">//</span> <span class="n">estimate_per_frame</span><span class="p">))</span>
+    <span class="n">budget</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">available_ram_bytes</span><span class="p">()</span> <span class="o">*</span> <span class="mf">0.10</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">num_frames</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="n">budget</span> <span class="o">//</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">pixels</span> <span class="o">*</span> <span class="mi">4</span> <span class="o">*</span> <span class="mi">4</span><span class="p">)))</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
@@ -2297,11 +3326,11 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">20</span>
-<span class="normal">21</span>
-<span class="normal">22</span>
-<span class="normal">23</span>
-<span class="normal">24</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">get_gpu_count</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">get_gpu_count</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the total number of CUDA devices available on the system.&quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">():</span>
         <span class="k">return</span> <span class="mi">0</span>
@@ -2334,17 +3363,58 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">27</span>
-<span class="normal">28</span>
-<span class="normal">29</span>
-<span class="normal">30</span>
-<span class="normal">31</span>
-<span class="normal">32</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">gpu_vram_bytes</span><span class="p">(</span><span class="n">device_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Return total VRAM of the specified CUDA device, or zero when no GPU is present.&quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="ow">or</span> <span class="n">device_id</span> <span class="o">&gt;=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">():</span>
         <span class="k">return</span> <span class="mi">0</span>
     <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">get_device_properties</span><span class="p">(</span><span class="n">device_id</span><span class="p">)</span><span class="o">.</span><span class="n">total_memory</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.gpu_available_vram_bytes" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">gpu_available_vram_bytes</span>
+
+
+<a href="#waven.runtime.performance.gpu_available_vram_bytes" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">gpu_available_vram_bytes</span><span class="p">(</span><span class="n">device_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return currently free CUDA memory, falling back safely when unavailable.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">gpu_available_vram_bytes</span><span class="p">(</span><span class="n">device_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return currently free CUDA memory, falling back safely when unavailable.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="ow">or</span> <span class="n">device_id</span> <span class="o">&gt;=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">():</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">free_bytes</span><span class="p">,</span> <span class="n">_total_bytes</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">mem_get_info</span><span class="p">(</span><span class="n">device_id</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">free_bytes</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">gpu_vram_bytes</span><span class="p">(</span><span class="n">device_id</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2369,9 +3439,9 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">35</span>
-<span class="normal">36</span>
-<span class="normal">37</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">available_ram_bytes</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">available_ram_bytes</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Return bytes of RAM currently free for allocation (not total installed).&quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">psutil</span><span class="o">.</span><span class="n">virtual_memory</span><span class="p">()</span><span class="o">.</span><span class="n">available</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
@@ -2389,22 +3459,52 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
 <a href="#waven.runtime.performance.has_enough_ram" class="headerlink" title="Permanent link">&para;</a></h2>
 <div class="doc-signature highlight"><pre><span></span><code><span class="nf">has_enough_ram</span><span class="p">(</span>
-    <span class="n">required_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">safety_margin</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.2</span>
+    <span class="n">required_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">safety_margin</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.2</span><span class="p">,</span>
+    <span class="n">os_reserve_fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.3</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
 
-        <p>Return True when <code>required_bytes * safety_margin</code> fits in free RAM.</p>
+        <p>Return whether an allocation fits while retaining OS/UI headroom.</p>
+<p>Treating all currently available RAM as application memory can make Windows
+page aggressively or stop servicing the GUI.  The reserve is intentionally
+retained for the desktop, file cache, driver allocations, and transient
+copies made by NumPy/PyTorch.</p>
 
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">40</span>
-<span class="normal">41</span>
-<span class="normal">42</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">has_enough_ram</span><span class="p">(</span><span class="n">required_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">safety_margin</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.20</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return True when ``required_bytes * safety_margin`` fits in free RAM.&quot;&quot;&quot;</span>
-    <span class="k">return</span> <span class="n">available_ram_bytes</span><span class="p">()</span> <span class="o">&gt;</span> <span class="nb">int</span><span class="p">(</span><span class="n">required_bytes</span> <span class="o">*</span> <span class="n">safety_margin</span><span class="p">)</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">has_enough_ram</span><span class="p">(</span>
+    <span class="n">required_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">safety_margin</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.20</span><span class="p">,</span>
+    <span class="n">os_reserve_fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.30</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return whether an allocation fits while retaining OS/UI headroom.</span>
+
+<span class="sd">    Treating all currently available RAM as application memory can make Windows</span>
+<span class="sd">    page aggressively or stop servicing the GUI.  The reserve is intentionally</span>
+<span class="sd">    retained for the desktop, file cache, driver allocations, and transient</span>
+<span class="sd">    copies made by NumPy/PyTorch.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">reserve_fraction</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">os_reserve_fraction</span><span class="p">),</span> <span class="mf">0.0</span><span class="p">),</span> <span class="mf">0.80</span><span class="p">)</span>
+    <span class="n">usable</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">available_ram_bytes</span><span class="p">()</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">reserve_fraction</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">usable</span> <span class="o">&gt;</span> <span class="nb">int</span><span class="p">(</span><span class="n">required_bytes</span> <span class="o">*</span> <span class="n">safety_margin</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2429,15 +3529,241 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">45</span>
-<span class="normal">46</span>
-<span class="normal">47</span>
-<span class="normal">48</span>
-<span class="normal">49</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">cpu_worker_count</span><span class="p">(</span><span class="n">cap</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">cpu_worker_count</span><span class="p">(</span><span class="n">cap</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a conservative CPU worker count that leaves one core for the OS.&quot;&quot;&quot;</span>
     <span class="n">cores</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span> <span class="ow">or</span> <span class="mi">4</span>
     <span class="n">limit</span> <span class="o">=</span> <span class="n">cap</span> <span class="k">if</span> <span class="n">cap</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">cores</span>
     <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">cores</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">limit</span><span class="p">))</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.cpu_inner_thread_count" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">cpu_inner_thread_count</span>
+
+
+<a href="#waven.runtime.performance.cpu_inner_thread_count" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">cpu_inner_thread_count</span><span class="p">(</span><span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return a BLAS/OpenMP budget that avoids nested-worker oversubscription.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">cpu_inner_thread_count</span><span class="p">(</span><span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a BLAS/OpenMP budget that avoids nested-worker oversubscription.&quot;&quot;&quot;</span>
+    <span class="n">workers</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">workers</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">cpu_worker_count</span><span class="p">()</span> <span class="o">//</span> <span class="n">workers</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.cpu_threadpool_scope" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">cpu_threadpool_scope</span>
+
+
+<a href="#waven.runtime.performance.cpu_threadpool_scope" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">cpu_threadpool_scope</span><span class="p">(</span><span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Limit native NumPy/SciPy/BLAS threads while an outer worker pool is active.</p>
+<p>NumPy, SciPy, PyTorch, and OpenCV may all have their own thread pools.  A
+four-process joblib run with each process using every logical core is much
+slower than a bounded allocation, especially on laptop CPUs.  The scope is
+a no-op only for older environments without <code>threadpoolctl</code>.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">cpu_threadpool_scope</span><span class="p">(</span><span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Limit native NumPy/SciPy/BLAS threads while an outer worker pool is active.</span>
+
+<span class="sd">    NumPy, SciPy, PyTorch, and OpenCV may all have their own thread pools.  A</span>
+<span class="sd">    four-process joblib run with each process using every logical core is much</span>
+<span class="sd">    slower than a bounded allocation, especially on laptop CPUs.  The scope is</span>
+<span class="sd">    a no-op only for older environments without ``threadpoolctl``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">threadpool_limits</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">nullcontext</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">threadpool_limits</span><span class="p">(</span><span class="n">limits</span><span class="o">=</span><span class="n">cpu_inner_thread_count</span><span class="p">(</span><span class="n">workers</span><span class="p">))</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.torch_compile_enabled" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">torch_compile_enabled</span>
+
+
+<a href="#waven.runtime.performance.torch_compile_enabled" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">torch_compile_enabled</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Whether the experimental compiled convolution runner is enabled.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">torch_compile_enabled</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Whether the experimental compiled convolution runner is enabled.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">enabled_feature</span><span class="p">(</span><span class="s2">&quot;TORCH_COMPILE&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">torch</span><span class="p">,</span> <span class="s2">&quot;compile&quot;</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.amp_enabled" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">amp_enabled</span>
+
+
+<a href="#waven.runtime.performance.amp_enabled" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">amp_enabled</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Whether opt-in Tensor Core mixed precision is enabled for convolution.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">amp_enabled</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Whether opt-in Tensor Core mixed precision is enabled for convolution.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">enabled_feature</span><span class="p">(</span><span class="s2">&quot;AMP&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="ow">and</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.convolution_precision_scope" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">convolution_precision_scope</span>
+
+
+<a href="#waven.runtime.performance.convolution_precision_scope" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">convolution_precision_scope</span><span class="p">(</span><span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the safe default or explicit CUDA autocast context.</p>
+<p>Mixed precision is deliberately not applied to Coarse RF correlation:
+that stage preserves its established float32/float64 numerical paths.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">convolution_precision_scope</span><span class="p">(</span><span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the safe default or explicit CUDA autocast context.</span>
+
+<span class="sd">    Mixed precision is deliberately not applied to Coarse RF correlation:</span>
+<span class="sd">    that stage preserves its established float32/float64 numerical paths.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">device</span><span class="p">)</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">amp_enabled</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">autocast</span><span class="p">(</span><span class="n">device_type</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float16</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">nullcontext</span><span class="p">()</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.performance.configure_torch_cpu_threads" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">configure_torch_cpu_threads</span>
+
+
+<a href="#waven.runtime.performance.configure_torch_cpu_threads" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">configure_torch_cpu_threads</span><span class="p">(</span><span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Set PyTorch's CPU thread count to the available nested-work budget.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">configure_torch_cpu_threads</span><span class="p">(</span><span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Set PyTorch&#39;s CPU thread count to the available nested-work budget.&quot;&quot;&quot;</span>
+    <span class="n">threads</span> <span class="o">=</span> <span class="n">cpu_inner_thread_count</span><span class="p">(</span><span class="n">workers</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">set_num_threads</span><span class="p">(</span><span class="n">threads</span><span class="p">)</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">set_num_interop_threads</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">threads</span><span class="p">)))</span>
+    <span class="k">except</span> <span class="ne">RuntimeError</span><span class="p">:</span>
+        <span class="c1"># PyTorch disallows changing inter-op threads after work has started;</span>
+        <span class="c1"># its existing setting is still safe, and threadpoolctl limits BLAS.</span>
+        <span class="k">pass</span>
+    <span class="k">return</span> <span class="n">threads</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2464,11 +3790,11 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">52</span>
-<span class="normal">53</span>
-<span class="normal">54</span>
-<span class="normal">55</span>
-<span class="normal">56</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">resolve_compute_device</span><span class="p">(</span><span class="n">prefer_gpu</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ComputeDevice</span><span class="p">:</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">resolve_compute_device</span><span class="p">(</span><span class="n">prefer_gpu</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ComputeDevice</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Pick ``cuda`` when a GPU exists and ``prefer_gpu`` is True, else ``cpu``.&quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="n">prefer_gpu</span> <span class="ow">and</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">():</span>
         <span class="k">return</span> <span class="s2">&quot;cuda&quot;</span>
@@ -2497,16 +3823,16 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">59</span>
-<span class="normal">60</span>
-<span class="normal">61</span>
-<span class="normal">62</span>
-<span class="normal">63</span>
-<span class="normal">64</span>
-<span class="normal">65</span>
-<span class="normal">66</span>
-<span class="normal">67</span>
-<span class="normal">68</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">wavelet_filter_chunk_size</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">wavelet_filter_chunk_size</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Filters processed per GPU matmul batch in wavelet decomposition.&quot;&quot;&quot;</span>
     <span class="n">vram_gb</span> <span class="o">=</span> <span class="n">gpu_vram_bytes</span><span class="p">()</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span><span class="o">**</span><span class="mi">3</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">vram_gb</span> <span class="o">&gt;=</span> <span class="mi">16</span><span class="p">:</span>
@@ -2540,16 +3866,16 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">71</span>
-<span class="normal">72</span>
-<span class="normal">73</span>
-<span class="normal">74</span>
-<span class="normal">75</span>
-<span class="normal">76</span>
-<span class="normal">77</span>
-<span class="normal">78</span>
-<span class="normal">79</span>
-<span class="normal">80</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">video_downsample_chunk_size</span><span class="p">(</span><span class="n">default</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1000</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">video_downsample_chunk_size</span><span class="p">(</span><span class="n">default</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1000</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Frames read per chunk when downsampling stimulus movies to disk.&quot;&quot;&quot;</span>
     <span class="n">ram_gb</span> <span class="o">=</span> <span class="n">available_ram_bytes</span><span class="p">()</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span><span class="o">**</span><span class="mi">3</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">ram_gb</span> <span class="o">&gt;=</span> <span class="mi">32</span><span class="p">:</span>
@@ -2589,24 +3915,24 @@ call repeatedly (results are cached where profiling would be expensive).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 83</span>
-<span class="normal"> 84</span>
-<span class="normal"> 85</span>
-<span class="normal"> 86</span>
-<span class="normal"> 87</span>
-<span class="normal"> 88</span>
-<span class="normal"> 89</span>
-<span class="normal"> 90</span>
-<span class="normal"> 91</span>
-<span class="normal"> 92</span>
-<span class="normal"> 93</span>
-<span class="normal"> 94</span>
-<span class="normal"> 95</span>
-<span class="normal"> 96</span>
-<span class="normal"> 97</span>
-<span class="normal"> 98</span>
-<span class="normal"> 99</span>
-<span class="normal">100</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">gpu_neuron_chunk_size</span><span class="p">(</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">gpu_neuron_chunk_size</span><span class="p">(</span>
     <span class="n">n_timepoints</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
     <span class="n">n_features</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
     <span class="n">dtype_bytes</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span>
@@ -2650,20 +3976,24 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">103</span>
-<span class="normal">104</span>
-<span class="normal">105</span>
-<span class="normal">106</span>
-<span class="normal">107</span>
-<span class="normal">108</span>
-<span class="normal">109</span>
-<span class="normal">110</span>
-<span class="normal">111</span>
-<span class="normal">112</span>
-<span class="normal">113</span>
-<span class="normal">114</span>
-<span class="normal">115</span>
-<span class="normal">116</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">model_parallel_jobs</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">model_parallel_jobs</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Joblib worker count for per-neuron model fitting.</span>
 
 <span class="sd">    When CUDA is active each worker may allocate GPU memory; cap workers to</span>
@@ -2676,7 +4006,11 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
         <span class="k">if</span> <span class="n">vram_gb</span> <span class="o">&gt;=</span> <span class="mi">12</span><span class="p">:</span>
             <span class="k">return</span> <span class="nb">min</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="n">cpu_worker_count</span><span class="p">(</span><span class="n">cap</span><span class="o">=</span><span class="mi">3</span><span class="p">))</span>
         <span class="k">return</span> <span class="nb">min</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="n">cpu_worker_count</span><span class="p">(</span><span class="n">cap</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
-    <span class="k">return</span> <span class="n">cpu_worker_count</span><span class="p">()</span>
+    <span class="c1"># Per-neuron workers each build sizeable feature/correlation arrays.  Using</span>
+    <span class="c1"># every logical core can turn model fitting into a memory-pressure event and</span>
+    <span class="c1"># leave Windows unable to service the GUI.  Four workers still provides</span>
+    <span class="c1"># useful parallelism while reserving CPU and RAM for the operating system.</span>
+    <span class="k">return</span> <span class="nb">min</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">cpu_worker_count</span><span class="p">(</span><span class="n">cap</span><span class="o">=</span><span class="mi">4</span><span class="p">))</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2701,23 +4035,23 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">119</span>
-<span class="normal">120</span>
-<span class="normal">121</span>
-<span class="normal">122</span>
-<span class="normal">123</span>
-<span class="normal">124</span>
-<span class="normal">125</span>
-<span class="normal">126</span>
-<span class="normal">127</span>
-<span class="normal">128</span>
-<span class="normal">129</span>
-<span class="normal">130</span>
-<span class="normal">131</span>
-<span class="normal">132</span>
-<span class="normal">133</span>
-<span class="normal">134</span>
-<span class="normal">135</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">coarse_wavelet_chunk_size</span><span class="p">(</span><span class="n">default</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1000</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">coarse_wavelet_chunk_size</span><span class="p">(</span><span class="n">default</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1000</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Time frames processed per chunk when building coarse wavelet caches.&quot;&quot;&quot;</span>
     <span class="n">ram_gb</span> <span class="o">=</span> <span class="n">available_ram_bytes</span><span class="p">()</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span><span class="o">**</span><span class="mi">3</span><span class="p">)</span>
 
@@ -2766,52 +4100,52 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\performance.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">138</span>
-<span class="normal">139</span>
-<span class="normal">140</span>
-<span class="normal">141</span>
-<span class="normal">142</span>
-<span class="normal">143</span>
-<span class="normal">144</span>
-<span class="normal">145</span>
-<span class="normal">146</span>
-<span class="normal">147</span>
-<span class="normal">148</span>
-<span class="normal">149</span>
-<span class="normal">150</span>
-<span class="normal">151</span>
-<span class="normal">152</span>
-<span class="normal">153</span>
-<span class="normal">154</span>
-<span class="normal">155</span>
-<span class="normal">156</span>
-<span class="normal">157</span>
-<span class="normal">158</span>
-<span class="normal">159</span>
-<span class="normal">160</span>
-<span class="normal">161</span>
-<span class="normal">162</span>
-<span class="normal">163</span>
-<span class="normal">164</span>
-<span class="normal">165</span>
-<span class="normal">166</span>
-<span class="normal">167</span>
-<span class="normal">168</span>
-<span class="normal">169</span>
-<span class="normal">170</span>
-<span class="normal">171</span>
-<span class="normal">172</span>
-<span class="normal">173</span>
-<span class="normal">174</span>
-<span class="normal">175</span>
-<span class="normal">176</span>
-<span class="normal">177</span>
-<span class="normal">178</span>
-<span class="normal">179</span>
-<span class="normal">180</span>
-<span class="normal">181</span>
-<span class="normal">182</span>
-<span class="normal">183</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">coarse_wavelet_chunk_size_gpu_or_cpu</span><span class="p">(</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span>
+<span class="normal">403</span>
+<span class="normal">404</span>
+<span class="normal">405</span>
+<span class="normal">406</span>
+<span class="normal">407</span>
+<span class="normal">408</span>
+<span class="normal">409</span>
+<span class="normal">410</span>
+<span class="normal">411</span>
+<span class="normal">412</span>
+<span class="normal">413</span>
+<span class="normal">414</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">coarse_wavelet_chunk_size_gpu_or_cpu</span><span class="p">(</span>
     <span class="n">nx0</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">138</span><span class="p">,</span>
     <span class="n">ny0</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">112</span><span class="p">,</span>
     <span class="n">no</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">18</span><span class="p">,</span>
@@ -2949,10 +4283,10 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\task_control.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">11</span>
-<span class="normal">12</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">12</span>
 <span class="normal">13</span>
-<span class="normal">14</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">check_cancelled</span><span class="p">(</span><span class="n">cancel_event</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="normal">14</span>
+<span class="normal">15</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">check_cancelled</span><span class="p">(</span><span class="n">cancel_event</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Raise :class:`OperationCancelled` when ``cancel_event`` is set.&quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="n">cancel_event</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">cancel_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">():</span>
         <span class="k">raise</span> <span class="n">OperationCancelled</span><span class="p">(</span><span class="s2">&quot;Operation cancelled by user.&quot;</span><span class="p">)</span>
@@ -2980,8 +4314,7 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\task_control.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">17</span>
-<span class="normal">18</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">18</span>
 <span class="normal">19</span>
 <span class="normal">20</span>
 <span class="normal">21</span>
@@ -2989,7 +4322,8 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
 <span class="normal">23</span>
 <span class="normal">24</span>
 <span class="normal">25</span>
-<span class="normal">26</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">format_duration</span><span class="p">(</span><span class="n">seconds</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="normal">26</span>
+<span class="normal">27</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">format_duration</span><span class="p">(</span><span class="n">seconds</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a compact human-readable duration.&quot;&quot;&quot;</span>
     <span class="n">seconds</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="nb">float</span><span class="p">(</span><span class="n">seconds</span><span class="p">))</span>
     <span class="k">if</span> <span class="n">seconds</span> <span class="o">&lt;</span> <span class="mi">60</span><span class="p">:</span>
@@ -3025,8 +4359,7 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src\waven\runtime\task_control.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">29</span>
-<span class="normal">30</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">30</span>
 <span class="normal">31</span>
 <span class="normal">32</span>
 <span class="normal">33</span>
@@ -3038,7 +4371,8 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
 <span class="normal">39</span>
 <span class="normal">40</span>
 <span class="normal">41</span>
-<span class="normal">42</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">progress_message</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="n">completed</span><span class="p">,</span> <span class="n">total</span><span class="p">,</span> <span class="n">start_time</span><span class="p">,</span> <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;steps&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="normal">42</span>
+<span class="normal">43</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">progress_message</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="n">completed</span><span class="p">,</span> <span class="n">total</span><span class="p">,</span> <span class="n">start_time</span><span class="p">,</span> <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;steps&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Format percent, elapsed time, ETA, and throughput for terminal logs.&quot;&quot;&quot;</span>
     <span class="n">elapsed</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">)</span>
     <span class="n">total</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">total</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
@@ -3052,6 +4386,309 @@ avoid VRAM exhaustion while still exploiting multi-core hosts.</p>
         <span class="sa">f</span><span class="s2">&quot;elapsed </span><span class="si">{</span><span class="n">format_duration</span><span class="p">(</span><span class="n">elapsed</span><span class="p">)</span><span class="si">}</span><span class="s2"> | ETA </span><span class="si">{</span><span class="n">format_duration</span><span class="p">(</span><span class="n">eta</span><span class="p">)</span><span class="si">}</span><span class="s2"> | &quot;</span>
         <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">speed</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">unit</span><span class="si">}</span><span class="s2">/s&quot;</span>
     <span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.task_control.task_start_message" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">task_start_message</span>
+
+
+<a href="#waven.runtime.task_control.task_start_message" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">task_start_message</span><span class="p">(</span>
+    <span class="n">task_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">started_at</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Format the standard terminal banner for a user-initiated GUI task.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>task_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Human-readable action name, such as <code>"Run Coarse RF"</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>started_at</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="float">float</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional Unix timestamp. When omitted, the current local
+time is used.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A newline-delimited banner suitable for <code>print</code>. The shared format</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>keeps neural-cache, stimulus, Gabor, wavelet, RF, model, and export</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>actions visually consistent in the GUI terminal.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\task_control.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">task_start_message</span><span class="p">(</span><span class="n">task_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">started_at</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Format the standard terminal banner for a user-initiated GUI task.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        task_name: Human-readable action name, such as ``&quot;Run Coarse RF&quot;``.</span>
+<span class="sd">        started_at: Optional Unix timestamp. When omitted, the current local</span>
+<span class="sd">            time is used.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A newline-delimited banner suitable for ``print``. The shared format</span>
+<span class="sd">        keeps neural-cache, stimulus, Gabor, wavelet, RF, model, and export</span>
+<span class="sd">        actions visually consistent in the GUI terminal.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%H:%M:%S&quot;</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">localtime</span><span class="p">(</span><span class="n">started_at</span><span class="p">))</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">task_name</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="se">\n</span><span class="s2">  Starting...</span><span class="se">\n</span><span class="s2">&quot;</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="waven.runtime.task_control.task_finish_message" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">task_finish_message</span>
+
+
+<a href="#waven.runtime.task_control.task_finish_message" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">task_finish_message</span><span class="p">(</span>
+    <span class="n">task_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">status</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">finished_at</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Format the standard final line for a GUI task.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>task_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Human-readable action name used in the start banner.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>status</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Final state, normally <code>"finished"</code>, <code>"failed"</code>, or
+<code>"cancelled"</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>finished_at</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="float">float</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional Unix timestamp. When omitted, the current local
+time is used.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A concise timestamped completion line. Detailed resource metrics are</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>emitted separately by the GUI task monitor.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src\waven\runtime\task_control.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">task_finish_message</span><span class="p">(</span><span class="n">task_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">status</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">finished_at</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Format the standard final line for a GUI task.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        task_name: Human-readable action name used in the start banner.</span>
+<span class="sd">        status: Final state, normally ``&quot;finished&quot;``, ``&quot;failed&quot;``, or</span>
+<span class="sd">            ``&quot;cancelled&quot;``.</span>
+<span class="sd">        finished_at: Optional Unix timestamp. When omitted, the current local</span>
+<span class="sd">            time is used.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A concise timestamped completion line. Detailed resource metrics are</span>
+<span class="sd">        emitted separately by the GUI task monitor.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%H:%M:%S&quot;</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">localtime</span><span class="p">(</span><span class="n">finished_at</span><span class="p">))</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">timestamp</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">task_name</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">status</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="si">}</span><span class="s2">.&quot;</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

@@ -737,6 +737,8 @@
       
         
       
+        
+      
     
     
     
@@ -834,6 +836,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1020,10 +1050,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#in-the-gui" class="md-nav__link">
+  <a href="#population-displays" class="md-nav__link">
     <span class="md-ellipsis">
       
-        In the GUI
+        Population displays
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#individual-neuron-curves-and-uncertainty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Individual-neuron curves and uncertainty
       
     </span>
   </a>
@@ -1085,6 +1126,12 @@
       
         
           
+        
+      
+        
+      
+        
+      
         
       
         
@@ -1238,6 +1285,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1434,6 +1537,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1683,10 +1814,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#in-the-gui" class="md-nav__link">
+  <a href="#population-displays" class="md-nav__link">
     <span class="md-ellipsis">
       
-        In the GUI
+        Population displays
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#individual-neuron-curves-and-uncertainty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Individual-neuron curves and uncertainty
       
     </span>
   </a>
@@ -1714,106 +1856,48 @@
 
 
 <h1 id="orientation-selectivity">Orientation selectivity<a class="headerlink" href="#orientation-selectivity" title="Permanent link">&para;</a></h1>
-<p><code>waven</code> computes two orientation selectivity summaries from each neuron's
-firing-rate orientation tuning curve.</p>
-<p>The input tuning curve is one value per orientation bin:</p>
-<div class="highlight"><pre><span></span><code>orientation_tuning.shape == (n_orientations,)
-</code></pre></div>
-<p>The RF tensor is still used to choose the preferred position, size, and
-frequency:</p>
-<div class="highlight"><pre><span></span><code>RF[neuron, preferred_x, preferred_y, :, preferred_sigma, preferred_frequency]
-</code></pre></div>
-<p>Those RF values are correlations, so they are not used directly for OSI/gOSI in
-the GUI. Instead, <code>waven</code> takes the non-negative coarse wavelet energy at the
-preferred feature slice and uses it to weight the frame-aligned neural response
-from <code>spikes</code>:</p>
+<p>The GUI calculates OSI and gOSI from the neuron's <strong>frame-aligned firing
+rate</strong>, never from RF correlation values. For ephys, the <code>spikes</code> cache is made
+by counting spikes in every photodiode-defined movie-frame bin and dividing by
+the actual bin duration in seconds. Thus its values are firing rates in Hz.</p>
+<p>Correlation still has one important role: coarse RF analysis uses it to choose
+each neuron's preferred position, size, and spatial-frequency feature. Once
+those feature indices are known, the selectivity calculation takes the
+non-negative wavelet energy at that feature as an orientation-specific frame
+weight and computes:</p>
 <div class="highlight"><pre><span></span><code>rate_tuning[orientation] =
-  sum_t(wavelet_energy[t, orientation] * firing_rate[t])
-  / sum_t(wavelet_energy[t, orientation])
+  sum(frame_weight * firing_rate) / sum(frame_weight)
 </code></pre></div>
-<p>For ephys, <code>spikes</code> contains firing rates in Hz from <code>time_alignment.py</code>. For
-two-photon data, the same tensor contains the aligned non-negative activity
-produced by the suite2p alignment path. The selected-neuron plot shows the RF
-correlation curve and the firing-rate tuning curve together, but the OSI/gOSI
-numbers come from the firing-rate curve.</p>
+<p>This asks: <em>at frames containing each orientation at the neuron's preferred RF
+feature, how strongly did the neuron fire?</em> The correlation tensor is not used
+as <code>R(theta)</code> in either index.</p>
 <h2 id="osi">OSI<a class="headerlink" href="#osi" title="Permanent link">&para;</a></h2>
-<p>The orientation selectivity index compares the preferred response with the
-orthogonal response:</p>
+<p>The orientation selectivity index compares the firing rate at the preferred
+orientation with that at the orientation nearest 90 degrees away:</p>
 <div class="highlight"><pre><span></span><code>OSI = (R_pref - R_orth) / (R_pref + R_orth)
 </code></pre></div>
-<p>The preferred orientation is the orientation with the largest tuning value. The
-orthogonal orientation is 90 degrees away, modulo 180 degrees.</p>
-<p>Interpretation:</p>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>near <code>0</code></td>
-<td>Preferred and orthogonal responses are similar.</td>
-</tr>
-<tr>
-<td>near <code>1</code></td>
-<td>Preferred response is much larger than the orthogonal response.</td>
-</tr>
-<tr>
-<td><code>NaN</code></td>
-<td>The denominator was zero after cleaning, usually because the curve had no usable signal.</td>
-</tr>
-</tbody>
-</table>
-<p>Classic OSI is easy to explain but depends on two bins: the maximum and the
-nearest orthogonal bin. It can be sensitive to noisy orientation samples.</p>
+<p>An OSI near zero means similar firing at preferred and orthogonal orientations;
+an OSI near one means a strongly preferred orientation.</p>
 <h2 id="gosi">gOSI<a class="headerlink" href="#gosi" title="Permanent link">&para;</a></h2>
-<p>The global OSI uses the orientation vector sum:</p>
+<p>Global OSI uses all firing-rate orientation bins:</p>
 <div class="highlight"><pre><span></span><code>gOSI = abs(sum(R(theta) * exp(2j * theta))) / sum(R(theta))
 </code></pre></div>
-<p>The factor of 2 makes orientation circular over 180 degrees rather than 360
-degrees.</p>
-<p>Interpretation:</p>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>near <code>0</code></td>
-<td>Responses are broadly distributed or balanced across orientations.</td>
-</tr>
-<tr>
-<td>near <code>1</code></td>
-<td>Responses concentrate strongly around one orientation axis.</td>
-</tr>
-<tr>
-<td><code>NaN</code></td>
-<td>The cleaned tuning curve sums to zero.</td>
-</tr>
-</tbody>
-</table>
-<p>gOSI uses all orientation bins, so it is often more stable for population
-histograms. It can still be biased by noisy curves or weak neurons, so compare
-it with repeatability and the plotted tuning curve.</p>
-<h2 id="in-the-gui">In the GUI<a class="headerlink" href="#in-the-gui" title="Permanent link">&para;</a></h2>
-<p>The selected-neuron tuning plot shows firing-rate OSI and gOSI in the
-orientation panel title. The <strong>All neurons</strong> tab shows:</p>
-<ul>
-<li>OSI/gOSI histograms over neurons with per-shank overlays when grouping
-  metadata can be inferred;</li>
-<li>OSI/gOSI histograms by unit, or by spatial bins when explicit unit metadata is
-  unavailable.</li>
-</ul>
-<p>Histograms are descriptive summaries. The neuron/shank view asks whether
-selectivity differs across anatomical recording groups. The unit view asks
-whether a larger grouping, which can contain many shanks or spatial bins, has a
-different selectivity distribution. A group with very few neurons should be read
-as an annotation, not as a stable population estimate.</p>
+<p>The doubled angle treats 0 and 180 degrees as the same orientation axis. A
+larger gOSI means the firing-rate response is more concentrated around one
+orientation axis.</p>
+<h2 id="population-displays">Population displays<a class="headerlink" href="#population-displays" title="Permanent link">&para;</a></h2>
+<p>The <strong>All neurons</strong> view renders separate OSI and gOSI panels with a KDE, mean,
+median, and legend. Its descriptive table lists total units, mean, median,
+mode, standard deviation, variance, range, quartiles, skewness, kurtosis, and
+high/medium/low selectivity categories. Counts use finite firing-rate-derived
+indices in the plotted population.</p>
+<h2 id="individual-neuron-curves-and-uncertainty">Individual-neuron curves and uncertainty<a class="headerlink" href="#individual-neuron-curves-and-uncertainty" title="Permanent link">&para;</a></h2>
+<p>The individual-neuron <strong>Orientation Tuning Curve</strong> and <strong>Size Tuning Curve</strong>
+remain correlation curves for inspecting the RF fit. They alone show 95% CI
+bars, computed from trial-wise correlations as
+<code>1.96 * sample_std / sqrt(number_of_valid_trials)</code>. Those correlation curves
+and their CIs do not determine OSI/gOSI: the title and exported OSI/gOSI values
+come from the separate firing-rate tuning calculation above.</p>
 
 
 

@@ -817,6 +817,8 @@
       
         
       
+        
+      
     
     
     
@@ -914,6 +916,34 @@
     
   
     Code Mindmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/maintainability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Organization
   
 
     
@@ -1113,6 +1143,12 @@
       
         
       
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1238,6 +1274,62 @@
     
   
     Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/data-contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Contracts and Scientific Interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/source-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source Architecture and Ownership
   
 
     
@@ -1434,6 +1526,34 @@
     
   
     Time Alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/psth-spike-triggered-averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PSTH-weighted Spike-Triggered Averaging
   
 
     
@@ -1757,9 +1877,9 @@
 <td>Anatomical positions used for scatter plots, quality overlays, shank/unit grouping, and neighborhood smoothing.</td>
 </tr>
 <tr>
-<td><code>wavelets_complex</code></td>
+<td><code>coarse_rf_power</code></td>
 <td><code>(n_frames, coarse_nx, coarse_ny, n_orientations, n_sigmas)</code></td>
-<td>Combined coarse wavelet coefficients used as stimulus features.</td>
+<td>Disk-backed wavelet power used as the RF stimulus feature tensor.</td>
 </tr>
 </tbody>
 </table>
@@ -1783,12 +1903,12 @@ trials. Skewness flags neurons whose activity is dominated by rare large events.
 The GUI does not silently delete low-quality neurons; it lowers their visual
 alpha so population structure remains visible while the quality mask is still
 obvious.</p>
-<p>OSI and gOSI use a firing-rate orientation tuning curve, not the raw RF
-correlation curve. The RF tensor selects each neuron's preferred position, size,
-and frequency; then non-negative wavelet energy at that feature slice weights
-the frame-aligned <code>spikes</code> response to produce one firing-rate value per
-orientation. A high selectivity value on a noisy, low-repeatability neuron is a
-hypothesis to inspect, not a conclusion by itself.</p>
+<p>OSI and gOSI do <strong>not</strong> use RF correlations. The RF tensor selects each
+neuron's preferred position, size, and frequency; Waven then uses the aligned
+neural response cache to calculate a firing-rate orientation curve weighted by
+the power at that preferred feature. For ephys this uses frame-bin Hz directly.
+A high selectivity value on a noisy, low-repeatability neuron is a hypothesis to
+inspect, not a conclusion by itself.</p>
 <p>In two-photon mode, the <strong>All neurons</strong> tab shows the all-cell OSI/gOSI
 distributions only. In ephys mode, the GUI also overlays shank distributions
 when shank-like metadata are present and adds by-unit histograms, because unit
