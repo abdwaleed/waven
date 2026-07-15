@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import io
 import pickle
+from PIL import Image
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
@@ -43,7 +44,7 @@ from ..config import (
     parse_literal,
 )
 import numpy as np
-from ..analysis.psth_sta import DEFAULT_MAX_WINDOW_MS, compute_psth_sta
+from ..analysis.psth_sta import DEFAULT_MAX_WINDOW_MS, compute_psth_sta, compute_psth_sta_batch
 
 from ..gui_support import (
     ToolTip,
@@ -2089,11 +2090,54 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         axis_root = os.path.join(base_dir, "graphs")
         os.makedirs(axis_root, exist_ok=True)
         exported = []
+        png_dpi = 200
         for record_index, record in enumerate(records, start=1):
             fig = record["figure"]
             fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
             figure_data = _extract_figure_data(fig)
+            has_selected_axis = any(
+                axis.get_visible()
+                and axis.get_title().strip()
+                and classify_individual_axis(record.get("tab"), record.get("title"), axis.get_title().strip()) in selected_kinds
+                for axis in fig.axes
+            )
+            if not has_selected_axis:
+                continue
+            # A single dashboard commonly contributes many one-axis export
+            # files.  Rasterize it once and crop the selected axes, instead of
+            # rasterizing the entire dashboard again for every PNG.  The SVG
+            # remains vector-native and is still written by Matplotlib below.
+            full_png = None
+            try:
+                figure_width, figure_height = fig.get_size_inches()
+                estimated_bytes = int(figure_width * png_dpi * figure_height * png_dpi * 4)
+                if estimated_bytes <= 96 * 1024 * 1024:
+                    png_buffer = io.BytesIO()
+                    fig.savefig(png_buffer, format="png", dpi=png_dpi)
+                    png_buffer.seek(0)
+                    full_png = Image.open(png_buffer).convert("RGBA")
+                    full_png.load()
+            except Exception as exc:
+                # Keep the established per-axis save path as a safe fallback
+                # for an unusual backend or exceptionally large figure.
+                print(f"[EXPORT] Shared PNG render unavailable; using per-axis renders: {exc}")
+
+            def save_axis_png(path, bbox_inches):
+                if full_png is None:
+                    fig.savefig(path, dpi=png_dpi, bbox_inches=bbox_inches)
+                    return
+                left = int(np.floor(bbox_inches.x0 * png_dpi))
+                upper = int(np.floor((figure_height - bbox_inches.y1) * png_dpi))
+                right = int(np.ceil(bbox_inches.x1 * png_dpi))
+                lower = int(np.ceil((figure_height - bbox_inches.y0) * png_dpi))
+                width, height = full_png.size
+                crop_box = (max(0, left), max(0, upper), min(width, right), min(height, lower))
+                if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
+                    fig.savefig(path, dpi=png_dpi, bbox_inches=bbox_inches)
+                    return
+                full_png.crop(crop_box).save(path, format="PNG")
+
             for axis_index, axis in enumerate(fig.axes):
                 if not axis.get_visible():
                     continue
@@ -2110,7 +2154,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 os.makedirs(graph_dir, exist_ok=True)
                 bbox = axis.get_tightbbox(renderer).expanded(1.08, 1.16)
                 bbox_inches = bbox.transformed(fig.dpi_scale_trans.inverted())
-                fig.savefig(os.path.join(graph_dir, "graph.png"), dpi=200, bbox_inches=bbox_inches)
+                save_axis_png(os.path.join(graph_dir, "graph.png"), bbox_inches)
                 fig.savefig(os.path.join(graph_dir, "graph.svg"), format="svg", bbox_inches=bbox_inches)
                 axis_data = figure_data.get("axes", [])[axis_index] if axis_index < len(figure_data.get("axes", [])) else {}
                 payload = graph_payload(getattr(fig, "_waven_export_payload", None), graph_kind)
@@ -2210,12 +2254,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         export_root = os.path.join(selected_dir, f"waven_export_{time.strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(export_root, exist_ok=True)
         jobs = [("coarse_rf", rf_count, rf_draw, "Individual neuron")]
+        sta_batch = individual_neuron_renderer.get("sta_batch") if "sta" in selected_kinds else None
+        sta_batch_size = individual_neuron_renderer.get("sta_batch_size") if sta_batch is not None else None
         print("[EXPORT] Selected single graphs | " + ", ".join(f"{name}={count}" for name, count, _draw, _tab in jobs))
         try:
             btn_export_all_individual_graph_types.configure(state=tk.DISABLED)
         except NameError:
             pass
-        state = {"job": 0, "neuron_id": 0, "failures": []}
+        state = {"job": 0, "neuron_id": 0, "failures": [], "sta_results": {}}
 
         def export_next_graph_type():
             if state["job"] >= len(jobs):
@@ -2251,10 +2297,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if neuron_id >= count:
                 state["job"] += 1
                 state["neuron_id"] = 0
+                state["sta_results"].clear()
                 root.after(1, export_next_graph_type)
                 return
             try:
-                draw(neuron_id, switch_tab=False)
+                sta_result = None
+                if sta_batch is not None:
+                    if not state["sta_results"]:
+                        batch_size = int(sta_batch_size()) if callable(sta_batch_size) else 1
+                        batch_ids = np.arange(neuron_id, min(count, neuron_id + max(1, batch_size)), dtype=int)
+                        state["sta_results"] = sta_batch(batch_ids)
+                        print(f"[EXPORT] Computed STA for {batch_ids.size} neurons in one bounded batch.")
+                    sta_result = state["sta_results"].pop(neuron_id, None)
+                # Export does not need Tk canvas redraws; the exporter draws
+                # only the figures it writes, below.
+                draw(neuron_id, switch_tab=False, sta_result=sta_result, for_export=True)
                 neuron_dir = os.path.join(export_root, "rf", f"n{neuron_id:05d}")
                 os.makedirs(neuron_dir, exist_ok=True)
                 records = _active_export_records(tab_name)
@@ -4096,6 +4153,39 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 psth_sta_cache[neuron_id] = result
                 return result
 
+            def _psth_sta_for_neurons(neuron_ids):
+                """Compute a small export batch with BLAS matrix products.
+
+                Interactive inspection retains the tiny single-neuron cache
+                above.  The all-neuron exporter instead asks for a bounded
+                consecutive group, avoiding hundreds of repeated STA passes
+                over the same stimulus movie while keeping RAM bounded.
+                """
+                neuron_ids = np.asarray(neuron_ids, dtype=int).reshape(-1)
+                if neuron_ids.size == 0:
+                    return {}
+                fps = float(movie_metadata["fps"])
+                max_lag = int(np.floor(DEFAULT_MAX_WINDOW_MS * fps / 1000.0 + 1e-12))
+                trial_batch = np.take(spks[:, :n_frames, :], neuron_ids, axis=2)
+                batch = compute_psth_sta_batch(
+                    psth_sta_movie[:n_frames], np.mean(trial_batch, axis=0), fps, max_lag,
+                    window_ms=DEFAULT_MAX_WINDOW_MS,
+                )
+                return {
+                    int(neuron_id): batch.result_for(batch_index)
+                    for batch_index, neuron_id in enumerate(neuron_ids)
+                }
+
+            def _psth_sta_export_batch_size():
+                """Choose a fast STA export group without growing RAM freely."""
+                fps = float(movie_metadata["fps"])
+                lag_count = int(np.floor(DEFAULT_MAX_WINDOW_MS * fps / 1000.0 + 1e-12)) + 1
+                bytes_per_neuron = max(1, lag_count * int(np.prod(psth_sta_movie.shape[1:])) * 4)
+                # The result cube and BLAS work area coexist briefly.  Leave a
+                # conservative 48 MiB total budget for this optional export
+                # acceleration, even on low-memory systems.
+                return max(1, min(64, (48 * 1024 * 1024) // (2 * bytes_per_neuron)))
+
             def correlation_tuning_ci(feature_matrix, trial_responses):
                 """Return 95% CIs from trial-wise feature/response correlations."""
                 features = np.asarray(feature_matrix, dtype=float)
@@ -4131,7 +4221,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
                 return ci, int(np.nanmin(counts[valid_columns]))
 
-            def draw_individual_neuron(neuron_id, switch_tab=True):
+            def draw_individual_neuron(neuron_id, switch_tab=True, sta_result=None, for_export=False):
                 """Refresh the selected-neuron spike and receptive-field panels.
 
                 Args:
@@ -4149,8 +4239,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 firing-rate metrics.
                 """
                 try:
-                    entry_neuron.delete(0, tk.END)
-                    entry_neuron.insert(0, str(neuron_id))
+                    if not for_export:
+                        entry_neuron.delete(0, tk.END)
+                        entry_neuron.insert(0, str(neuron_id))
 
                     trial_spikes = spks[:, :, neuron_id]
                     spike_train = np.mean(trial_spikes, axis=0)
@@ -4175,7 +4266,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         },
                     )
                     refresh_figure_caption(fig2)
-                    canvas2.draw()
+                    if not for_export:
+                        canvas2.draw()
 
                     best_x, best_y, best_orientation, best_sigma, best_frequency = np.asarray(
                         rfs_gabor[1], dtype=int
@@ -4339,11 +4431,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "retinotopy": np.asarray(rfs_gabor[2])[:, neuron_id],
                         },
                     )
-                    canvas3.draw()
+                    if not for_export:
+                        canvas3.draw()
 
                     fig_sta.clear()
                     try:
-                        sta_result = _psth_sta_for_neuron(neuron_id, spike_train)
+                        sta_result = sta_result or _psth_sta_for_neuron(neuron_id, spike_train)
                     except ValueError as exc:
                         fig_sta.text(
                             0.5, 0.5, f"PSTH-weighted STA unavailable\n{exc}",
@@ -4393,7 +4486,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                 "sta_peak_variance": float(sta_result.variances[sta_result.peak_lag_index]),
                             },
                         )
-                    canvas_sta.draw()
+                    if not for_export:
+                        canvas_sta.draw()
                     if switch_tab:
                         switch_to_individual_tab(flash=True)
                 except Exception as e:
@@ -4413,6 +4507,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             fig1.canvas.mpl_connect('pick_event', onpick)
             fig10.canvas.mpl_connect('pick_event', onpick)
             individual_neuron_renderer["draw"] = draw_individual_neuron
+            individual_neuron_renderer["sta_batch"] = _psth_sta_for_neurons
+            individual_neuron_renderer["sta_batch_size"] = _psth_sta_export_batch_size
 
             global canvas2, canvas3
 

@@ -36,6 +36,33 @@ class PSTHSTAResult:
         return float(self.lag_ms[self.peak_lag_index])
 
 
+@dataclass(frozen=True)
+class PSTHSTABatchResult:
+    """PSTH-weighted STA results for a bounded batch of neurons.
+
+    ``maps`` is indexed as ``(neuron, lag, y, x)``.  The common lag metadata
+    deliberately lives once per batch, which makes this suitable for a
+    streaming all-neuron export without retaining an all-neuron STA cube.
+    """
+
+    maps: np.ndarray
+    lag_frames: np.ndarray
+    lag_ms: np.ndarray
+    variances: np.ndarray
+    peak_lag_indices: np.ndarray
+
+    def result_for(self, neuron_index: int) -> PSTHSTAResult:
+        """Return the usual single-neuron result for one batch position."""
+        neuron_index = int(neuron_index)
+        return PSTHSTAResult(
+            maps=self.maps[neuron_index],
+            lag_frames=self.lag_frames,
+            lag_ms=self.lag_ms,
+            variances=self.variances[neuron_index],
+            peak_lag_index=int(self.peak_lag_indices[neuron_index]),
+        )
+
+
 def lag_frames_within_window(fps: float, max_lag: int, window_ms: float = DEFAULT_MAX_WINDOW_MS) -> np.ndarray:
     """Return integer lags that do not exceed the requested time window.
 
@@ -115,4 +142,78 @@ def compute_psth_sta(
     )
 
 
-__all__ = ["DEFAULT_MAX_WINDOW_MS", "PSTHSTAResult", "compute_psth_sta", "lag_frames_within_window"]
+def compute_psth_sta_batch(
+    stimulus_movie: np.ndarray,
+    averaged_psths: np.ndarray,
+    fps: float,
+    max_lag: int,
+    *,
+    window_ms: float = DEFAULT_MAX_WINDOW_MS,
+) -> PSTHSTABatchResult:
+    """Calculate standard STAs for multiple aligned PSTHs at once.
+
+    This is mathematically the same calculation as :func:`compute_psth_sta`,
+    but uses one BLAS matrix--matrix product per lag rather than one
+    matrix--vector product per neuron and lag.  Callers should keep the batch
+    bounded so the returned ``(neurons, lags, y, x)`` array remains modest.
+    ``averaged_psths`` has shape ``(frames, neurons)``.
+    """
+    movie = np.asarray(stimulus_movie)
+    psths = np.asarray(averaged_psths, dtype=np.float64)
+    if movie.ndim != 3:
+        raise ValueError(f"stimulus_movie must have shape (frames, y, x), got {movie.shape}.")
+    if psths.ndim != 2:
+        raise ValueError(f"averaged_psths must have shape (frames, neurons), got {psths.shape}.")
+    if movie.shape[0] != psths.shape[0]:
+        raise ValueError(
+            "STA stimulus and averaged PSTHs must have identical frame counts: "
+            f"movie={movie.shape[0]}, PSTHs={psths.shape[0]}."
+        )
+    if movie.shape[0] < 1 or psths.shape[1] < 1:
+        raise ValueError("STA requires at least one aligned frame and one neuron.")
+    if not np.all(np.isfinite(psths)):
+        raise ValueError("averaged_psths must contain only finite values.")
+    if np.any(psths < 0):
+        raise ValueError("averaged_psths must be non-negative for a standard rate-weighted STA.")
+
+    lags = lag_frames_within_window(fps, max_lag, window_ms)
+    valid_lags = lags[lags < movie.shape[0]]
+    if valid_lags.size == 0:
+        raise ValueError("No STA lags remain after applying the frame/time limits.")
+
+    height, width = movie.shape[1:]
+    flat_movie = np.asarray(movie, dtype=np.float32).reshape(movie.shape[0], height * width)
+    neuron_count = psths.shape[1]
+    maps = np.zeros((neuron_count, valid_lags.size, height, width), dtype=np.float32)
+    for output_index, lag in enumerate(valid_lags):
+        weights = psths[int(lag):]
+        weight_sums = np.sum(weights, axis=0, dtype=np.float64)
+        valid_neurons = weight_sums > 0
+        if np.any(valid_neurons):
+            # (neurons x frames) @ (frames x pixels) computes every selected
+            # neuron's complete STA map in one highly optimized BLAS call.
+            maps[valid_neurons, output_index] = (
+                weights[:, valid_neurons].T @ flat_movie[:movie.shape[0] - int(lag)]
+                / weight_sums[valid_neurons, np.newaxis]
+            ).reshape(-1, height, width)
+
+    variances = np.var(maps, axis=(2, 3), dtype=np.float64).astype(np.float32)
+    peak_lag_indices = np.argmax(variances, axis=1).astype(np.int32)
+    lag_ms = valid_lags.astype(np.float32) * (1000.0 / float(fps))
+    return PSTHSTABatchResult(
+        maps=maps,
+        lag_frames=valid_lags,
+        lag_ms=lag_ms,
+        variances=variances,
+        peak_lag_indices=peak_lag_indices,
+    )
+
+
+__all__ = [
+    "DEFAULT_MAX_WINDOW_MS",
+    "PSTHSTAResult",
+    "PSTHSTABatchResult",
+    "compute_psth_sta",
+    "compute_psth_sta_batch",
+    "lag_frames_within_window",
+]

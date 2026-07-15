@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from waven.analysis.psth_sta import compute_psth_sta, lag_frames_within_window
+from waven.analysis.psth_sta import compute_psth_sta, compute_psth_sta_batch, lag_frames_within_window
 
 
 def test_lag_window_never_exceeds_300_ms():
@@ -33,3 +33,19 @@ def test_peak_lag_tracks_largest_spatial_variance():
 
     assert result.peak_lag_frame == 2
     assert result.peak_lag_ms == 200.0
+
+
+def test_batched_sta_matches_the_single_neuron_calculation():
+    rng = np.random.default_rng(3)
+    movie = rng.normal(size=(12, 3, 4)).astype(np.float32)
+    psths = rng.uniform(size=(12, 3)).astype(np.float32)
+    psths[:, 2] = 0.0
+
+    batch = compute_psth_sta_batch(movie, psths, fps=30.0, max_lag=12)
+
+    for neuron_index in range(psths.shape[1]):
+        single = compute_psth_sta(movie, psths[:, neuron_index], fps=30.0, max_lag=12)
+        from_batch = batch.result_for(neuron_index)
+        np.testing.assert_allclose(from_batch.maps, single.maps, rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(from_batch.variances, single.variances, rtol=1e-6, atol=1e-6)
+        assert from_batch.peak_lag_index == single.peak_lag_index

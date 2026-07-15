@@ -31,6 +31,11 @@ The selected array format does not alter PNG, SVG, JSON, or pickle outputs.
 The all-neuron single-graph export creates a directory for every selected graph
 of every neuron and can therefore be large for recordings with many cells.
 
+For a selected STA export, Waven calculates a small RAM-bounded group of
+neurons at a time using vectorized matrix products, then writes each neuron's
+usual PNG, SVG, pickle, array, and manifest files. Batch export also avoids
+unneeded Tk canvas refreshes; the saved graph contents are unchanged.
+
 Export folders use compact, collision-safe directory names so batch exports
 remain below typical Windows path-length limits. The complete graph title and
 the list of generated files remain in each graph's `manifest.json`; a batch
