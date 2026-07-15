@@ -6,6 +6,7 @@ formatting, size formatting, tooltip behavior, and Gabor parameter normalization
 without opening the full GUI implementation.
 """
 import os
+import hashlib
 import tkinter as tk
 from pathlib import Path
 
@@ -178,6 +179,22 @@ def _safe_name(value):
         Result produced by the operation.
     """
     return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in str(value)).strip("_") or "plot"
+
+
+def _export_safe_name(value, maximum_length=64):
+    """Return a stable short filename component suitable for Windows exports.
+
+    A graph title can include fitted values and easily become longer than the
+    remaining Windows path budget once it is placed in a per-neuron directory.
+    Keep a readable prefix and append a digest so distinct long titles remain
+    distinct without duplicating a long title in both directory and filename.
+    """
+    safe = _safe_name(value)
+    maximum_length = max(12, int(maximum_length))
+    if len(safe) <= maximum_length:
+        return safe
+    digest = hashlib.sha1(safe.encode("utf-8")).hexdigest()[:8]
+    return f"{safe[:maximum_length - len(digest) - 1].rstrip('_')}_{digest}"
 
 
 def _default_gabor_library_path(path_value, suffix):

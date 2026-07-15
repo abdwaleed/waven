@@ -50,6 +50,7 @@ from ..gui_support import (
     _build_size_text,
     _folder_size_bytes,
     _format_bytes,
+    _export_safe_name,
     _normalise_gabor_params,
     _ordered_float_union,
     _parse_data_dir,
@@ -1869,16 +1870,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         prefix_bits = []
         if index is not None:
             prefix_bits.append(f"{index:02d}")
-        prefix_bits.extend([_safe_name(tab_name), _safe_name(title)])
-        export_name = "_".join(prefix_bits)
+        prefix_bits.extend([tab_name, title])
+        export_name = _export_safe_name("_".join(prefix_bits), maximum_length=56)
         graph_dir = os.path.join(base_dir, export_name)
         os.makedirs(graph_dir, exist_ok=True)
 
-        png_path = os.path.join(graph_dir, f"{export_name}.png")
-        svg_path = os.path.join(graph_dir, f"{export_name}.svg")
-        pickle_path = os.path.join(graph_dir, f"{export_name}_data.pkl")
-        figure_pickle_path = os.path.join(graph_dir, f"{export_name}_figure.pkl")
-        manifest_path = os.path.join(graph_dir, f"{export_name}_manifest.json")
+        # Keep leaf names short.  Repeating long graph titles in a folder and
+        # every file exceeded the legacy Windows path limit for all-neuron
+        # exports despite otherwise valid filenames.
+        png_path = os.path.join(graph_dir, "figure.png")
+        svg_path = os.path.join(graph_dir, "figure.svg")
+        pickle_path = os.path.join(graph_dir, "data.pkl")
+        figure_pickle_path = os.path.join(graph_dir, "figure.pkl")
+        manifest_path = os.path.join(graph_dir, "manifest.json")
 
         fig.savefig(png_path, dpi=200, bbox_inches="tight")
         fig.savefig(svg_path, format="svg", bbox_inches="tight")
@@ -1964,13 +1968,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "tab": tab_name,
             "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "files": {
-                "png": os.path.basename(png_path),
-                "svg": os.path.basename(svg_path),
+                "png": "figure.png",
+                "svg": "figure.svg",
                 "array_format": array_format,
                 "array_files": array_files,
-                "pickle_data": os.path.basename(pickle_path),
+                "pickle_data": "data.pkl",
                 "pickle_data_contains_full_payload": pickle_data_saved,
-                "figure_pickle": os.path.basename(figure_pickle_path) if figure_pickle_saved else None,
+                "figure_pickle": "figure.pkl" if figure_pickle_saved else None,
             },
             "array_keys": sorted(arrays),
             "metadata": _json_safe(metadata),
@@ -2008,22 +2012,35 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         selected_dir = filedialog.askdirectory(title=dialog_title)
         if not selected_dir:
             return
-        export_root = os.path.join(selected_dir, f"waven_{_safe_name(export_label)}_{time.strftime('%Y%m%d_%H%M%S')}")
+        export_root = os.path.join(selected_dir, f"waven_export_{time.strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(export_root, exist_ok=True)
         exported = []
+        failures = []
         try:
             for index, record in enumerate(records, start=1):
-                tab_dir = os.path.join(export_root, _safe_name(record.get("tab") or "Plots"))
+                tab_dir = os.path.join(export_root, _export_safe_name(record.get("tab") or "plots", 24))
                 os.makedirs(tab_dir, exist_ok=True)
-                exported.append(_export_figure_record(record, tab_dir, index=index))
+                try:
+                    exported.append(_export_figure_record(record, tab_dir, index=index))
+                except Exception as exc:
+                    title = record.get("title") or f"graph {index}"
+                    failures.append({"index": index, "title": title, "error": str(exc)})
+                    print(f"[EXPORT] Skipped '{title}': {exc}")
             manifest = {
                 "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "count": len(exported),
                 "graphs": exported,
+                "failures": failures,
             }
             with open(os.path.join(export_root, "export_manifest.json"), "w", encoding="utf-8") as handle:
                 json.dump(_json_safe(manifest), handle, indent=2)
             print(f"Exported {len(exported)} displayed graph(s) with reusable data to: {export_root}")
+            if failures:
+                messagebox.showwarning(
+                    "Export Completed with Skips",
+                    f"Exported {len(exported)} graph(s); skipped {len(failures)}.\n"
+                    f"See export_manifest.json and the terminal for details.\n\n{export_root}",
+                )
         except Exception as exc:
             messagebox.showerror("Export Failed", f"Could not export displayed results: {exc}")
             print(f"Failed to export displayed results: {exc}")
@@ -2069,7 +2086,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         same style as complete-figure exports.
         """
         selected_kinds = set(selected_kinds or {kind for kind, _label in SINGLE_NEURON_GRAPH_OPTIONS})
-        axis_root = os.path.join(base_dir, "individual_graphs")
+        axis_root = os.path.join(base_dir, "graphs")
         os.makedirs(axis_root, exist_ok=True)
         exported = []
         for record_index, record in enumerate(records, start=1):
@@ -2086,14 +2103,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 graph_kind = classify_individual_axis(record.get("tab"), record.get("title"), title)
                 if graph_kind not in selected_kinds:
                     continue
-                safe_title = _safe_name(title)
-                graph_name = f"{record_index:02d}_{axis_index:02d}_{safe_title}"
+                graph_name = _export_safe_name(
+                    f"{record_index:02d}_{axis_index:02d}_{title}", maximum_length=56,
+                )
                 graph_dir = os.path.join(axis_root, graph_name)
                 os.makedirs(graph_dir, exist_ok=True)
                 bbox = axis.get_tightbbox(renderer).expanded(1.08, 1.16)
                 bbox_inches = bbox.transformed(fig.dpi_scale_trans.inverted())
-                fig.savefig(os.path.join(graph_dir, f"{graph_name}.png"), dpi=200, bbox_inches=bbox_inches)
-                fig.savefig(os.path.join(graph_dir, f"{graph_name}.svg"), format="svg", bbox_inches=bbox_inches)
+                fig.savefig(os.path.join(graph_dir, "graph.png"), dpi=200, bbox_inches=bbox_inches)
+                fig.savefig(os.path.join(graph_dir, "graph.svg"), format="svg", bbox_inches=bbox_inches)
                 axis_data = figure_data.get("axes", [])[axis_index] if axis_index < len(figure_data.get("axes", [])) else {}
                 payload = graph_payload(getattr(fig, "_waven_export_payload", None), graph_kind)
                 if graph_kind == "sta" and "sta_maps" in payload:
@@ -2151,7 +2169,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         except Exception as exc:
                             metadata[f"{key}.zarr_export_error"] = str(exc)
                             print(f"  Skipped Zarr array '{key}': {exc}")
-                with open(os.path.join(graph_dir, f"{graph_name}_data.pkl"), "wb") as handle:
+                with open(os.path.join(graph_dir, "data.pkl"), "wb") as handle:
                     pickle.dump(bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
                 manifest = {
                     "title": title,
@@ -2160,9 +2178,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "graph_kind": graph_kind,
                     "one_graph_per_file": True,
                     "files": {
-                        "png": f"{graph_name}.png",
-                        "svg": f"{graph_name}.svg",
-                        "pickle_data": f"{graph_name}_data.pkl",
+                        "png": "graph.png",
+                        "svg": "graph.svg",
+                        "pickle_data": "data.pkl",
                         "array_format": array_format,
                         "array_files": array_files,
                     },
@@ -2170,7 +2188,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "metadata": _json_safe(metadata),
                     "axis_data": _json_safe(axis_data),
                 }
-                with open(os.path.join(graph_dir, f"{graph_name}_manifest.json"), "w", encoding="utf-8") as handle:
+                with open(os.path.join(graph_dir, "manifest.json"), "w", encoding="utf-8") as handle:
                     json.dump(manifest, handle, indent=2)
                 exported.append(graph_dir)
         return exported
@@ -2189,7 +2207,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         selected_dir = filedialog.askdirectory(title="Select Folder for Single-Graph Export for Every Analyzed Neuron")
         if not selected_dir:
             return
-        export_root = os.path.join(selected_dir, f"waven_single_graphs_all_analyzed_neurons_{time.strftime('%Y%m%d_%H%M%S')}")
+        export_root = os.path.join(selected_dir, f"waven_export_{time.strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(export_root, exist_ok=True)
         jobs = [("coarse_rf", rf_count, rf_draw, "Individual neuron")]
         print("[EXPORT] Selected single graphs | " + ", ".join(f"{name}={count}" for name, count, _draw, _tab in jobs))
@@ -2197,7 +2215,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             btn_export_all_individual_graph_types.configure(state=tk.DISABLED)
         except NameError:
             pass
-        state = {"job": 0, "neuron_id": 0}
+        state = {"job": 0, "neuron_id": 0, "failures": []}
 
         def export_next_graph_type():
             if state["job"] >= len(jobs):
@@ -2205,8 +2223,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
                 except NameError:
                     pass
+                batch_manifest = {
+                    "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "selected_graph_kinds": sorted(selected_kinds),
+                    "skipped_neurons": state["failures"],
+                }
+                try:
+                    with open(os.path.join(export_root, "export_manifest.json"), "w", encoding="utf-8") as handle:
+                        json.dump(_json_safe(batch_manifest), handle, indent=2)
+                except Exception as exc:
+                    # The individual graph bundles are already complete at this
+                    # point.  A missing summary must not turn a successful
+                    # long-running batch export into a reported failure.
+                    print(f"[EXPORT] Could not write batch manifest: {exc}")
                 print(f"[DONE] Exported selected single-graph files\n       {export_root}")
-                messagebox.showinfo("Export Complete", f"Exported selected single-graph files.\n\n{export_root}")
+                if state["failures"]:
+                    messagebox.showwarning(
+                        "Export Completed with Skips",
+                        f"Export finished with {len(state['failures'])} skipped neuron(s).\n"
+                        f"See export_manifest.json and the terminal for details.\n\n{export_root}",
+                    )
+                else:
+                    messagebox.showinfo("Export Complete", f"Exported selected single-graph files.\n\n{export_root}")
                 return
             kind, count, draw, tab_name = jobs[state["job"]]
             neuron_id = state["neuron_id"]
@@ -2217,7 +2255,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 return
             try:
                 draw(neuron_id, switch_tab=False)
-                neuron_dir = os.path.join(export_root, kind, f"neuron_{neuron_id:05d}")
+                neuron_dir = os.path.join(export_root, "rf", f"n{neuron_id:05d}")
                 os.makedirs(neuron_dir, exist_ok=True)
                 records = _active_export_records(tab_name)
                 _export_individual_axes(records, neuron_dir, selected_kinds)
@@ -2227,12 +2265,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 update_progress(100.0 * completed / total, "Exporting single graphs", f"{kind} neuron {state['neuron_id']}/{count}")
                 root.after(1, export_next_graph_type)
             except Exception as exc:
-                try:
-                    btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
-                except NameError:
-                    pass
-                print(f"[FAILED] Individual graph export ({kind}) at neuron {neuron_id}: {exc}")
-                messagebox.showerror("Export Failed", f"Stopped at {kind} neuron {neuron_id}: {exc}")
+                state["failures"].append({"kind": kind, "neuron_id": neuron_id, "error": str(exc)})
+                print(f"[EXPORT] Skipped {kind} neuron {neuron_id}: {exc}")
+                state["neuron_id"] += 1
+                root.after(1, export_next_graph_type)
 
         root.after_idle(export_next_graph_type)
 
@@ -4887,6 +4923,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if not export_dir:
             return
         exported = 0
+        failures = []
         try:
             for index, canvas in enumerate(embedded_canvases, start=1):
                 fig = getattr(canvas, "figure", None)
@@ -4898,10 +4935,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     title = axes_titles[0] if axes_titles else f"plot_{index:02d}"
                 except Exception:
                     title = f"plot_{index:02d}"
-                filename = f"{index:02d}_{_safe_name(title)}.svg"
-                fig.savefig(os.path.join(export_dir, filename), format="svg", bbox_inches="tight")
-                exported += 1
+                filename = f"{index:02d}_{_export_safe_name(title, 72)}.svg"
+                try:
+                    fig.savefig(os.path.join(export_dir, filename), format="svg", bbox_inches="tight")
+                    exported += 1
+                except Exception as exc:
+                    failures.append({"index": index, "title": title, "error": str(exc)})
+                    print(f"[EXPORT] Skipped SVG '{title}': {exc}")
             print(f"Exported {exported} SVG plot(s) to: {export_dir}")
+            if failures:
+                messagebox.showwarning(
+                    "Export Completed with Skips",
+                    f"Exported {exported} SVG plot(s); skipped {len(failures)}.\n"
+                    "See the terminal for details.",
+                )
         except Exception as exc:
             messagebox.showerror("Export Failed", f"Could not export SVG plots: {exc}")
             print(f"Failed to export SVG plots: {exc}")

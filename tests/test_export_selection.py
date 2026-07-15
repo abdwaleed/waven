@@ -5,6 +5,7 @@ from waven.gui_support.export_selection import (
     classify_individual_axis,
     graph_payload,
 )
+from waven.gui_support.helpers import _export_safe_name
 
 
 def test_current_display_records_are_classified_for_checkbox_selection():
@@ -24,6 +25,15 @@ def test_batch_axis_classification_keeps_dashboard_graphs_separate():
         "Individual neuron", "Selected Neuron Tuning", "Orientation tuning from firing rate (OSI 0.4)"
     ) == "orientation_firing_rate"
     assert classify_individual_axis("Individual neuron", "PSTH-weighted STA", "STA lag 100 ms") == "sta"
+
+
+def test_export_safe_name_limits_long_titles_without_collisions():
+    long_title = "Orientation correlation firing rate OSI 0.030594 gOSI 0.027696 " * 4
+    compact = _export_safe_name(long_title, maximum_length=56)
+
+    assert len(compact) <= 56
+    assert compact != _export_safe_name(long_title + "different", maximum_length=56)
+    assert all(character.isalnum() or character in "-_." for character in compact)
 
 
 def test_single_graph_payload_excludes_sibling_dashboard_arrays():
