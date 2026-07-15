@@ -48,9 +48,9 @@ only when diagnosing a machine-specific driver or filesystem issue.
 | `WAVEN_AUTOTUNE` | on | Measures early convolution chunks and adapts only within the safe batch ceiling. |
 | `WAVEN_PREFETCH` | on | Enables one bounded input prefetch worker and downsampling resize overlap. |
 | `WAVEN_ASYNC_WRITER` | on | Enables a single bounded wavelet-output writer. |
-| `WAVEN_TIME_MAJOR_CONV` | on | For direct coarse-RF power, reads/uploads each frame chunk once before applying its bounded filter groups. Falls back to the group-major schedule if the combined kernel banks exceed a safe live-memory budget. |
+| `WAVEN_TIME_MAJOR_CONV` | on | For direct coarse-RF power, reads/uploads each frame chunk once before applying its bounded filter groups. Its Zarr output is chunked to the frame/filter write tiles, avoiding repeated compression of the same output chunk; it falls back to group-major if the combined kernel banks exceed a safe live-memory budget. |
 | `WAVEN_RF_GPU` | on, if CUDA is present | Accumulates Coarse RF feature/response cross-products on GPU when the current tile fits. Each tile falls back to CPU on allocation failure. |
-| `WAVEN_MULTI_GPU` | off | Explicitly enables PyTorch batch-parallel convolution across all detected CUDA GPUs. Leave this off unless all GPUs are dedicated to the analysis. |
+| `WAVEN_MULTI_GPU` | off | Enables PyTorch batch-parallel convolution only across compatible CUDA GPUs. Cards with different compute capability, or less than 75% of the primary card's estimated throughput or VRAM, are excluded automatically. |
 | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile` runner for long, fixed-shape convolution jobs. The first chunks are slower while the runner compiles; disable after a compiler/driver issue. |
 | `WAVEN_AMP` | off | Explicit Tensor Core float16 autocast for convolution only. It changes convolution round-off, so use only after validating a representative run against default precision. |
 
@@ -59,6 +59,16 @@ then gathers them in original order. It does not change filter settings or
 array layout, and a setup failure automatically continues on the primary GPU.
 GPU RF acceleration also preserves the CPU algorithm's sufficient statistics;
 only the floating-point matrix multiply location changes.
+
+### Cancellation and resume
+
+Cancellation is cooperative: the active chunk finishes, then the task stops at
+the next safe checkpoint. Convolution-backed **Prepare Coarse RF**, **Prepare
+Run Model**, and **Prepare Run Full Model** retain their partial Zarr caches and
+their recovery manifest. A rerun reuses completed phase artifacts and, for the
+direct Coarse RF cache, skips every completed frame/filter output tile. Partial
+caches are never considered analysis-ready until their normal artifact metadata
+is written after a successful run.
 
 ### Optional two-photon timeline roots
 

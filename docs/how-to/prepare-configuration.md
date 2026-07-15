@@ -114,8 +114,9 @@ Example performance block:
 ```
 
 Enable `multi_gpu` only when using the convolution backend with at least two
-CUDA GPUs dedicated to Waven. The GUI displays detected hardware and safely
-falls back to one GPU or CPU when the option cannot apply.
+CUDA GPUs dedicated to Waven. The GUI automatically excludes mixed or markedly
+unequal cards from synchronous DataParallel work and explains its one-GPU
+fallback in the terminal.
 
 `suite2p_subject_dirs` is intentionally empty in the portable example
 configuration. It is a machine-specific data-discovery convenience, not a
@@ -185,6 +186,11 @@ If you only want to analyze the central visual field, type a smaller crop:
 ```json
 "Analysis Coverage": "[-35, 35, 35, -35]"
 ```
+
+The stimulus cache converts these coverage limits to pixel bounds before
+resizing. Changing either coverage field invalidates the prepared stimulus
+cache; run **Prepare Stimulus Cache** again before rerunning the wavelets or
+STA.
 
 ## Workflow-specific sections
 

@@ -1,6 +1,6 @@
 """Stimulus and wavelet-array loading helpers."""
 from .full_model import load_stimulus, load_wavelets
-from .metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
+from .metadata import coverage_crop_bounds, coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
 from .wavelet_cache import (
     coarseWavelet,
     load_stimulus_simple_cell,
@@ -17,6 +17,7 @@ __all__ = [
     "load_stimulus_simple_cell2_r",
     "load_stimulus_simple_cell2",
     "coarseWavelet",
+    "coverage_crop_bounds",
     "coverage_ratios",
     "downsampled_grid_dimensions",
     "read_movie_metadata",

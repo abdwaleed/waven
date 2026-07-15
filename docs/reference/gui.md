@@ -29,9 +29,13 @@ the movie width and height multiplied by the selected percentage. Wavelet
 decomposition requires its cache and does not silently repeat downsampling.
 
 The Stage 2 NPY/Zarr selector controls the user-visible downsampled movie
-cache. Large internal Wavelets products are always chunked Zarr caches, which
-keeps their reuse disk-backed. The Wavelets tab identifies their format and
-size before a run and prints the exact reused path.
+cache. The movie is cropped from `Visual Coverage` to `Analysis Coverage` by
+converting visual degrees to pixel bounds, then resized to the selected grid.
+The cache records this crop provenance, so a cache made with older crop logic
+or different coverage values is regenerated rather than silently reused. Large
+internal Wavelets products are always chunked Zarr caches, which keeps their
+reuse disk-backed. The Wavelets tab identifies their format and size before a
+run and prints the exact reused path.
 
 The Export tab always preserves PNG/SVG and metadata formats. Its array selector
 chooses NPY, Zarr, or both for reusable numerical payloads. **Section A —
@@ -72,18 +76,25 @@ Current GUI Inputs / Parameters** under `gui.performance`.
 | Adaptive batch tuning | `WAVEN_AUTOTUNE` | on | Convolution wavelet actions |
 | Prefetch input chunks | `WAVEN_PREFETCH` | on | Downsampling and convolution wavelet reads |
 | Asynchronous cache writing | `WAVEN_ASYNC_WRITER` | on | Convolution wavelet outputs |
-| Read movie chunks once across filter groups | `WAVEN_TIME_MAJOR_CONV` | on | Direct coarse-RF power convolution; preserves the group-major fallback when kernel banks cannot safely coexist |
+| Read movie chunks once across filter groups | `WAVEN_TIME_MAJOR_CONV` | on | Direct coarse-RF power convolution; aligns Zarr chunks with frame/filter writes to avoid output recompression, with a group-major fallback when kernel banks cannot safely coexist |
 | GPU Coarse RF statistics | `WAVEN_RF_GPU` | on | Coarse RF sufficient-statistics cross-products |
-| Use all available GPUs | `WAVEN_MULTI_GPU` | off | Convolution wavelets only, with two or more CUDA GPUs |
+| Use compatible GPUs | `WAVEN_MULTI_GPU` | off | Convolution wavelets only; mismatched cards automatically fall back to one GPU |
 | Compile stable convolution kernels | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile`; useful for repeated long fixed-shape jobs after its warm-up cost |
 | Tensor Core convolution | `WAVEN_AMP` | off | CUDA float16 autocast for convolution only; retain default precision for scientific-equivalence runs |
 
 The hardware status line reports the detected CUDA count and whether multi-GPU
-can be effective with the selected backend. Choosing multi-GPU on a one-GPU or
-CPU-only machine is safe and persists the preference, but it has no effect
-until the app runs on a compatible multi-GPU convolution system. GPU Coarse RF
-also remains safe on a constrained device: each tile falls back to CPU if it
-does not fit.
+can be effective with the selected backend. When enabled, the app uses only
+cards with matching CUDA architecture and broadly similar estimated convolution
+throughput and VRAM; otherwise it reports why it selected one GPU instead.
+Choosing multi-GPU on a one-GPU or CPU-only machine is safe and persists the
+preference, but it has no effect until the app runs on a compatible multi-GPU
+convolution system. GPU Coarse RF also remains safe on a constrained device:
+each tile falls back to CPU if it does not fit.
+
+Cancelling a convolution wavelet action retains its resumable output tiles and
+the task's recovery checkpoint. After stimulus downsampling completes, both
+**Create pos/spikes Cache** and **Validate Existing Neural Cache** become
+available; changing between the two sources does not change that prerequisite.
 
 The **Advanced 2-photon data discovery** card exposes the other optional
 runtime setting used by the application: Suite2p timeline dataset roots. Enter

@@ -676,15 +676,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Function for raise if cancelled."""
         check_cancelled(_current_cancel_event())
 
-    def _register_cancel_cleanup_path(path):
-        """Function for register cancel cleanup path.
+    def _register_cancel_cleanup_path(path, preserve_on_cancel=False):
+        """Register a temporary path, optionally retaining resumable caches.
 
         Args:
             path: Input value for this operation.
         """
         if not path:
             return
-        active_task.setdefault("cleanup_paths", []).append(os.path.abspath(path))
+        active_task.setdefault("cleanup_paths", []).append(
+            (os.path.abspath(path), bool(preserve_on_cancel))
+        )
 
     def _remove_cancelled_task_paths():
         """Function for remove cancelled task paths.
@@ -693,7 +695,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             Result produced by the operation.
         """
         removed = 0
-        for path in reversed(active_task.get("cleanup_paths", [])):
+        preserved = 0
+        for entry in reversed(active_task.get("cleanup_paths", [])):
+            # Older in-memory sessions stored bare paths; accepting both keeps
+            # cancellation safe while the GUI is upgraded in place.
+            path, preserve_on_cancel = entry if isinstance(entry, tuple) else (entry, False)
+            if preserve_on_cancel:
+                preserved += 1
+                print(f"Kept resumable cache after cancellation: {path}")
+                continue
             try:
                 if os.path.isdir(path):
                     shutil.rmtree(path)
@@ -706,6 +716,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             except Exception as exc:
                 print(f"Could not remove cancelled task path {path}: {exc}")
         active_task["cleanup_paths"] = []
+        if preserved:
+            print(f"Retained {preserved} resumable cache path(s) for the next run.")
         return removed
 
     def _format_task_summary(metrics, status):
@@ -753,7 +765,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             btn_cancel_terminal.configure(state=tk.DISABLED, text="Cancelling...")
         except NameError:
             pass
-        print("\n[!] Cancel requested. Waiting for the current safe checkpoint, then cleaning partial files.")
+        print("\n[!] Cancel requested. Waiting for the current safe checkpoint; resumable wavelet tiles will be retained.")
 
     def flash_taskbar():
         """Function for flash taskbar."""
@@ -906,8 +918,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 action = action_map.get(completed_name)
                 if action:
                     if action == "downsample":
-                        action = f"{action}:{_selected_analysis_scale()}"
-                        completed_actions.add(action)
+                        # Neural-cache creation and both coarse wavelet actions
+                        # consume this shared coarse movie.  Record the concrete
+                        # prerequisite instead of relying on a UI selector.
+                        completed_actions.add("downsample:coarse")
                     elif action == "gabor_all":
                         completed_actions.update({"gabor:coarse", "gabor:full"})
                     else:
@@ -929,6 +943,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         for btn in all_buttons:
             btn.configure(state=tk.NORMAL)
         try:
+            if success and completed_name == "Stimulus video downsampling":
+                # The worker writes metadata before it returns.  Rechecking on
+                # the UI thread prevents either neural-cache source mode from
+                # being left disabled by a stale prerequisite set.
+                _sync_completed_actions_from_artifacts()
             refresh_action_buttons(advance_from=completed_name if success else None)
         except NameError:
             pass
@@ -974,7 +993,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     cancelled = True
                     print(f"\n[CANCELLED] {label}")
                     removed = _remove_cancelled_task_paths()
-                    print(f"Cancelled task cleanup removed {removed} partial path(s).")
+                    print(f"Cancelled task cleanup removed {removed} non-resumable partial path(s).")
                 except Exception as exc:
                     # Print a clear header for the error
                     print(f"\n[FAILED] {label}\n  See traceback below.\n")
@@ -2386,15 +2405,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 json.dump(manifest, handle, indent=2)
         except Exception:
             pass
-        if success or cancelled:
+        if success:
             try:
                 shutil.rmtree(task_dir)
-                reason = "successful" if success else "cancelled"
-                print(f"Removed {reason} recovery checkpoint: {task_dir}")
+                print(f"Removed successful recovery checkpoint: {task_dir}")
             except Exception as exc:
                 print(f"Could not remove recovery checkpoint {task_dir}: {exc}")
         else:
-            print(f"Kept recovery checkpoint after failure: {task_dir}")
+            reason = "cancellation" if cancelled else "failure"
+            print(f"Kept recovery checkpoint after {reason}: {task_dir}")
 
     def _library_output_path(kind, base_path):
         """Function for library output path.
@@ -2534,6 +2553,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             print(f"Existing artifact parameters changed, regenerating: {path}")
             return False
         return True
+
+    def _artifact_has_params(path, expected_params):
+        """Return whether an artifact records the supplied provenance values."""
+        metadata = _read_artifact_metadata(path)
+        params = metadata.get("params") if metadata is not None else None
+        return isinstance(params, dict) and all(
+            params.get(key) == value for key, value in expected_params.items()
+        )
 
     def _library_artifact_path(path_save):
         """Function for library artifact path.
@@ -2707,19 +2734,29 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 unique.append(Path(candidate))
         return unique
 
-    def _find_compatible_downsample_cache(movie_path, scale, expected_shape, preferred_format=None):
-        """Find a current or legacy NPY/Zarr movie cache with the required shape."""
+    def _find_compatible_downsample_cache(
+        movie_path, scale, expected_shape, preferred_format=None, required_params=None,
+    ):
+        """Find a shape- and provenance-compatible prepared stimulus cache."""
         for candidate in _downsample_cache_candidates(movie_path, scale, preferred_format):
             if not candidate.exists():
                 continue
             if not _artifact_matches(str(candidate), expected_shape):
                 continue
             metadata = _read_artifact_metadata(str(candidate))
+            if required_params is not None and metadata is None:
+                print(f"Existing stimulus cache has no crop provenance, regenerating: {candidate}")
+                continue
             if metadata is not None:
                 if metadata.get("kind") not in {None, "downsampled_video"}:
                     continue
                 params = metadata.get("params") or {}
                 if params.get("scale") not in {None, scale, "coarse"}:
+                    continue
+                if required_params is not None and any(
+                    params.get(key) != value for key, value in required_params.items()
+                ):
+                    print(f"Existing stimulus cache crop settings changed, regenerating: {candidate}")
                     continue
             actual_format = "zarr" if candidate.suffix.lower() == ".zarr" else "npy"
             print(
@@ -2734,6 +2771,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _coverage_ratios_for_values(visual_coverage, analysis_coverage):
         """Return x/y coverage ratios used by video downsampling."""
         return coverage_ratios(visual_coverage, analysis_coverage)
+
+    def _downsample_cache_crop_params(visual_coverage, analysis_coverage):
+        """Return cache provenance for the pixel-accurate coverage crop."""
+        return {
+            "crop_version": 2,
+            "visual_coverage": [float(value) for value in visual_coverage],
+            "analysis_coverage": [float(value) for value in analysis_coverage],
+        }
 
     def _scale_label(scale=None):
         """Return a short user-facing label for an analysis scale."""
@@ -2889,8 +2934,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         expected_shape = (expected_frames, target_ny, target_nx)
         visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
         analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
+        crop_params = _downsample_cache_crop_params(visual_coverage, analysis_coverage)
         reusable_path, reusable_format = _find_compatible_downsample_cache(
-            movpath, scale, expected_shape, output_format
+            movpath, scale, expected_shape, output_format, required_params=crop_params,
         )
         if reusable_path:
             # Mark this prerequisite immediately.  This makes the next stage
@@ -2905,6 +2951,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "scale": scale,
                 "output_format": output_format,
                 "shape": expected_shape,
+                **crop_params,
             }
         )
 
@@ -2933,7 +2980,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "downsampled_video",
             expected_shape,
             downsample_fingerprint,
-            params={"scale": scale, "format": output_format, "grid": (target_nx, target_ny)},
+            params={"scale": scale, "format": output_format, "grid": (target_nx, target_ny), **crop_params},
         )
         completed_actions.add("downsample:coarse")
         update_progress(100, "Stimulus downsample", "Downsampled movie ready")
@@ -3004,6 +3051,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
         analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
+        crop_params = _downsample_cache_crop_params(visual_coverage, analysis_coverage)
         coarse_downsample_shape = (expected_frames, coarse_ny, coarse_nx)
         full_downsample_shape = (expected_frames, full_ny, full_nx)
         coarse_downsample_ready = False
@@ -3012,14 +3060,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         full_downsample_format = downsample_output_format
         if scale == "coarse":
             found_path, coarse_downsample_format = _find_compatible_downsample_cache(
-                movpath, "coarse", coarse_downsample_shape, downsample_output_format
+                movpath, "coarse", coarse_downsample_shape, downsample_output_format,
+                required_params=crop_params,
             )
             if found_path:
                 coarse_downsample_path = found_path
                 coarse_downsample_ready = True
         else:
             found_path, full_downsample_format = _find_compatible_downsample_cache(
-                movpath, "full", full_downsample_shape, downsample_output_format
+                movpath, "full", full_downsample_shape, downsample_output_format,
+                required_params=crop_params,
             )
             if found_path:
                 full_downsample_path = found_path
@@ -3030,6 +3080,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "scale": "coarse",
                 "output_format": coarse_downsample_format,
                 "shape": coarse_downsample_shape,
+                **crop_params,
             }
         )
         full_downsample_fingerprint = _cache_fingerprint(
@@ -3038,6 +3089,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "scale": "full",
                 "output_format": full_downsample_format,
                 "shape": full_downsample_shape,
+                **crop_params,
             }
         )
 
@@ -3190,7 +3242,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if product == "coarse_rf" and backend == "convolution":
                     update_progress(25, "Coarse wavelet decomposition", "Writing direct RF power cache")
                     print("Step 2/2: Writing direct coarse RF power (no temporary phase caches)...")
-                    _register_cancel_cleanup_path(coarse_power_path)
+                    _register_cancel_cleanup_path(coarse_power_path, preserve_on_cancel=True)
                     waveletPowerDecompositionConv(
                         videodata,
                         sigmas,
@@ -3205,7 +3257,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
                         raise ValueError(f"Direct coarse RF power cache has an unexpected shape: {coarse_power_path}")
                     _write_artifact_metadata(
-                        coarse_power_path, "coarse_rf_power", coarse_power_shape, coarse_power_fingerprint
+                        coarse_power_path, "coarse_rf_power", coarse_power_shape,
+                        coarse_power_fingerprint, params=crop_params,
                     )
                     _write_recovery_step("coarse_rf_power_complete", path=coarse_power_path)
                     print(f"Direct coarse RF power cache is ready: {coarse_power_path}")
@@ -3219,7 +3272,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     print(f"Resume: found completed coarse real phase, reusing {real_phase_path}")
                     _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
                 else:
-                    _register_cancel_cleanup_path(real_phase_path)
+                    _register_cancel_cleanup_path(real_phase_path, preserve_on_cancel=True)
                     if backend == "convolution":
                         waveletDecompositionConv(
                             videodata,
@@ -3254,7 +3307,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     print(f"Resume: found completed coarse imaginary phase, reusing {imag_phase_path}")
                     _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
                 else:
-                    _register_cancel_cleanup_path(imag_phase_path)
+                    _register_cancel_cleanup_path(imag_phase_path, preserve_on_cancel=True)
                     if backend == "convolution":
                         waveletDecompositionConv(
                             videodata,
@@ -3285,7 +3338,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 update_progress(68, "Coarse wavelet decomposition", "Building the requested cache product")
                 print(f"Step 4/4: Building the {product.replace('_', ' ')} cache product...")
                 if product == "coarse_rf":
-                    _register_cancel_cleanup_path(coarse_power_path)
+                    _register_cancel_cleanup_path(coarse_power_path, preserve_on_cancel=True)
                     _build_coarse_power_zarr(real_phase_path, imag_phase_path, coarse_power_path)
                 elif not _artifact_ready(model_imag_path, coarse_phase_shape, imag_phase_fingerprint, kind="coarse_model_phase"):
                     raise ValueError("Run Model requires both named coarse model phase caches.")
@@ -3293,7 +3346,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if product == "coarse_rf":
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
                         raise ValueError(f"Coarse RF power cache was written with an unexpected shape: {coarse_power_path}")
-                    _write_artifact_metadata(coarse_power_path, "coarse_rf_power", coarse_power_shape, coarse_power_fingerprint)
+                    _write_artifact_metadata(
+                        coarse_power_path, "coarse_rf_power", coarse_power_shape,
+                        coarse_power_fingerprint, params=crop_params,
+                    )
                     _write_recovery_step("coarse_rf_power_complete", path=coarse_power_path)
                     for intermediate_path in (real_phase_path, imag_phase_path):
                         try:
@@ -3386,7 +3442,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 _write_recovery_step(f"full_model_phase_{phase}_reused", path=target, shape=full_model_shape)
                 continue
             update_progress(45 + phase * 25, "Full wavelet decomposition", f"Writing full-model phase {phase}")
-            _register_cancel_cleanup_path(target)
+            _register_cancel_cleanup_path(target, preserve_on_cancel=True)
             if backend == "convolution":
                 waveletDecompositionFullConv(
                     videodata,
@@ -3826,14 +3882,24 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             from ..storage.array_store import load_array
             power_path = os.path.join(parent_dir, "coarse_rf_power.zarr")
             w_c_downsampled = load_array(power_path, mmap_mode="r")
+            if not _artifact_has_params(
+                power_path,
+                _downsample_cache_crop_params(visual_coverage, analysis_coverage),
+            ):
+                raise ValueError(
+                    "Coarse RF power cache was built with an older stimulus crop. "
+                    "Prepare Stimulus Cache, then Prepare Coarse RF wavelets."
+                )
         except Exception as e:
             print(f"Coarse RF power cache loading failed: {e}")
             return False
 
         try:
             expected_movie_shape = (movie_metadata["frames"], coarse_ny, coarse_nx)
+            crop_params = _downsample_cache_crop_params(visual_coverage, analysis_coverage)
             downsample_path, _ = _find_compatible_downsample_cache(
-                movpath, "coarse", expected_movie_shape, _selected_downsample_format()
+                movpath, "coarse", expected_movie_shape, _selected_downsample_format(),
+                required_params=crop_params,
             )
             if downsample_path is None:
                 raise FileNotFoundError("No compatible prepared coarse stimulus cache was found.")
@@ -5681,8 +5747,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "Uses GPU feature-response cross-products when the current tile fits; automatically falls back to CPU.",
         ),
         (
-            "multi_gpu", "WAVEN_MULTI_GPU", False, "Use all available GPUs",
-            "Opt-in batch-parallel convolution. Requires the convolution backend and at least two CUDA GPUs.",
+            "multi_gpu", "WAVEN_MULTI_GPU", False, "Use compatible GPUs",
+            "Opt-in batch-parallel convolution. The app excludes mixed or markedly unequal GPUs that would slow synchronous batches.",
         ),
         (
             "torch_compile", "WAVEN_TORCH_COMPILE", False, "Compile stable convolution kernels (experimental)",
@@ -5732,7 +5798,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             backend = "legacy"
         if count >= 2 and backend == "convolution":
-            return f"Detected {count} CUDA GPUs. Multi-GPU is available when enabled."
+            return f"Detected {count} CUDA GPUs. When enabled, only compatible GPUs are combined."
         if count >= 2:
             return f"Detected {count} CUDA GPUs. Multi-GPU applies after selecting the convolution backend."
         if count == 1:
@@ -6279,6 +6345,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             else:
                 neural_cache_format_frame.grid_remove()
                 btn_create_neural_cache.configure(text="Validate Existing Neural Cache")
+            # Switching between fresh-data and existing-cache modes must not
+            # retain a stale disabled state after stimulus preparation.
+            try:
+                refresh_action_buttons()
+            except NameError:
+                pass
         except Exception:
             pass
 
@@ -6656,8 +6728,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             movpath = _find_movie_path()
             nx, ny = _stimulus_grid_dimensions("coarse", movpath)
             expected_movie_shape = (_movie_metadata(movpath)["frames"], ny, nx)
+            visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
+            analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
             cache_path, _cache_format = _find_compatible_downsample_cache(
-                movpath, "coarse", expected_movie_shape, _selected_downsample_format()
+                movpath, "coarse", expected_movie_shape, _selected_downsample_format(),
+                required_params=_downsample_cache_crop_params(visual_coverage, analysis_coverage),
             )
             if cache_path:
                 completed_actions.add("downsample:coarse")
@@ -6710,7 +6785,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             n_sigmas = len(parse_literal(gabor_entries["Sigmas"].get(), "Sigmas"))
             coarse_shape = (frames, nx, ny, n_orientations, n_sigmas)
             wavelet_dir = _wavelet_folder("coarse")
-            if _artifact_matches(os.path.join(wavelet_dir, "coarse_rf_power.zarr"), coarse_shape):
+            crop_params = _downsample_cache_crop_params(
+                parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage"),
+                parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage"),
+            )
+            coarse_power_path = os.path.join(wavelet_dir, "coarse_rf_power.zarr")
+            if (
+                "downsample:coarse" in completed_actions
+                and _artifact_matches(coarse_power_path, coarse_shape)
+                and _artifact_has_params(coarse_power_path, crop_params)
+            ):
                 completed_actions.add("wavelet:coarse_rf")
             if (
                 _artifact_matches(os.path.join(wavelet_dir, "coarse_model_real.zarr"), coarse_shape)

@@ -82,8 +82,10 @@ nonnegative baseline before computing ratios.
 ## Caching and recovery
 
 Long-running buttons reuse completed outputs when shapes match the current
-configuration. Recovery checkpoints are removed after successful or cancelled
-runs and kept after failures for debugging.
+configuration. Cancellation retains convolution-wavelet partial caches and the
+recovery checkpoint, allowing completed phases (and direct Coarse RF output
+tiles) to be reused on the next run. Recovery checkpoints are removed only
+after successful runs and are kept after cancellations or failures.
 
 Shape validation is the main safety rule. If `NX`, `NY`, `N_thetas`, `Sigmas`,
 or `Frequencies` change, a previous cache can have the right filename but the

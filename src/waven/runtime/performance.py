@@ -12,7 +12,7 @@ import threading
 import time
 from contextlib import nullcontext
 from functools import lru_cache
-from typing import Dict, Literal, Optional
+from typing import Dict, Iterable, Literal, Optional, Tuple
 
 import psutil
 import torch
@@ -23,6 +23,7 @@ except ImportError:  # pragma: no cover - optional protection for legacy install
     threadpool_limits = None
 
 ComputeDevice = Literal["cuda", "cpu"]
+_reported_multi_gpu_decisions: set[Tuple[int, ...]] = set()
 
 
 class OperationTelemetry:
@@ -74,14 +75,83 @@ def enabled_feature(name: str, default: bool = True) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _gpu_descriptor(device_id: int) -> Dict[str, object]:
+    """Return the hardware traits relevant to synchronous DataParallel work."""
+    properties = torch.cuda.get_device_properties(int(device_id))
+    return {
+        "id": int(device_id),
+        "name": str(properties.name),
+        "capability": (int(properties.major), int(properties.minor)),
+        "vram_bytes": int(properties.total_memory),
+        # SM count and core clock are a stable, inexpensive proxy for relative
+        # convolution throughput.  Exact core counts vary by architecture, so
+        # they intentionally are not inferred from marketing names.
+        "throughput_score": max(1, int(properties.multi_processor_count)) * max(1, int(properties.clock_rate)),
+    }
+
+
+def select_compatible_multi_gpu_ids(
+    descriptors: Iterable[Dict[str, object]],
+    minimum_relative_score: float = 0.75,
+    minimum_relative_memory: float = 0.75,
+) -> Tuple[Tuple[int, ...], Tuple[str, ...]]:
+    """Keep only GPUs that can usefully share synchronous ``DataParallel`` work.
+
+    ``DataParallel`` splits each frame chunk, then waits for every GPU before
+    gathering. A substantially slower/smaller card therefore throttles the
+    whole batch. Different CUDA architectures also make mixed-precision and
+    kernel behaviour less predictable, so they are deliberately not combined.
+    """
+    available = sorted((dict(item) for item in descriptors), key=lambda item: int(item["id"]))
+    if not available:
+        return (), ()
+    primary = available[0]
+    accepted = [int(primary["id"])]
+    rejected = []
+    for candidate in available[1:]:
+        device_id = int(candidate["id"])
+        reasons = []
+        if tuple(candidate["capability"]) != tuple(primary["capability"]):
+            reasons.append(
+                f"compute capability {candidate['capability']} differs from cuda:{primary['id']} {primary['capability']}"
+            )
+        score_ratio = min(float(candidate["throughput_score"]), float(primary["throughput_score"])) / max(
+            float(candidate["throughput_score"]), float(primary["throughput_score"])
+        )
+        if score_ratio < float(minimum_relative_score):
+            reasons.append(f"estimated convolution throughput is {score_ratio:.0%} of the primary GPU")
+        memory_ratio = min(float(candidate["vram_bytes"]), float(primary["vram_bytes"])) / max(
+            float(candidate["vram_bytes"]), float(primary["vram_bytes"])
+        )
+        if memory_ratio < float(minimum_relative_memory):
+            reasons.append(f"VRAM is {memory_ratio:.0%} of the primary GPU")
+        if reasons:
+            rejected.append(f"cuda:{device_id} ({candidate['name']}): " + "; ".join(reasons))
+        else:
+            accepted.append(device_id)
+    return tuple(accepted), tuple(rejected)
+
+
 def compute_devices(allow_multi_gpu: bool = False):
-    """Return safe compute-device names; multi-GPU remains explicit opt-in."""
+    """Return safe compute devices, rejecting imbalanced DataParallel groups."""
     if not torch.cuda.is_available():
         return ["cpu"]
     if allow_multi_gpu and enabled_feature("MULTI_GPU", default=False):
-        devices = [f"cuda:{idx}" for idx in range(torch.cuda.device_count()) if gpu_available_vram_bytes(idx) > 0]
-        if len(devices) > 1:
-            return devices
+        available_ids = [idx for idx in range(torch.cuda.device_count()) if gpu_available_vram_bytes(idx) > 0]
+        if len(available_ids) > 1:
+            accepted_ids, rejected = select_compatible_multi_gpu_ids(
+                _gpu_descriptor(idx) for idx in available_ids
+            )
+            if len(accepted_ids) > 1:
+                return [f"cuda:{idx}" for idx in accepted_ids]
+            decision_key = tuple(available_ids)
+            if decision_key not in _reported_multi_gpu_decisions:
+                _reported_multi_gpu_decisions.add(decision_key)
+                detail = " | ".join(rejected) or "no compatible peer GPU was available"
+                print(
+                    "Multi-GPU requested, but synchronous DataParallel would be bottlenecked; "
+                    f"using cuda:0 only. {detail}"
+                )
     return ["cuda:0"]
 
 

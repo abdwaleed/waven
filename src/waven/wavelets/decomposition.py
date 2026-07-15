@@ -5,6 +5,7 @@ wavelet coefficient arrays to disk. Filter-bank construction lives in
 :mod:`waven.wavelets.filters`.
 """
 import gc
+import json
 import math
 import os
 import queue
@@ -47,6 +48,7 @@ from ..runtime.performance import (
     wavelet_filter_chunk_size,
 )
 from ..runtime.task_control import check_cancelled, progress_message
+from ..stimulus.metadata import coverage_crop_bounds
 from .filters import has_enough_ram
 
 
@@ -77,23 +79,28 @@ class _AsyncSliceWriter:
             if task is None:
                 self.queue.task_done()
                 return
-            callback, payload, byte_count = task
+            callback, payload, byte_count, on_complete = task
             try:
                 started = time.perf_counter()
                 callback(payload)
                 if self.telemetry is not None:
                     self.telemetry.add("output", time.perf_counter() - started, byte_count)
+                if on_complete is not None:
+                    on_complete()
             except Exception as exc:
                 self.error = exc
             finally:
                 self.queue.task_done()
 
-    def submit(self, callback, payload, byte_count):
+    def submit(self, callback, payload, byte_count, on_complete=None):
         if self._closed:
             raise RuntimeError("Cannot submit to a closed array writer.")
         if self.error is not None:
             raise self.error
-        self.queue.put((callback, payload, int(byte_count)))
+        queued_at = time.perf_counter()
+        self.queue.put((callback, payload, int(byte_count), on_complete))
+        if self.telemetry is not None:
+            self.telemetry.add("output_backpressure", time.perf_counter() - queued_at)
 
     def close(self):
         if self._closed:
@@ -172,6 +179,116 @@ def _open_zarr_array(zarr_module, path, **kwargs):
             except Exception:
                 kwargs.pop("compressors", None)
         return zarr_module.open(path, **kwargs)
+
+
+def _convolution_progress_path(save_path):
+    """Return the sidecar used to resume an interrupted convolution cache."""
+    return f"{save_path}.waven-progress.json"
+
+
+class _ConvolutionProgress:
+    """Persist completed output tiles without treating a partial cache as final.
+
+    The progress sidecar is deliberately separate from the normal artifact
+    metadata.  A cache remains unavailable to downstream analysis until the
+    caller writes its normal completion metadata, while a cancelled run can
+    still reuse every tile recorded here on its next attempt.
+    """
+
+    def __init__(self, save_path, shape, kind, flush_every=8):
+        self.path = _convolution_progress_path(save_path)
+        self.shape = tuple(int(v) for v in shape)
+        self.kind = str(kind)
+        self.flush_every = max(1, int(flush_every))
+        self.completed = set()
+        self._pending = 0
+        self.reusable = False
+        try:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if tuple(payload.get("shape", ())) == self.shape and payload.get("kind") == self.kind:
+                self.completed = {str(key) for key in payload.get("completed", ())}
+                self.reusable = True
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def mark(self, key):
+        key = str(key)
+        if key in self.completed:
+            return
+        self.completed.add(key)
+        self._pending += 1
+        if self._pending >= self.flush_every:
+            self.flush()
+
+    def flush(self):
+        if not self._pending and os.path.exists(self.path):
+            return
+        payload = {
+            "kind": self.kind,
+            "shape": self.shape,
+            "completed": sorted(self.completed),
+            "updated_at": time.time(),
+        }
+        temporary_path = f"{self.path}.tmp"
+        with open(temporary_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, separators=(",", ":"))
+        os.replace(temporary_path, self.path)
+        self._pending = 0
+
+    def discard(self):
+        try:
+            os.remove(self.path)
+        except FileNotFoundError:
+            pass
+
+
+def _open_resumable_zarr(zarr_module, save_path, shape, chunks, compressor, progress):
+    """Open a matching interrupted Zarr cache, or start a fresh one safely."""
+    if progress.reusable and os.path.exists(save_path):
+        try:
+            existing = _open_zarr_array(zarr_module, save_path, mode="a")
+            if tuple(existing.shape) == tuple(shape):
+                print(f"Resuming interrupted convolution cache: {save_path} ({len(progress.completed)} saved tiles)")
+                return existing
+        except Exception:
+            pass
+    progress.completed.clear()
+    progress.reusable = False
+    progress._pending = 1
+    progress.flush()
+    return _open_zarr_array(
+        zarr_module, save_path, mode="w", shape=shape, chunks=chunks,
+        dtype=np.float32, compressor=compressor,
+    )
+
+
+def _completed_output_interval(progress, group_start, start, end):
+    """Return whether persisted tiles cover one requested frame interval."""
+    if progress is None:
+        return False
+    prefix = f"g{int(group_start)}:t"
+    intervals = []
+    for key in progress.completed:
+        if not key.startswith(prefix):
+            continue
+        try:
+            tile_start, tile_end = key[len(prefix):].split("-", 1)
+            intervals.append((int(tile_start), int(tile_end)))
+        except ValueError:
+            # Ignore sidecars written by an older build; their progress is not
+            # sufficiently specific to prove coverage of an adaptive chunk.
+            continue
+    cursor = int(start)
+    for tile_start, tile_end in sorted(intervals):
+        if tile_end <= cursor:
+            continue
+        if tile_start > cursor:
+            break
+        cursor = max(cursor, tile_end)
+        if cursor >= int(end):
+            return True
+    return cursor >= int(end)
 
 
 def _prepare_video_flat(videodata, device):
@@ -500,6 +617,7 @@ def _conv2d_wavelet_group(videodata, kernels, device, frame_chunk_size, n_orient
 @torch.no_grad()
 def _time_major_convolution_groups(
     videodata, groups, device, frame_chunk_size, cancel_event=None, telemetry=None,
+    skip_frame_starts=(),
 ):
     """Convolve every filter group while one movie chunk is resident.
 
@@ -529,11 +647,14 @@ def _time_major_convolution_groups(
 
     num_frames = int(videodata.shape[0])
     active_frame_chunk = max(1, int(frame_chunk_size))
+    skip_frame_starts = {int(start) for start in skip_frame_starts}
     if not str(device).startswith("cuda"):
         configure_torch_cpu_threads()
     try:
         for start in range(0, num_frames, active_frame_chunk):
             check_cancelled(cancel_event)
+            if start in skip_frame_starts:
+                continue
             end = min(start + active_frame_chunk, num_frames)
             read_start = time.perf_counter()
             frames = np.asarray(videodata[start:end], dtype=np.float32)
@@ -747,21 +868,18 @@ def downsample_video_binary(
         raise IOError(f"Cannot open video file for downsampling: {path}")
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    ratio_x, ratio_y = ratios
-    vis_cov = np.array(visual_coverage)
-    ana_cov = np.array(analysis_coverage)
-    
-    xi = int(abs((vis_cov - ana_cov)[2]))
-    yi = int(abs((vis_cov - ana_cov)[0]))
-    
     # Grab one frame to dynamically determine cropping bounds
     ret, first_img = cap.read()
     if not ret:
         cap.release()
         raise IOError(f"Cannot read the first frame from video: {path}")
-    img_gray = first_img[:, :, 0] > 100
-    xe = int(ratio_y * img_gray.shape[0])
-    ye = int(ratio_x * img_gray.shape[1])
+    xi, xe, yi, ye = coverage_crop_bounds(
+        first_img.shape[:2], visual_coverage, analysis_coverage,
+    )
+    print(
+        "Stimulus crop (rows, cols): "
+        f"{xi}:{xe}, {yi}:{ye}; source={first_img.shape[0]}x{first_img.shape[1]}"
+    )
     
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Reset video
     
@@ -1340,6 +1458,12 @@ def waveletDecompositionConv(
     output_stem = output_stem or f"dwt_videodata_{phase}"
     save_path = os.path.join(folder_path, f"{output_stem}.{output_format}")
     required_bytes = _array_bytes(final_shape, np.float32)
+    if frame_chunk_size is None:
+        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny)
+    if filter_group_size is None:
+        filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
+    filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
+    progress = None
 
     if output_format == "zarr":
         try:
@@ -1351,15 +1475,24 @@ def waveletDecompositionConv(
             ) from exc
         _require_disk_space(folder_path, required_bytes, f"convolution coarse wavelet phase {phase}")
         if zarr_chunks is None:
-            zarr_chunks = (min(num_frames, 128), min(nx, 16), min(ny, 16), int(n_orientations), len(sigmas))
+            zarr_chunks = (
+                min(num_frames, frame_chunk_size), min(nx, 16), min(ny, 16),
+                int(n_orientations), filter_group_size,
+            )
         zarr_chunks = tuple(
             min(int(dim), max(1, int(chunk)))
             for dim, chunk in zip(final_shape, zarr_chunks)
         )
-        wt_final = _open_zarr_array(
-            zarr, save_path, mode="w", shape=final_shape, chunks=zarr_chunks,
-            dtype=np.float32,
-            compressor=Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE),
+        progress_kind = json.dumps(
+            {"product": "coarse_phase", "phase": int(phase), "sigmas": sigmas.tolist(),
+             "orientations": int(n_orientations),
+             "phase_offsets": list(phase_offsets) if phase_offsets is not None else []},
+            sort_keys=True,
+        )
+        progress = _ConvolutionProgress(save_path, final_shape, progress_kind)
+        wt_final = _open_resumable_zarr(
+            zarr, save_path, final_shape, zarr_chunks,
+            Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE), progress,
         )
         use_mmap = False
         print(f"Writing convolution coarse phase {phase} directly to Zarr: {save_path}")
@@ -1373,11 +1506,6 @@ def waveletDecompositionConv(
         use_mmap = True
         print(f"Using disk-backed output for convolution coarse phase {phase}; RAM is below safe working set.")
 
-    if frame_chunk_size is None:
-        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny)
-    if filter_group_size is None:
-        filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
-    filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
     print(f"Convolution backend device: {device}")
     print(f"Convolution backend frame chunk size: {frame_chunk_size}")
     print(f"Convolution backend sigma group size: {filter_group_size}")
@@ -1386,11 +1514,19 @@ def waveletDecompositionConv(
     telemetry = OperationTelemetry(f"Convolution coarse phase {phase}")
     writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
     total_groups = max(1, math.ceil(len(sigmas) / filter_group_size))
+
+    def tile_key(start, end, group_start):
+        return f"g{int(group_start)}:t{int(start)}-{int(end)}"
+
     try:
         completed_groups = 0
         for group_start in range(0, len(sigmas), filter_group_size):
             check_cancelled(cancel_event)
             group_end = min(group_start + filter_group_size, len(sigmas))
+            if _completed_output_interval(progress, group_start, 0, num_frames):
+                completed_groups += 1
+                print(f"Resume: skipping completed coarse phase {phase} sigma group {completed_groups}/{total_groups}.")
+                continue
             group_sigmas = sigmas[group_start:group_end]
             if kernel_cache is not None:
                 kernels = kernel_cache[int(phase), group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
@@ -1412,11 +1548,17 @@ def waveletDecompositionConv(
                 def write_response(values, t0=start, t1=end, s0=group_start, s1=group_end):
                     wt_final[t0:t1, :, :, :, s0:s1] = values
                 if writer is not None:
-                    writer.submit(write_response, response, response.nbytes)
+                    writer.submit(
+                        write_response, response, response.nbytes,
+                        on_complete=(lambda key=tile_key(start, end, group_start): progress.mark(key))
+                        if progress is not None else None,
+                    )
                 else:
                     write_start = time.perf_counter()
                     write_response(response)
                     telemetry.add("output", time.perf_counter() - write_start, response.nbytes)
+                    if progress is not None:
+                        progress.mark(tile_key(start, end, group_start))
                 print(progress_message(
                     f"Convolution coarse phase {phase}", end, num_frames,
                     chunk_start, unit="frames",
@@ -1428,10 +1570,13 @@ def waveletDecompositionConv(
     finally:
         if writer is not None:
             writer.close()
+        if progress is not None:
+            progress.flush()
 
     if device == "cuda":
         torch.cuda.empty_cache()
     if output_format == "zarr":
+        progress.discard()
         print(f"Success! Saved convolution coarse Zarr array to {save_path}")
     elif use_mmap:
         wt_final.flush()
@@ -1469,14 +1614,6 @@ def waveletPowerDecompositionConv(
     ) if kernel_cache_path else None
     final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
     _require_disk_space(folder_path, _array_bytes(final_shape, np.float32), "coarse RF power cache")
-    if zarr_chunks is None:
-        zarr_chunks = (min(num_frames, 128), min(nx, 16), min(ny, 16), int(n_orientations), len(sigmas))
-    zarr_chunks = tuple(min(int(dim), max(1, int(chunk))) for dim, chunk in zip(final_shape, zarr_chunks))
-    save_path = os.path.join(folder_path, f"{output_stem}.zarr")
-    power = _open_zarr_array(
-        zarr, save_path, mode="w", shape=final_shape, chunks=zarr_chunks,
-        dtype=np.float32, compressor=Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE),
-    )
     if frame_chunk_size is None:
         frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny, n_channels=2)
     if filter_group_size is None:
@@ -1485,6 +1622,28 @@ def waveletPowerDecompositionConv(
             frame_chunk_size, nx, ny, n_orientations, device
         ) // 2)
     filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
+    if zarr_chunks is None:
+        # Time-major scheduling writes one frame/filter tile at a time.  The old
+        # layout put all sigmas in a compressed chunk, so each group rewrote the
+        # same chunk repeatedly.  Aligning time and sigma chunks with writes
+        # avoids that read-modify-compress bottleneck.
+        zarr_chunks = (
+            min(num_frames, frame_chunk_size), min(nx, 16), min(ny, 16),
+            int(n_orientations), filter_group_size,
+        )
+    zarr_chunks = tuple(min(int(dim), max(1, int(chunk))) for dim, chunk in zip(final_shape, zarr_chunks))
+    save_path = os.path.join(folder_path, f"{output_stem}.zarr")
+    progress_kind = json.dumps(
+        {"product": "coarse_rf_power", "sigmas": sigmas.tolist(),
+         "orientations": int(n_orientations),
+         "phase_offsets": list(phase_offsets) if phase_offsets is not None else []},
+        sort_keys=True,
+    )
+    progress = _ConvolutionProgress(save_path, final_shape, progress_kind)
+    power = _open_resumable_zarr(
+        zarr, save_path, final_shape, zarr_chunks,
+        Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE), progress,
+    )
     print(f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, sigma group={filter_group_size}")
     start_time = time.time()
     telemetry = OperationTelemetry("Direct coarse RF power")
@@ -1515,15 +1674,20 @@ def waveletPowerDecompositionConv(
             ((group_number, group_start, group_end), list(real_kernels) + list(imag_kernels), fused_power_response)
         )
 
+    def tile_key(start, end, group_start):
+        return f"g{int(group_start)}:t{int(start)}-{int(end)}"
+
     def store_power(start, end, group_start, group_end, payload):
+        key = tile_key(start, end, group_start)
         def write_power(values, t0=start, t1=end, s0=group_start, s1=group_end):
             power[t0:t1, :, :, :, s0:s1] = values
         if writer is not None:
-            writer.submit(write_power, payload, payload.nbytes)
+            writer.submit(write_power, payload, payload.nbytes, on_complete=lambda: progress.mark(key))
         else:
             write_start = time.perf_counter()
             write_power(payload)
             telemetry.add("output", time.perf_counter() - write_start, payload.nbytes)
+            progress.mark(key)
 
     try:
         use_time_major = (
@@ -1534,8 +1698,17 @@ def waveletPowerDecompositionConv(
         if use_time_major:
             try:
                 print("Direct coarse RF power using time-major filter scheduling (one movie read per frame chunk).")
+                frame_starts = range(0, num_frames, frame_chunk_size)
+                completed_frame_starts = {
+                    start for start in frame_starts
+                    if all(_completed_output_interval(progress, group_start, start, min(start + frame_chunk_size, num_frames))
+                           for _group_number, group_start, _group_end in (record[0] for record in group_records))
+                }
+                if completed_frame_starts:
+                    print(f"Resume: skipping {len(completed_frame_starts)} completed time-major frame chunk(s).")
                 for metadata, start, end, power_response in _time_major_convolution_groups(
                     videodata, group_records, device, frame_chunk_size, cancel_event=cancel_event, telemetry=telemetry,
+                    skip_frame_starts=completed_frame_starts,
                 ):
                     group_number, group_start, group_end = metadata
                     store_power(start, end, group_start, group_end, power_response)
@@ -1550,6 +1723,10 @@ def waveletPowerDecompositionConv(
         if not use_time_major:
             for metadata, fused_kernels, fused_power_response in group_records:
                 group_number, group_start, group_end = metadata
+                group_complete = _completed_output_interval(progress, group_start, 0, num_frames)
+                if group_complete:
+                    print(f"Resume: skipping completed sigma group {group_number}/{total_groups}.")
+                    continue
                 for chunk_index, (start, end, power_response) in enumerate(_conv2d_wavelet_bank(
                     videodata, fused_kernels, device, frame_chunk_size,
                     cancel_event=cancel_event, telemetry=telemetry, postprocess=fused_power_response,
@@ -1564,9 +1741,11 @@ def waveletPowerDecompositionConv(
     finally:
         if writer is not None:
             writer.close()
+        progress.flush()
     if device == "cuda":
         torch.cuda.empty_cache()
     del power
+    progress.discard()
     print(f"Success! Saved direct coarse RF power Zarr array to {save_path}")
     telemetry.report()
     return save_path
@@ -1625,6 +1804,13 @@ def waveletDecompositionFullConv(
     save_ext = ".zarr" if output_format == "zarr" else ".npy"
     save_path = os.path.join(folder_path, f"dwt_videodata2{phase_suffix}{save_ext}")
     required_bytes = _array_bytes(final_shape, np.float32)
+    combo_count = len(sigmas) * len(frequencies)
+    if frame_chunk_size is None:
+        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny)
+    if filter_group_size is None:
+        filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
+    filter_group_size = max(1, min(int(filter_group_size), combo_count))
+    progress = None
 
     if output_format == "zarr":
         try:
@@ -1643,14 +1829,15 @@ def waveletDecompositionFullConv(
             min(int(dim), int(max(1, chunk)))
             for dim, chunk in zip(final_shape, zarr_chunks)
         )
-        wt_final = _open_zarr_array(
-            zarr,
-            save_path,
-            mode="w",
-            shape=final_shape,
-            chunks=zarr_chunks,
-            dtype=np.float32,
-            compressor=compressor,
+        progress_kind = json.dumps(
+            {"product": "full_phase", "phase": int(phase), "sigmas": sigmas.tolist(),
+             "frequencies": frequencies.tolist(), "orientations": int(n_orientations),
+             "phase_offsets": list(phase_offsets) if phase_offsets is not None else []},
+            sort_keys=True,
+        )
+        progress = _ConvolutionProgress(save_path, final_shape, progress_kind)
+        wt_final = _open_resumable_zarr(
+            zarr, save_path, final_shape, zarr_chunks, compressor, progress,
         )
         use_mmap = False
         print(f"Writing convolution full-model phase {phase} directly to Zarr: {save_path}")
@@ -1664,12 +1851,6 @@ def waveletDecompositionFullConv(
         use_mmap = True
         print(f"Using disk-backed output for convolution full-model phase {phase}; RAM is below safe working set.")
 
-    if frame_chunk_size is None:
-        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny)
-    combo_count = len(sigmas) * len(frequencies)
-    if filter_group_size is None:
-        filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
-    filter_group_size = max(1, min(int(filter_group_size), combo_count))
     print(f"Convolution backend device: {device}")
     print(f"Convolution backend frame chunk size: {frame_chunk_size}")
     print(f"Convolution backend sigma/frequency group size: {filter_group_size}")
@@ -1680,10 +1861,18 @@ def waveletDecompositionFullConv(
     start_time = time.time()
     telemetry = OperationTelemetry(f"Convolution full-model phase {phase}")
     writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
+
+    def tile_key(start, end, group_start):
+        return f"g{int(group_start)}:t{int(start)}-{int(end)}"
+
     try:
       for group_start in range(0, len(combinations), filter_group_size):
         check_cancelled(cancel_event)
         combo_group = combinations[group_start:group_start + filter_group_size]
+        if _completed_output_interval(progress, group_start, 0, num_frames):
+            completed_steps += 1
+            print(f"Resume: skipping completed full-model phase {phase} group {completed_steps}/{total_steps}.")
+            continue
         if kernel_cache is not None:
             kernels = np.concatenate(
                 [kernel_cache[int(phase), s_idx, f_idx] for s_idx, f_idx in combo_group],
@@ -1713,11 +1902,17 @@ def waveletDecompositionFullConv(
                 for local_idx, (s_idx, f_idx) in enumerate(pairs):
                     wt_final[t0:t1, :, :, :, s_idx, f_idx] = values[..., local_idx]
             if writer is not None:
-                writer.submit(write_response, response, response.nbytes)
+                writer.submit(
+                    write_response, response, response.nbytes,
+                    on_complete=(lambda key=tile_key(start, end, group_start): progress.mark(key))
+                    if progress is not None else None,
+                )
             else:
                 write_start = time.perf_counter()
                 write_response(response)
                 telemetry.add("output", time.perf_counter() - write_start, response.nbytes)
+                if progress is not None:
+                    progress.mark(tile_key(start, end, group_start))
             print(
                 progress_message(
                     f"Convolution full-model phase {phase}",
@@ -1734,10 +1929,13 @@ def waveletDecompositionFullConv(
     finally:
         if writer is not None:
             writer.close()
+        if progress is not None:
+            progress.flush()
 
     if device == "cuda":
         torch.cuda.empty_cache()
     if output_format == "zarr":
+        progress.discard()
         print(f"Success! Saved convolution full-model Zarr array to {save_path}", end="\n\n")
     elif use_mmap:
         wt_final.flush()
