@@ -78,6 +78,11 @@ def enabled_feature(name: str, default: bool = True) -> bool:
 def _gpu_descriptor(device_id: int) -> Dict[str, object]:
     """Return the hardware traits relevant to synchronous DataParallel work."""
     properties = torch.cuda.get_device_properties(int(device_id))
+    # ``clock_rate`` is absent on some supported PyTorch/CUDA property objects.
+    # Retain a deterministic, conservative score in that case rather than
+    # making the opt-in multi-GPU switch fail before a convolution starts.
+    multiprocessors = max(1, int(getattr(properties, "multi_processor_count", 1)))
+    clock_rate = max(1, int(getattr(properties, "clock_rate", 1)))
     return {
         "id": int(device_id),
         "name": str(properties.name),
@@ -86,7 +91,7 @@ def _gpu_descriptor(device_id: int) -> Dict[str, object]:
         # SM count and core clock are a stable, inexpensive proxy for relative
         # convolution throughput.  Exact core counts vary by architecture, so
         # they intentionally are not inferred from marketing names.
-        "throughput_score": max(1, int(properties.multi_processor_count)) * max(1, int(properties.clock_rate)),
+        "throughput_score": multiprocessors * clock_rate,
     }
 
 

@@ -79,7 +79,7 @@ Current GUI Inputs / Parameters** under `gui.performance`.
 | Read movie chunks once across filter groups | `WAVEN_TIME_MAJOR_CONV` | on | Direct coarse-RF power convolution; aligns Zarr chunks with frame/filter writes to avoid output recompression, with a group-major fallback when kernel banks cannot safely coexist |
 | GPU Coarse RF statistics | `WAVEN_RF_GPU` | on | Coarse RF sufficient-statistics cross-products |
 | Use compatible GPUs | `WAVEN_MULTI_GPU` | off | Convolution wavelets only; mismatched cards automatically fall back to one GPU |
-| Compile stable convolution kernels | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile`; useful for repeated long fixed-shape jobs after its warm-up cost |
+| Compile stable convolution kernels | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile`; useful for repeated long fixed-shape jobs after its warm-up cost, with automatic eager fallback if setup or execution fails |
 | Tensor Core convolution | `WAVEN_AMP` | off | CUDA float16 autocast for convolution only; retain default precision for scientific-equivalence runs |
 
 The hardware status line reports the detected CUDA count and whether multi-GPU

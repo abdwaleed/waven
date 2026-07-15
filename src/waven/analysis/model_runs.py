@@ -175,14 +175,16 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
     rho = np.hypot(w_r.ravel(), w_i.ravel())
     phi = np.arctan2(w_i.ravel(), w_r.ravel())
     phi = np.unwrap(phi)
-    dphi = np.diff(phi, prepend=0)
+    # The first sample has no preceding frame, so its instantaneous phase drift
+    # is zero. Prepending literal zero instead spuriously injected ``phi[0]``.
+    dphi = np.diff(phi, prepend=phi[0])
     dphi[abs(dphi) >= 3] = np.nan
     nans, x_val = nan_helper(dphi)
     dphi[nans] = np.interp(x_val(nans), x_val(~nans), dphi[~nans])
 
     rho_inhib = np.hypot(w_r_inhib.ravel(), w_i_inhib.ravel())
-    phi_inhib = np.arctan2(w_i_inhib.ravel(), w_r_inhib.ravel())
-    dphi_inhib = np.diff(phi_inhib, prepend=0)
+    phi_inhib = np.unwrap(np.arctan2(w_i_inhib.ravel(), w_r_inhib.ravel()))
+    dphi_inhib = np.diff(phi_inhib, prepend=phi_inhib[0])
     dphi_inhib[abs(dphi_inhib) >= 3] = np.nan
     nans, x_val = nan_helper(dphi_inhib)
     dphi_inhib[nans] = np.interp(x_val(nans), x_val(~nans), dphi_inhib[~nans])
@@ -246,7 +248,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
                                                                                           n_min=n_min,
                                                                                           train_idx=train_idx,
                                                                                           test_idx=test_idx,
-                                                                                          double_wavelet_model=False,
+                                                                                          double_wavelet_model=double_wavelet_model,
                                                                                           lastmin=lastmin, func=relu, sigma=15,
                                                                                           plotting=False,
                                                                                           frames_per_minute=frames_per_minute)
@@ -565,7 +567,6 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                     f"run_Full_Model {label} coarse RF coordinates are outside "
                     f"the current coarse grid {(coarse_nx, coarse_ny)}. Re-run Coarse RF analysis."
                 )
-    margin = 5
     corr_shape = (n_orientations, n_sigmas_w, n_frequencies)
     compute_device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -660,8 +661,11 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         Returns:
             Result produced by the operation.
         """
-        x0 = int(np.round(np.minimum(np.maximum(x * scale_x, margin), nx_full - margin)))
-        y0 = int(np.round(np.minimum(np.maximum(y * scale_y, margin), ny_full - margin)))
+        # Small synthetic or cropped movies can be narrower than the legacy
+        # five-pixel margin. Clipping to real feature bounds keeps refinement
+        # valid for every positive full-resolution grid.
+        x0 = int(np.clip(np.round(x * scale_x), 0, nx_full - 1))
+        y0 = int(np.clip(np.round(y * scale_y), 0, ny_full - 1))
         w = 10
         t_start = int(tt[0])
         t_end = min(t_start + nmin * frames_per_minute, wavelets_r.shape[0], spks.shape[1])
@@ -804,9 +808,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         pp = cc_f_1_o[:, s, f]
         ori_selectivity = signaltonoiseScipy(pp)  # abs(np.max(pp)) / abs(np.mean(pp))
 
-        if not plotting:
-            OS.append(ori_selectivity)
-            Params.append([[x, y, o, s, f], [x1, y1, o1, s1, f1]])
+        OS.append(ori_selectivity)
+        Params.append([[x, y, o, s, f], [x1, y1, o1, s1, f1]])
 
         if plotting:
             plt.rcParams.update({
@@ -921,7 +924,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         # Vectorized polar coordinate calculation (100x faster, zero unnecessary RAM)
         rho = np.hypot(w_r.flatten(), w_i.flatten())
         phi = np.arctan2(w_i.flatten(), w_r.flatten())
-        dphi = np.diff(np.unwrap(phi), prepend=0) * hz
+        phi = np.unwrap(phi)
+        dphi = np.diff(phi, prepend=phi[0]) * hz
         dphi = np.clip(dphi, -2 * np.pi, 2 * np.pi)
         nans, dx = nan_helper(dphi)
         dphi[nans] = np.interp(dx(nans), dx(~nans), dphi[~nans])
@@ -930,7 +934,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         rho_inhib = np.hypot(w_r_inhib.flatten(), w_i_inhib.flatten())
         phi_inhib = np.arctan2(w_i_inhib.flatten(), w_r_inhib.flatten())
         phi_inhib = np.unwrap(phi_inhib)
-        dphi_inhib = np.diff(np.unwrap(phi_inhib), prepend=0) * hz
+        dphi_inhib = np.diff(phi_inhib, prepend=phi_inhib[0]) * hz
         dphi_inhib = np.clip(dphi_inhib, -2 * np.pi, 2 * np.pi)
         nans, dx = nan_helper(dphi_inhib)
         dphi_inhib[nans] = np.interp(dx(nans), dx(~nans), dphi_inhib[~nans])
@@ -1048,7 +1052,6 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[1].axis("off")
         Predictions.append(vis_resp)
         nonlinParams.append(nonlinparams)
-        rhophiparams.append(ori_selectivity)
         RhoPhiParams.append(rhophiparams)
 
         Metrics.append(a)

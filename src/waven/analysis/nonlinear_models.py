@@ -1604,8 +1604,6 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
     
     fittedParameters, pcov, res = fitnonlin(X1, y_train, func)
 
-    fittedParameters, pcov, res = fitnonlin(X1, y_train, func)
-
     res1 = res  # + (w_pc*pcs_test[:, 0])
     res2 = np.mean(res1.reshape(len(train_idx), dt1), axis=0)
     ev = explained_variance_score(np.mean(y_train.reshape(len(train_idx), dt1), axis=0), res2, multioutput='uniform_average')
@@ -1622,19 +1620,13 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
     res = func(X1, *fittedParameters)
 
     res1 = res  # + (w_pc*pcs_test[:, 0])
+    # The held-out prediction must be produced by the nonlinearity fitted on
+    # the training trials. The old single-wavelet path replaced it with a raw
+    # feature trace, so its reported model metrics did not describe the fitted
+    # model. With a single-wavelet model the second feature is already zeroed
+    # by the caller; the same fitted prediction is valid in both modes.
     w = 0
-    if double_wavelet_model:
-        res2 = np.mean(res1.reshape(len(test_idx), dt1), axis=0)
-    else:
-        res21=unrectified
-        cc1 = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res21)[0,1]
-        res22 = unrectified2
-        cc2 = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res22)[0,1]
-        if cc1>=cc2:
-            res2=unrectified
-        else:
-            w = 1
-            res2=unrectified2
+    res2 = np.mean(res1.reshape(len(test_idx), dt1), axis=0)
     ev = explained_variance_score(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2, multioutput='uniform_average')
     feve = FEVE(y_test.reshape(len(test_idx), dt1), res2)
     cc = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2)

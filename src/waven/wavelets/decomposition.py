@@ -463,12 +463,37 @@ class _ConvolutionRunner(torch.nn.Module):
         return F.conv2d(values, self.weights, padding=self.padding)
 
 
+class _CompileFallbackRunner(torch.nn.Module):
+    """Use a compiled runner when possible, then permanently fall back safely.
+
+    ``torch.compile`` is lazy on several PyTorch releases: construction can
+    succeed even though the first real CUDA call fails due to an unavailable
+    compiler, driver, or unsupported graph. This wrapper retries that first
+    failing chunk eagerly and disables compilation for the rest of the job.
+    """
+
+    def __init__(self, eager_runner, compiled_runner):
+        super().__init__()
+        self.eager_runner = eager_runner
+        self.compiled_runner = compiled_runner
+        self._compiled_active = True
+
+    def forward(self, values):
+        if self._compiled_active:
+            try:
+                return self.compiled_runner(values)
+            except Exception as exc:
+                self._compiled_active = False
+                print(f"torch.compile execution failed; using eager convolution: {exc}")
+        return self.eager_runner(values)
+
+
 def _maybe_compile_convolution(runner):
     """Compile a stable convolution runner only when explicitly requested."""
     if not torch_compile_enabled():
         return runner
     try:
-        return torch.compile(runner, mode="reduce-overhead")
+        return _CompileFallbackRunner(runner, torch.compile(runner, mode="reduce-overhead"))
     except Exception as exc:
         print(f"torch.compile setup failed; using eager convolution: {exc}")
         return runner

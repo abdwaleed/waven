@@ -91,6 +91,7 @@ nav:
       - Wavelets: reference/wavelets.md
       - Stimulus: reference/stimulus.md
       - Analysis: reference/analysis.md
+      - Model Input, Output, and Scientific Contracts: reference/model-input-output-contracts.md
       - GUI: reference/gui.md
       - Storage: reference/storage.md
       - Runtime: reference/runtime.md

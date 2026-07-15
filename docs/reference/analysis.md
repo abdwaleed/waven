@@ -27,9 +27,12 @@ The Individual Neuron tab deliberately keeps these measurements separate. Its
 RF map, orientation, size, and frequency panels use the selected correlation
 tensor features. Azimuth and elevation use the established signed SVD
 projection of the selected RF map, which summarizes the spatial pattern without
-allowing one noisy feature cell to define a profile. Its orientation title
-reports OSI/gOSI from the separate firing-rate calculation. This avoids falsely
-presenting a correlation coefficient as a firing rate.
+allowing one noisy feature cell to define a profile. The correlation and
+firing-rate orientation panels are adjacent, use the same 0–180 degree axis,
+and display the same six-decimal firing-rate OSI/gOSI values. Each repeats the
+0-degree display point at 180 degrees to show orientation periodicity; that
+copy is never included in a metric calculation. This avoids falsely presenting
+a correlation coefficient as a firing rate.
 
 ## Which module to read
 

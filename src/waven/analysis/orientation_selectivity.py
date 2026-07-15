@@ -20,6 +20,32 @@ def _clean_rates(rates):
     return rates
 
 
+def close_orientation_curve(angles_deg, values):
+    """Return a consistently ordered orientation curve closed at 180 degrees.
+
+    Orientation is axial: 0 and 180 degrees denote the same physical axis.
+    Plotting an extra copy of the first value at the first angle plus 180 makes
+    that periodicity visible without including the duplicated value in OSI or
+    gOSI calculations.
+    """
+    angles = np.asarray(angles_deg, dtype=float).reshape(-1) % 180.0
+    curve = np.asarray(values, dtype=float).reshape(-1)
+    if angles.size != curve.size:
+        raise ValueError("angles_deg and values must have the same length")
+    if angles.size == 0:
+        return angles, curve
+    order = np.argsort(angles, kind="stable")
+    angles = angles[order]
+    curve = curve[order]
+    # A caller may already provide a periodic endpoint. Retain one copy only.
+    if angles.size > 1 and np.isclose(angles[0], angles[-1]):
+        angles = angles[:-1]
+        curve = curve[:-1]
+    if angles.size == 0:
+        return angles, curve
+    return np.append(angles, angles[0] + 180.0), np.append(curve, curve[0])
+
+
 def calculate_osi(angles_deg, rates):
     """Calculate the orientation selectivity index using pref/orth responses."""
     angles_deg = np.asarray(angles_deg, dtype=float) % 180

@@ -51,12 +51,14 @@ only when diagnosing a machine-specific driver or filesystem issue.
 | `WAVEN_TIME_MAJOR_CONV` | on | For direct coarse-RF power, reads/uploads each frame chunk once before applying its bounded filter groups. Its Zarr output is chunked to the frame/filter write tiles, avoiding repeated compression of the same output chunk; it falls back to group-major if the combined kernel banks exceed a safe live-memory budget. |
 | `WAVEN_RF_GPU` | on, if CUDA is present | Accumulates Coarse RF feature/response cross-products on GPU when the current tile fits. Each tile falls back to CPU on allocation failure. |
 | `WAVEN_MULTI_GPU` | off | Enables PyTorch batch-parallel convolution only across compatible CUDA GPUs. Cards with different compute capability, or less than 75% of the primary card's estimated throughput or VRAM, are excluded automatically. |
-| `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile` runner for long, fixed-shape convolution jobs. The first chunks are slower while the runner compiles; disable after a compiler/driver issue. |
+| `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile` runner for long, fixed-shape convolution jobs. The first chunks are slower while the runner compiles; if setup or a compiled call fails, Waven retries eagerly and keeps the rest of the action eager. |
 | `WAVEN_AMP` | off | Explicit Tensor Core float16 autocast for convolution only. It changes convolution round-off, so use only after validating a representative run against default precision. |
 
 Multi-GPU is deliberately opt-in: it distributes independent frame batches,
 then gathers them in original order. It does not change filter settings or
 array layout, and a setup failure automatically continues on the primary GPU.
+Some PyTorch/CUDA builds do not expose a GPU `clock_rate`; Waven handles that
+case with a conservative throughput proxy instead of failing the switch.
 GPU RF acceleration also preserves the CPU algorithm's sufficient statistics;
 only the floating-point matrix multiply location changes.
 

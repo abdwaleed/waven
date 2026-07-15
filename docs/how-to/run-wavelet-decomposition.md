@@ -79,7 +79,10 @@ estimated convolution throughput and VRAM, preventing a slower card from
 holding up every synchronous DataParallel batch. The same choice is saved with
 the current GUI inputs (and remains available as `WAVEN_MULTI_GPU=1` for
 unattended launches). If the cards are not a suitable group, the terminal
-reports why and the action continues on the primary GPU.
+reports why and the action continues on the primary GPU. The optional
+compiled-convolution setting also falls back to eager convolution if compiler
+setup or the first compiled batch fails, so a driver/compiler mismatch does not
+abort the decomposition.
 
 ## Disk intuition
 

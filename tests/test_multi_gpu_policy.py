@@ -1,5 +1,8 @@
 """Tests for the conservative synchronous multi-GPU selection policy."""
 
+from types import SimpleNamespace
+
+from waven.runtime import performance
 from waven.runtime.performance import select_compatible_multi_gpu_ids
 
 
@@ -47,3 +50,23 @@ def test_large_throughput_gap_is_not_combined_even_with_matching_architecture():
 
     assert ids == (0,)
     assert "throughput" in rejected[0]
+
+
+def test_gpu_descriptor_accepts_property_objects_without_clock_rate(monkeypatch):
+    properties = SimpleNamespace(
+        name="Clockless test GPU",
+        major=8,
+        minor=6,
+        total_memory=8 * 1024**3,
+        multi_processor_count=20,
+    )
+    monkeypatch.setattr(
+        performance.torch.cuda,
+        "get_device_properties",
+        lambda _device_id: properties,
+    )
+
+    descriptor = performance._gpu_descriptor(0)
+
+    assert descriptor["throughput_score"] == 20
+    assert descriptor["capability"] == (8, 6)

@@ -184,7 +184,7 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     """
     global _RF_IMPORTS_READY
     global compute_skewness_neurons, PearsonCorrelationPinkNoise
-    global repetability_trial3, firing_rate_orientation_tuning
+    global repetability_trial3, firing_rate_orientation_tuning, close_orientation_curve
     if _RF_IMPORTS_READY:
         return
     _ensure_plot_imports()
@@ -194,12 +194,14 @@ def _ensure_rf_imports(label="coarse RF analysis"):
         repetability_trial3 as _repetability_trial3,
     )
     from ..analysis.orientation_selectivity import (
+        close_orientation_curve as _close_orientation_curve,
         firing_rate_orientation_tuning as _firing_rate_orientation_tuning,
     )
 
     compute_skewness_neurons = _compute_skewness_neurons
     PearsonCorrelationPinkNoise = _PearsonCorrelationPinkNoise
     repetability_trial3 = _repetability_trial3
+    close_orientation_curve = _close_orientation_curve
     firing_rate_orientation_tuning = _firing_rate_orientation_tuning
     _RF_IMPORTS_READY = True
 
@@ -4122,17 +4124,24 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             fig2, ax2 = plt.subplots(figsize=(10, 2.5), constrained_layout=True)
             ax2.set_title("Trial-averaged Spike Train")
 
-            fig3 = plt.figure(figsize=(8, 13), constrained_layout=True)
-            gs = fig3.add_gridspec(5, 2)
+            # Keep the two orientation plots adjacent and identically sized.
+            # This makes their distinct units (correlation versus firing rate)
+            # comparable without implying a different x axis.
+            fig3 = plt.figure(figsize=(10, 11), constrained_layout=True)
+            gs = fig3.add_gridspec(4, 2)
             ax3_0 = fig3.add_subplot(gs[0, :])
             ax3_1 = fig3.add_subplot(gs[1, 0])
             ax3_2 = fig3.add_subplot(gs[1, 1])
             ax3_3 = fig3.add_subplot(gs[2, 0])
             ax3_4 = fig3.add_subplot(gs[2, 1])
-            ax3_5 = fig3.add_subplot(gs[3, :])
-            ax3_6 = fig3.add_subplot(gs[4, :])
+            ax3_5 = fig3.add_subplot(gs[3, 0])
+            ax3_6 = fig3.add_subplot(gs[3, 1])
             ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4, ax3_5, ax3_6]
-            fig_sta = plt.figure(figsize=(10, 7), constrained_layout=True)
+            # Explicit layout and a borderless figure patch avoid the stray
+            # top-left frame artifact that can remain after repeated Tk redraws.
+            fig_sta = plt.figure(figsize=(10, 7), constrained_layout=False)
+            fig_sta.patch.set_edgecolor("none")
+            fig_sta.patch.set_linewidth(0)
             psth_sta_cache = {}
 
             def _psth_sta_for_neuron(neuron_id, spike_train):
@@ -4297,7 +4306,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     feature_tuning = np.asarray(
                         rfs_gabor[0][neuron_id, best_x, best_y, :, :, best_frequency], dtype=float
                     )
-                    ori_tun = np.append(feature_tuning[:, best_sigma], feature_tuning[0, best_sigma])
+                    correlation_orientation_tuning = feature_tuning[:, best_sigma]
                     s_tuning = feature_tuning[best_orientation, :]
                     f_tuning = np.asarray(
                         rfs_gabor[0][neuron_id, best_x, best_y, best_orientation, best_sigma, :], dtype=float
@@ -4310,12 +4319,34 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         size_features = w_c_downsampled[:n_frames, best_x, best_y, best_orientation, :]
                     ori_ci, ori_ci_trials = correlation_tuning_ci(orientation_features, trial_spikes[:, :n_frames])
                     size_ci, size_ci_trials = correlation_tuning_ci(size_features, trial_spikes[:, :n_frames])
-                    rate_ori_tun = np.asarray(
+                    rate_orientation_tuning = np.asarray(
                         analysis_state["orientation_selectivity"]["orientation_tuning"][neuron_id],
                         dtype=float,
                     )
                     neuron_osi = float(analysis_state["orientation_selectivity"]["osi"][neuron_id])
                     neuron_gosi = float(analysis_state["orientation_selectivity"]["gosi"][neuron_id])
+                    base_orientation_angles = np.asarray(
+                        analysis_state["orientation_selectivity"].get(
+                            "angles_deg", np.linspace(0, 180, correlation_orientation_tuning.size, endpoint=False)
+                        ),
+                        dtype=float,
+                    )
+                    if base_orientation_angles.size != correlation_orientation_tuning.size:
+                        base_orientation_angles = np.linspace(
+                            0, 180, correlation_orientation_tuning.size, endpoint=False
+                        )
+                    orientation_angles, ori_tun = close_orientation_curve(
+                        base_orientation_angles, correlation_orientation_tuning
+                    )
+                    _ci_angles, ori_ci_plot = (
+                        close_orientation_curve(base_orientation_angles, ori_ci)
+                        if ori_ci is not None
+                        else (orientation_angles, None)
+                    )
+                    rate_angles, rate_ori_tun = close_orientation_curve(
+                        base_orientation_angles, rate_orientation_tuning
+                    )
+                    selectivity_text = f"OSI {neuron_osi:.6f}, gOSI {neuron_gosi:.6f}"
                     for extra_ax in [axis for axis in list(fig3.axes) if axis not in ax3]:
                         extra_ax.remove()
                     for ax in ax3: ax.clear()
@@ -4353,48 +4384,43 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     ax3[2].set_xlabel("Azimuth (deg)")
                     ax3[2].set_ylabel("RF correlation (r)")
                     ax3[3].errorbar(
-                        np.arange(len(ori_tun)), ori_tun, yerr=None if ori_ci is None else np.append(ori_ci, ori_ci[0]),
+                        orientation_angles, ori_tun, yerr=ori_ci_plot,
                         fmt='o-', c='#2563EB', ecolor='#60A5FA', capsize=3,
                         label=f'Correlation (95% CI; n={ori_ci_trials})' if ori_ci is not None else 'Correlation',
                     )
-                    ax3[3].set_title(f'Orientation correlation (firing-rate OSI {neuron_osi:.6f}, gOSI {neuron_gosi:.6f})')
-                    n_ori = rfs_gabor[0].shape[3]
-                    ax3[3].set_xticks(
-                        [0, max(1, n_ori // 2), max(2, n_ori - 1)],
-                        [0, 90, 180],
-                    )
+                    ax3[3].set_title(f'Orientation correlation ({selectivity_text}; firing-rate metric)')
+                    ax3[3].set_xlim(0, 180)
+                    ax3[3].set_xticks([0, 90, 180])
                     ax3[3].set_xlabel("Orientation (deg)")
                     ax3[3].set_ylabel("RF correlation (r)")
                     ax3[3].legend(fontsize=8)
-                    ax3[4].errorbar(
+                    ax3[5].errorbar(
                         np.arange(len(s_tuning)), s_tuning, yerr=size_ci,
                         fmt='o-', c='#7C3AED', ecolor='#C4B5FD', capsize=3,
                         label=f'Correlation (95% CI; n={size_ci_trials})' if size_ci is not None else 'Correlation',
                     )
-                    ax3[4].set_title('Size (deg)')
-                    ax3[4].set_xticks([0, len(sigmas) - 1], [sigmas_deg[0], sigmas_deg[-1]])
-                    ax3[4].set_xlabel("Size (deg)")
-                    ax3[4].set_ylabel("RF correlation (r)")
-                    ax3[4].legend(fontsize=8)
+                    ax3[5].set_title('Size (deg)')
+                    ax3[5].set_xticks([0, len(sigmas) - 1], [sigmas_deg[0], sigmas_deg[-1]])
+                    ax3[5].set_xlabel("Size (deg)")
+                    ax3[5].set_ylabel("RF correlation (r)")
+                    ax3[5].legend(fontsize=8)
                     has_frequency_axis = w_c_downsampled.ndim == 6 and rf_nf > 1 and len(f_tuning) > 1
                     if has_frequency_axis:
-                        ax3[5].set_visible(True)
-                        ax3[5].plot(f_tuning, 'o-', c='k')
-                        ax3[5].set_title('Spatial Frequency')
-                        ax3[5].set_xticks(range(len(rf_frequencies)), [round(f, 3) for f in rf_frequencies])
-                        ax3[5].set_xlabel("Spatial frequency (cycles/deg)")
-                        ax3[5].set_ylabel("RF correlation (r)")
+                        ax3[6].set_visible(True)
+                        ax3[6].plot(f_tuning, 'o-', c='k')
+                        ax3[6].set_title('Spatial Frequency')
+                        ax3[6].set_xticks(range(len(rf_frequencies)), [round(f, 3) for f in rf_frequencies])
+                        ax3[6].set_xlabel("Spatial frequency (cycles/deg)")
+                        ax3[6].set_ylabel("RF correlation (r)")
                     else:
-                        ax3[5].set_visible(False)
-                    rate_angles = np.asarray(
-                        analysis_state["orientation_selectivity"].get("angles_deg", np.arange(rate_ori_tun.size)),
-                        dtype=float,
-                    )
+                        ax3[6].set_visible(False)
                     rate_sem = analysis_state["orientation_selectivity"].get("orientation_sem")
                     if rate_sem is not None:
-                        rate_sem = np.asarray(rate_sem, dtype=float)[neuron_id]
-                    ax3[6].set_visible(True)
-                    ax3[6].errorbar(
+                        rate_sem = close_orientation_curve(
+                            base_orientation_angles, np.asarray(rate_sem, dtype=float)[neuron_id]
+                        )[1]
+                    ax3[4].set_visible(True)
+                    ax3[4].errorbar(
                         rate_angles,
                         rate_ori_tun,
                         yerr=rate_sem,
@@ -4404,11 +4430,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         capsize=3,
                         label='Firing rate (mean ± SEM)' if rate_sem is not None else 'Firing rate',
                     )
-                    ax3[6].set_title(f'Orientation tuning from firing rate (OSI {neuron_osi:.3f}, gOSI {neuron_gosi:.3f})')
-                    ax3[6].set_xlabel("Orientation (deg)")
-                    ax3[6].set_ylabel("Firing rate (Hz)" if workflow == WORKFLOW_EPHYS else "Activity (a.u.)")
-                    ax3[6].set_xticks(rate_angles)
-                    ax3[6].legend(fontsize=8)
+                    ax3[4].set_title(f'Orientation tuning from firing rate ({selectivity_text})')
+                    ax3[4].set_xlim(0, 180)
+                    ax3[4].set_xlabel("Orientation (deg)")
+                    ax3[4].set_ylabel("Firing rate (Hz)" if workflow == WORKFLOW_EPHYS else "Activity (a.u.)")
+                    ax3[4].set_xticks([0, 90, 180])
+                    ax3[4].legend(fontsize=8)
                     _set_figure_export_payload(
                         fig3,
                         {
@@ -4418,7 +4445,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "azimuth_correlation_tuning": azimuth_tuning,
                             "elevation_correlation_tuning": elevation_tuning[::-1],
                             "orientation_correlation_tuning": ori_tun,
-                            "orientation_correlation_ci_95": ori_ci,
+                            "orientation_correlation_ci_95": ori_ci_plot,
                             "orientation_firing_rate_tuning": rate_ori_tun,
                             "osi": neuron_osi,
                             "gosi": neuron_gosi,
@@ -4435,6 +4462,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         canvas3.draw()
 
                     fig_sta.clear()
+                    fig_sta.set_constrained_layout(False)
+                    fig_sta.patch.set_edgecolor("none")
+                    fig_sta.patch.set_linewidth(0)
                     try:
                         sta_result = sta_result or _psth_sta_for_neuron(neuron_id, spike_train)
                     except ValueError as exc:
@@ -4450,14 +4480,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         n_lags = int(sta_result.maps.shape[0])
                         n_columns = min(4, n_lags)
                         n_rows = int(np.ceil(n_lags / n_columns))
-                        axes_sta = np.asarray(fig_sta.subplots(n_rows, n_columns)).reshape(-1)
+                        axes_sta = fig_sta.subplots(n_rows, n_columns, squeeze=False).ravel()
+                        fig_sta.subplots_adjust(
+                            left=0.07, right=0.985, bottom=0.08, top=0.88,
+                            wspace=0.20, hspace=0.45,
+                        )
                         sta_min = float(np.min(sta_result.maps))
                         sta_max = float(np.max(sta_result.maps))
                         if sta_max <= sta_min:
                             sta_max = sta_min + 1e-6
                         for lag_index, axis in enumerate(axes_sta):
                             if lag_index >= n_lags:
-                                axis.set_visible(False)
+                                axis.remove()
                                 continue
                             lag_ms = float(sta_result.lag_ms[lag_index])
                             axis.imshow(
@@ -4470,7 +4504,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             axis.set_ylabel("Stimulus y (px)")
                         fig_sta.suptitle(
                             f"PSTH-weighted STA — neuron {neuron_id}; peak at "
-                            f"{sta_result.peak_lag_ms:.1f} ms (variance {sta_result.variances[sta_result.peak_lag_index]:.4g})"
+                            f"{sta_result.peak_lag_ms:.1f} ms (variance {sta_result.variances[sta_result.peak_lag_index]:.4g})",
+                            y=0.97,
                         )
                         _set_figure_export_payload(
                             fig_sta,
@@ -5895,7 +5930,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ),
         (
             "torch_compile", "WAVEN_TORCH_COMPILE", False, "Compile stable convolution kernels (experimental)",
-            "Uses torch.compile after a one-time warm-up. Enable for repeated long convolution jobs; disable if a driver/compiler error occurs.",
+            "Uses torch.compile after a one-time warm-up. If setup or execution fails, this action retries eagerly and remains safe.",
         ),
         (
             "amp", "WAVEN_AMP", False, "Tensor Core convolution (fast precision)",
