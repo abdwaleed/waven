@@ -1,11 +1,22 @@
 # Export results
 
-The GUI has four export buttons:
+The Export tab has two clearly separated sections.
 
-- **Export All Displayed Results**
-- **Export All Neurons Tab**
-- **Export Individual Neuron Tab**
-- **Export All Individual Neurons**
+**Section A — Current Display** exports the graphs that are currently visible:
+
+- **Export Current GUI: All + Individual**;
+- **Export Current Display: All-Neuron Graphs**;
+- **Export Current Display: Individual-Neuron Graphs**.
+
+Tick the graph-type checkboxes above each action to control the contents. The
+current all-neuron and individual-neuron selections are independent, so a
+combined export includes only the checked graph types from each view.
+
+**Section B — Every Analyzed Neuron** has **Export Selected Single-Graph Files
+for Every Neuron**. Its checkboxes select spike trains, RF maps, elevation,
+azimuth, orientation/size/frequency tuning, and PSTH-weighted STA lag maps. It creates one
+folder per graph: a multi-panel tuning dashboard is never stored as a single
+graph-data bundle.
 
 Each exported graph can include:
 
@@ -16,6 +27,6 @@ Each exported graph can include:
 - JSON manifest describing files, axes, and array keys.
 
 Use exports when you need a figure and the numerical data that produced it.
-The selected array format does not alter PNG, SVG, JSON, or pickle outputs. The
-all-individual-neurons export creates one directory per neuron and can therefore
-be large for recordings with many cells or units.
+The selected array format does not alter PNG, SVG, JSON, or pickle outputs.
+The all-neuron single-graph export creates a directory for every selected graph
+of every neuron and can therefore be large for recordings with many cells.

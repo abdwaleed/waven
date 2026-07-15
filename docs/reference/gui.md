@@ -34,9 +34,12 @@ keeps their reuse disk-backed. The Wavelets tab identifies their format and
 size before a run and prints the exact reused path.
 
 The Export tab always preserves PNG/SVG and metadata formats. Its array selector
-chooses NPY, Zarr, or both for reusable numerical payloads. **Export All
-Individual Neurons** renders the selected-neuron spike and tuning figures for
-every loaded cell or unit.
+chooses NPY, Zarr, or both for reusable numerical payloads. **Section A —
+Current Display** has independent all-neuron and individual-neuron graph-type
+checkboxes, used by the combined and scope-specific current-display actions.
+**Section B — Every Analyzed Neuron** exports only the selected graph axes for
+every cell or unit: its spike train, RF map, profiles, and tuning curves are
+separate folders with separate data bundles rather than a multi-panel figure.
 
 ## Conditional inputs
 
@@ -74,7 +77,6 @@ Current GUI Inputs / Parameters** under `gui.performance`.
 | Use all available GPUs | `WAVEN_MULTI_GPU` | off | Convolution wavelets only, with two or more CUDA GPUs |
 | Compile stable convolution kernels | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile`; useful for repeated long fixed-shape jobs after its warm-up cost |
 | Tensor Core convolution | `WAVEN_AMP` | off | CUDA float16 autocast for convolution only; retain default precision for scientific-equivalence runs |
-| FFT STA actual maps | `WAVEN_STA_FFT` | off | Experimental bounded CUDA FFT backend for in-memory, many-lag STA runs; shuffle testing remains exact batched GEMM |
 
 The hardware status line reports the detected CUDA count and whether multi-GPU
 can be effective with the selected backend. Choosing multi-GPU on a one-GPU or
@@ -146,31 +148,13 @@ beside it. The `Create as` selector is displayed only for fresh processing and
 controls whether the button writes `spikes.npy`/`pos.npy` or
 `spikes.zarr`/`pos.zarr`.
 
-For an **ephys** session using the **convolution** backend, neural alignment
-writes a sibling raw `spike_counts` cache without changing the standard
-firing-rate `spikes` cache. The **Neural & RF Analysis** panel then offers
-**Run Spike-Triggered Averaging (STA)**, which streams the prepared stimulus
-cache through lagged STA and a circular shuffle test. STA has its own **STA
-Neuron Index** selector, separate from the normal coarse-RF Neuron ID. The
-**STA Receptive Fields** results tab contains one nested tab
-per lag and only fits its phase-sensitive Gabor model after the image passes
-the selected 3–5 SD shuffle threshold. See [Spike-Triggered
-Averaging](spike-triggered-averaging.md) for the method and artifacts.
-
-The STA card also has a **STA cache format** radio selector. **NPY** is the
-default for simple portable arrays and direct memory mapping; **Zarr
-(compressed)** writes chunked compressed result arrays to reduce disk use. The
-same choice is used by the explicit STA data export and persists in saved GUI
-state.
-
-After STA finishes, the GUI asks for a valid STA Neuron Index instead of
-plotting an arbitrary cell (a valid index already typed is used directly). The
-normal selected-neuron RF figure retains correlation tuning and adds a separate
-orientation curve in firing-rate units. Export includes **Export All STA Data
-and Lag Graphs** and **Export Every Individual Graph Type for Every Neuron**;
-the latter includes the firing-rate orientation graph and, when available, STA
-lag plots.
-
+When an individual neuron is inspected after **Run Coarse RF Analysis**, the
+same tab also shows its **PSTH-weighted Spike-Triggered Averages (0–300 ms)**.
+The analysis uses the trial-averaged, frame-aligned firing rate together with
+the prepared coarse stimulus movie; it computes one standard STA map per valid
+lag and marks the map with the greatest pixel variance. See
+[PSTH-weighted Spike-Triggered Averaging](psth-spike-triggered-averaging.md)
+for the method and exported arrays.
 The `Stimulus & Metadata` section controls movie downsampling before neural
 alignment and Gabor projection. Its only spatial control is a percentage slider that scales
 dimensions read from the movie:

@@ -43,7 +43,7 @@ Gabor-library arrays use feature order `(x, y)`.
 | [Storage](storage.md) | `.npy`/Zarr loading and conversion helpers |
 | [Runtime](runtime.md) | chunk sizes, RAM checks, cancellation, keep-awake behavior |
 | [Time Alignment](time-alignment.md) | conversion from acquisition timing to frame-aligned spikes |
-| [Spike-Triggered Averaging](spike-triggered-averaging.md) | ephys raw-count STAs, shuffle screening, and phase-sensitive Gabor fits |
+| [PSTH-weighted Spike-Triggered Averaging](psth-spike-triggered-averaging.md) | standard Coarse RF STA maps, lag window, and exports |
 | [Neural Data](neural-data.md) | Suite2p/ephys loading utilities |
 | [GUI](gui.md) | interactive app entry points and long-running task plumbing |
 | [Compatibility Modules](compatibility.md) | historical import paths retained for older scripts |

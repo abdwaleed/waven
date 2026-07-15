@@ -85,20 +85,6 @@ def find_neural_cache_pair(
     return None
 
 
-def find_spike_counts_cache(directory: Path, preferred_suffix: Optional[str] = None) -> Optional[Path]:
-    """Find the raw frame-binned ephys count cache used by STA.
-
-    ``spikes`` remains the established firing-rate cache.  Counts are saved
-    separately because a value of three must mean three spikes for STA, rather
-    than three spikes per second.
-    """
-    directory = Path(directory)
-    for path in _candidate_paths(directory, "spike_counts", preferred_suffix):
-        if path.exists():
-            return path
-    return None
-
-
 def load_neural_cache_pair(
     directory: Path,
     spks_path: Optional[Path] = None,
@@ -121,23 +107,6 @@ def load_neural_cache_pair(
         spikes = loader(str(spikes_path), mmap_mode=mmap_mode)
         neuron_pos = loader(str(pos_path), mmap_mode=mmap_mode)
     return spikes, neuron_pos, spikes_path, pos_path
-
-
-def load_spike_counts_cache(
-    directory: Path,
-    mmap_mode: Optional[str] = "r",
-) -> Tuple[np.ndarray, Path]:
-    """Load ephys frame-binned spike counts from NPY or Zarr."""
-    path = find_spike_counts_cache(directory)
-    if path is None:
-        raise FileNotFoundError(
-            "Could not find spike_counts.npy/spike_counts.zarr for STA in "
-            f"{Path(directory)}. Recreate the ephys neural cache from raw data."
-        )
-    loader = load_array_with_memory_fallback if mmap_mode is None else load_array
-    if mmap_mode is None:
-        return loader(str(path)), path
-    return loader(str(path), mmap_mode=mmap_mode), path
 
 
 def _save_zarr_array(path: Path, array: np.ndarray) -> None:
@@ -205,23 +174,6 @@ def save_aligned_neural_cache(
     return result
 
 
-def save_spike_counts_cache(
-    spike_counts: np.ndarray,
-    save_dir: Optional[Path],
-    output_format: str = "npy",
-) -> Path:
-    """Persist raw ephys counts without changing the firing-rate cache."""
-    fmt = normalize_neural_cache_format(output_format)
-    output_dir = Path(".") if save_dir is None else Path(save_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = neural_cache_path(output_dir, "spike_counts", fmt)
-    if fmt == "npy":
-        np.save(path, np.asarray(spike_counts))
-    else:
-        _save_zarr_array(path, np.asarray(spike_counts))
-    return path
-
-
 def load_unit_ids(directory: Path, n_neurons: Optional[int] = None) -> Optional[np.ndarray]:
     """Load preserved acquisition unit identifiers from a neural-cache folder.
 
@@ -247,12 +199,9 @@ def load_unit_ids(directory: Path, n_neurons: Optional[int] = None) -> Optional[
 __all__ = [
     "SUPPORTED_NEURAL_CACHE_FORMATS",
     "find_neural_cache_pair",
-    "find_spike_counts_cache",
     "load_neural_cache_pair",
-    "load_spike_counts_cache",
     "load_unit_ids",
     "neural_cache_path",
     "normalize_neural_cache_format",
     "save_aligned_neural_cache",
-    "save_spike_counts_cache",
 ]

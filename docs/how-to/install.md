@@ -82,7 +82,7 @@ storage capacity remains a user responsibility.
 
 ## CPU-only systems
 
-Waven's current convolution, STA, and Coarse RF implementations automatically
+Waven's current convolution and Coarse RF implementations automatically
 fall back to CPU when CUDA is unavailable. On a system without an NVIDIA GPU,
 install the CPU PyTorch wheel rather than the CUDA requirements:
 

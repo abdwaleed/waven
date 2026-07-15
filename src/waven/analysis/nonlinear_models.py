@@ -4,44 +4,6 @@ from .receptive_fields import *
 from .trial_stats import circular_variance
 from ..runtime.performance import cpu_threadpool_scope, cpu_worker_count, resolve_compute_device
 
-def compute_sta(a, b, ran, nx=None, ny=None, n_orientations=None):
-    """Function for compute sta.
-
-    Args:
-        a: Input value for this operation.
-        b: Input value for this operation.
-        ran: Input value for this operation.
-        nx: Input value for this operation.
-        ny: Input value for this operation.
-        n_orientations: Input value for this operation.
-
-    Returns:
-        Result produced by the operation.
-    """
-    if nx is None or ny is None or n_orientations is None:
-        feature_count = b.shape[1] // ran if b.shape[1] % ran else b.shape[1]
-        total = b.shape[1]
-        if nx is None and ny is None and n_orientations is None:
-            nx, ny = coarse_grid_dimensions(int(np.sqrt(total)), int(np.sqrt(total)))
-            n_orientations = max(1, total // (nx * ny))
-    device = resolve_compute_device(prefer_gpu=True)
-    with cpu_threadpool_scope(), torch.no_grad():
-        a_t = torch.as_tensor(a, device=device, dtype=torch.float32)
-        b_t = torch.as_tensor(b, device=device, dtype=torch.float32)
-        
-        a_sub = a_t[ran:].reshape(1, -1)
-        a_sum = torch.sum(a_sub)
-        
-        # Pre-allocate output array in CPU RAM instead of list comprehension
-        c = np.empty((ran, nx, ny, n_orientations), dtype=np.float32)
-        
-        for i, dt1 in enumerate(range(ran)[::-1]):
-            b_sub = b_t[ran - dt1 : b_t.shape[0] - dt1].reshape(b_t.shape[0] - ran, -1)
-            val = torch.sum(a_sub @ b_sub, dim=0) / a_sum
-            c[i] = val.cpu().numpy().reshape((nx, ny, n_orientations))
-            
-    return c
-
 
 def spikeTrig(spk, w_i, w_r, w_c, ran):
     """Function for spikeTrig.

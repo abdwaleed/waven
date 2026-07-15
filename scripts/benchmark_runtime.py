@@ -9,7 +9,6 @@ repository root after installing the project:
 from __future__ import annotations
 
 import argparse
-import os
 import time
 
 import numpy as np
@@ -17,7 +16,7 @@ import psutil
 import torch
 
 from waven.analysis.rf_correlation import streaming_cross_correlation
-from waven.analysis.sta import compute_sta
+from waven.analysis.psth_sta import compute_psth_sta
 
 
 def measure(label, callback):
@@ -47,7 +46,8 @@ def main():
     movie = rng.normal(size=(args.frames, args.height, args.width)).astype(np.float32)
     response = rng.normal(size=(args.frames, args.neurons)).astype(np.float32)
     stimulus = rng.random(size=(args.frames, 4, 3, 4, 2), dtype=np.float32)
-    counts = rng.poisson(0.2, size=(2, args.frames, args.neurons)).astype(np.int32)
+    psth = rng.poisson(0.2, size=args.frames).astype(np.float32)
+    psth[0] = max(psth[0], 1.0)
 
     old_rf = os.environ.get("WAVEN_RF_GPU")
     for use_gpu in (False, True):
@@ -60,16 +60,10 @@ def main():
     else:
         os.environ["WAVEN_RF_GPU"] = old_rf
 
-    old_fft = os.environ.get("WAVEN_STA_FFT")
-    os.environ["WAVEN_STA_FFT"] = "0"
-    measure("STA batched GEMM", lambda: compute_sta(movie, counts, 1000.0, max_lag_ms=8, n_shuffles=8))
-    if torch.cuda.is_available():
-        os.environ["WAVEN_STA_FFT"] = "1"
-        measure("STA FFT actual maps + batched null", lambda: compute_sta(movie, counts, 1000.0, max_lag_ms=8, n_shuffles=8))
-    if old_fft is None:
-        os.environ.pop("WAVEN_STA_FFT", None)
-    else:
-        os.environ["WAVEN_STA_FFT"] = old_fft
+    measure(
+        "PSTH-weighted STA (300 ms maximum)",
+        lambda: compute_psth_sta(movie, psth, fps=30.0, max_lag=9),
+    )
 
 
 if __name__ == "__main__":

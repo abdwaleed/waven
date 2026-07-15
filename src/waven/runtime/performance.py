@@ -98,21 +98,6 @@ def autotuned_frame_chunk_size(num_frames: int, nx: int, ny: int, n_channels: in
     return max(8, min(num_frames, 512, budget // max(1, pixels * 4 * 4)))
 
 
-def sta_shuffle_batch_size(pixels: int, n_neurons: int, n_shuffles: int, device: str) -> int:
-    """Bound concurrent STA shuffle columns by live RAM/VRAM.
-
-    One batch contains the response index matrix, the matrix-product result,
-    and a float64 accumulator.  Batching makes each movie pass serve several
-    circular-shuffle draws without retaining the complete shuffle cube.
-    """
-    per_shuffle = max(1, int(pixels) * int(n_neurons) * 4 * 4)
-    if str(device).startswith("cuda"):
-        budget = int(gpu_available_vram_bytes() * 0.12)
-    else:
-        budget = int(available_ram_bytes() * 0.05)
-    return max(1, min(int(n_shuffles), 16, budget // per_shuffle))
-
-
 def get_gpu_count() -> int:
     """Return the total number of CUDA devices available on the system."""
     if not torch.cuda.is_available():
@@ -200,8 +185,8 @@ def amp_enabled() -> bool:
 def convolution_precision_scope(device: str):
     """Return the safe default or explicit CUDA autocast context.
 
-    Mixed precision is deliberately not applied to correlation/STA statistics:
-    those stages preserve their established float32/float64 numerical paths.
+    Mixed precision is deliberately not applied to Coarse RF correlation:
+    that stage preserves its established float32/float64 numerical paths.
     """
     if str(device).startswith("cuda") and amp_enabled():
         return torch.autocast(device_type="cuda", dtype=torch.float16)

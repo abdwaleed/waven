@@ -43,6 +43,7 @@ from ..config import (
     parse_literal,
 )
 import numpy as np
+from ..analysis.psth_sta import DEFAULT_MAX_WINDOW_MS, compute_psth_sta
 
 from ..gui_support import (
     ToolTip,
@@ -54,6 +55,12 @@ from ..gui_support import (
     _parse_data_dir,
     _safe_name,
     _zarr_output_path,
+    ALL_NEURON_GRAPH_OPTIONS,
+    CURRENT_INDIVIDUAL_GRAPH_OPTIONS,
+    SINGLE_NEURON_GRAPH_OPTIONS,
+    classify_export_record,
+    classify_individual_axis,
+    graph_payload,
 )
 from ..runtime.keep_awake import KeepAwake
 from ..runtime.task_control import (
@@ -75,7 +82,6 @@ from ..project_layout import (
 from ..storage.neural_cache import (
     find_neural_cache_pair,
     load_neural_cache_pair,
-    load_spike_counts_cache,
     load_unit_ids,
 )
 from ..stimulus.metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
@@ -84,7 +90,6 @@ _GABOR_IMPORTS_READY = False
 _WAVELET_IMPORTS_READY = False
 _RF_IMPORTS_READY = False
 _MODEL_IMPORTS_READY = False
-_STA_IMPORTS_READY = False
 _PLOT_IMPORTS_READY = False
 plt = None
 FigureCanvasTkAgg = None
@@ -167,25 +172,6 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     video_downsample_chunk_size = _video_downsample_chunk_size
     convert_npy_to_zarr = _convert_npy_to_zarr
     _WAVELET_IMPORTS_READY = True
-
-
-def _ensure_sta_imports(label="spike-triggered averaging"):
-    """Load the ephys-only STA engine only when the option is enabled."""
-    global _STA_IMPORTS_READY, compute_sta, phase_gabor_image, write_sta_result, load_array
-    if _STA_IMPORTS_READY:
-        return
-    from ..analysis.sta import (
-        compute_sta as _compute_sta,
-        phase_gabor_image as _phase_gabor_image,
-        write_sta_result as _write_sta_result,
-    )
-    from ..storage.array_store import load_array as _load_array
-
-    compute_sta = _compute_sta
-    phase_gabor_image = _phase_gabor_image
-    write_sta_result = _write_sta_result
-    load_array = _load_array
-    _STA_IMPORTS_READY = True
 
 
 def _ensure_rf_imports(label="coarse RF analysis"):
@@ -1007,9 +993,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     temp_directories = []
     current_wavelet_dir = [None]
     analysis_state = {}
-    sta_state = {"result": None}
     individual_neuron_renderer = {"draw": None}
-    sta_neuron_renderer = {"draw": None}
     embedded_canvases = []
     figure_export_records = []
     active_recovery_dir = {"path": None}
@@ -1446,8 +1430,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 return "All neurons"
             if parent_container is frame_plot_individual:
                 return "Individual neuron"
-            if parent_container is frame_plot_sta:
-                return "STA Receptive Fields"
         except NameError:
             pass
         return "Plots"
@@ -1829,6 +1811,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 active.append(record)
         return active
 
+    # Filled when the Export tab is constructed. Keeping the Tk variables in
+    # one map lets these helpers be used by the current-display and all-neuron
+    # actions without changing any of the figure/data serialization formats.
+    export_selection_vars = {
+        "current_all": {},
+        "current_individual": {},
+        "all_individual": {},
+    }
+
+    def _selected_export_kinds(selection_name):
+        """Return graph kinds ticked in one Export-tab checkbox group."""
+        variables = export_selection_vars.get(selection_name, {})
+        return {kind for kind, variable in variables.items() if bool(variable.get())}
+
+    def _filter_export_records(records, selection_name):
+        """Keep current-display figures whose graph category is selected."""
+        selected = _selected_export_kinds(selection_name)
+        return [
+            record for record in records
+            if classify_export_record(record.get("tab"), record.get("title")) in selected
+        ]
+
     def _export_figure_record(record, base_dir, index=None):
         """Function for export figure record.
 
@@ -1976,24 +1980,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showerror("Export Failed", f"Could not export {title}: {exc}")
             print(f"Failed to export graph '{title}': {exc}")
 
-    def _export_displayed_results(tab_name=None):
-        """Function for export displayed results.
-
-        Args:
-            tab_name: Input value for this operation.
-        """
-        records = _active_export_records(tab_name=tab_name)
+    def _export_records(records, export_label, dialog_title):
+        """Export a prepared collection of complete current-display figures."""
         if not records:
-            label = tab_name or "displayed"
-            messagebox.showinfo("No Results", f"No {label} results are available to export.")
-            print(f"No {label} figures are available to export.")
+            messagebox.showinfo("No Selected Graphs", "No displayed graphs match the selected export checkboxes.")
+            print("No displayed graphs match the selected export checkboxes.")
             return
-        title = f"Select Folder for {tab_name} Export" if tab_name else "Select Folder for Displayed Result Export"
-        selected_dir = filedialog.askdirectory(title=title)
+        selected_dir = filedialog.askdirectory(title=dialog_title)
         if not selected_dir:
             return
-        export_label = _safe_name(tab_name or "displayed_results")
-        export_root = os.path.join(selected_dir, f"waven_{export_label}_{time.strftime('%Y%m%d_%H%M%S')}")
+        export_root = os.path.join(selected_dir, f"waven_{_safe_name(export_label)}_{time.strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(export_root, exist_ok=True)
         exported = []
         try:
@@ -2004,7 +2000,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             manifest = {
                 "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "count": len(exported),
-                "tab": tab_name,
                 "graphs": exported,
             }
             with open(os.path.join(export_root, "export_manifest.json"), "w", encoding="utf-8") as handle:
@@ -2014,78 +2009,47 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showerror("Export Failed", f"Could not export displayed results: {exc}")
             print(f"Failed to export displayed results: {exc}")
 
-    def export_all_displayed_results():
-        """Function for export all displayed results."""
-        _export_displayed_results()
+    def _export_displayed_results(tab_name=None, selection_name=None):
+        """Function for export displayed results.
+
+        Args:
+            tab_name: Input value for this operation.
+        """
+        records = _active_export_records(tab_name=tab_name)
+        if selection_name is not None:
+            records = _filter_export_records(records, selection_name)
+        if not records:
+            label = tab_name or "displayed"
+            messagebox.showinfo("No Results", f"No {label} results are available to export.")
+            print(f"No {label} figures are available to export.")
+            return
+        title = f"Select Folder for {tab_name} Export" if tab_name else "Select Folder for Displayed Result Export"
+        _export_records(records, tab_name or "displayed_results", title)
+
+    def export_current_gui_results():
+        """Export selected graphs from both current All Neurons and Individual tabs."""
+        records = _filter_export_records(_active_export_records("All neurons"), "current_all")
+        records += _filter_export_records(_active_export_records("Individual neuron"), "current_individual")
+        _export_records(records, "current_gui", "Select Folder for Current GUI Export")
 
     def export_all_neurons_results():
         """Function for export all neurons results."""
-        _export_displayed_results("All neurons")
+        _export_displayed_results("All neurons", "current_all")
 
     def export_individual_neuron_results():
         """Function for export individual neuron results."""
-        _export_displayed_results("Individual neuron")
+        records = _filter_export_records(_active_export_records("Individual neuron"), "current_individual")
+        _export_records(records, "current_individual_neuron", "Select Folder for Current Individual-Neuron Export")
 
-    def export_all_individual_neurons_results():
-        """Render/export one neuron per Tk event-loop turn to keep the GUI responsive."""
-        draw = individual_neuron_renderer.get("draw")
-        n_neurons = np.asarray(analysis_state.get("spks", np.empty((0, 0, 0)))).shape[-1]
-        if draw is None or n_neurons <= 0:
-            messagebox.showinfo("No Results", "Run coarse RF analysis before exporting all neurons.")
-            return
-        selected_dir = filedialog.askdirectory(title="Select Folder for All Individual Neurons Export")
-        if not selected_dir:
-            return
-        export_root = os.path.join(selected_dir, f"waven_all_individual_neurons_{time.strftime('%Y%m%d_%H%M%S')}")
-        os.makedirs(export_root, exist_ok=True)
-        try:
-            btn_export_all_individual_neurons.configure(state=tk.DISABLED)
-        except NameError:
-            pass
-        print(f"[EXPORT] All individual neurons | count={n_neurons}")
-        export_state = {"neuron_id": 0, "failed": None}
+    def _export_individual_axes(records, base_dir, selected_kinds=None):
+        """Write selected individual-neuron axes as one-graph export bundles.
 
-        def export_next_neuron():
-            """Export one neuron, then yield control back to Tk before continuing."""
-            neuron_id = export_state["neuron_id"]
-            if neuron_id >= n_neurons:
-                try:
-                    btn_export_all_individual_neurons.configure(state=tk.NORMAL)
-                except NameError:
-                    pass
-                if export_state["failed"] is None:
-                    print(f"[DONE] Exported {n_neurons} individual-neuron result sets\n       {export_root}")
-                    messagebox.showinfo("Export Complete", f"Exported {n_neurons} individual-neuron result sets.\n\n{export_root}")
-                return
-            try:
-                draw(neuron_id, switch_tab=False)
-                neuron_dir = os.path.join(export_root, f"neuron_{neuron_id:05d}")
-                os.makedirs(neuron_dir, exist_ok=True)
-                for index, record in enumerate(_active_export_records("Individual neuron"), start=1):
-                    _export_figure_record(record, neuron_dir, index=index)
-                export_state["neuron_id"] += 1
-                percent = 100.0 * export_state["neuron_id"] / n_neurons
-                update_progress(percent, "Exporting individual neurons", f"Neuron {export_state['neuron_id']}/{n_neurons}")
-                # A zero-delay timer lets paint/input events run between neurons.
-                root.after(1, export_next_neuron)
-            except Exception as exc:
-                export_state["failed"] = exc
-                try:
-                    btn_export_all_individual_neurons.configure(state=tk.NORMAL)
-                except NameError:
-                    pass
-                print(f"[FAILED] Individual-neuron export at neuron {neuron_id}: {exc}")
-                messagebox.showerror("Export Failed", f"Stopped at neuron {neuron_id}: {exc}")
-
-        root.after_idle(export_next_neuron)
-
-    def _export_individual_axes(records, base_dir):
-        """Write each visible individual-neuron axis as its own reusable graph.
-
-        The regular figure bundle is intentionally retained, while this helper
-        makes its RF map, profiles, correlation curve, and firing-rate curve
-        directly consumable as one file per graph.
+        Unlike a dashboard export, every folder contains exactly one cropped
+        graph and only its axis data plus the matching payload values. PNG,
+        SVG, pickle, NPY/Zarr arrays, and a manifest remain available in the
+        same style as complete-figure exports.
         """
+        selected_kinds = set(selected_kinds or {kind for kind, _label in SINGLE_NEURON_GRAPH_OPTIONS})
         axis_root = os.path.join(base_dir, "individual_graphs")
         os.makedirs(axis_root, exist_ok=True)
         exported = []
@@ -2095,8 +2059,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             renderer = fig.canvas.get_renderer()
             figure_data = _extract_figure_data(fig)
             for axis_index, axis in enumerate(fig.axes):
+                if not axis.get_visible():
+                    continue
                 title = axis.get_title().strip()
                 if not title:
+                    continue
+                graph_kind = classify_individual_axis(record.get("tab"), record.get("title"), title)
+                if graph_kind not in selected_kinds:
                     continue
                 safe_title = _safe_name(title)
                 graph_name = f"{record_index:02d}_{axis_index:02d}_{safe_title}"
@@ -2107,96 +2076,104 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 fig.savefig(os.path.join(graph_dir, f"{graph_name}.png"), dpi=200, bbox_inches=bbox_inches)
                 fig.savefig(os.path.join(graph_dir, f"{graph_name}.svg"), format="svg", bbox_inches=bbox_inches)
                 axis_data = figure_data.get("axes", [])[axis_index] if axis_index < len(figure_data.get("axes", [])) else {}
+                payload = graph_payload(getattr(fig, "_waven_export_payload", None), graph_kind)
+                if graph_kind == "sta" and "sta_maps" in payload:
+                    # A lag grid is a display convenience.  Each Section B
+                    # bundle must contain only the map represented by this
+                    # cropped axis, never the entire multi-lag cube.
+                    lag_index = axis_index
+                    maps = np.asarray(payload.pop("sta_maps"))
+                    lag_frames = np.asarray(payload.pop("sta_lag_frames", ()))
+                    lag_ms = np.asarray(payload.pop("sta_lag_ms", ()))
+                    variances = np.asarray(payload.pop("sta_variances", ()))
+                    if lag_index < maps.shape[0]:
+                        payload.update(
+                            sta_lag_index=int(lag_index),
+                            sta_map=maps[lag_index],
+                            sta_lag_frame=int(lag_frames[lag_index]) if lag_index < lag_frames.size else None,
+                            sta_lag_ms=float(lag_ms[lag_index]) if lag_index < lag_ms.size else None,
+                            sta_variance=float(variances[lag_index]) if lag_index < variances.size else None,
+                        )
+                bundle = {
+                    "tab": record.get("tab"),
+                    "title": title,
+                    "source_figure": record.get("title"),
+                    "axis_index": axis_index,
+                    "graph_kind": graph_kind,
+                    "axis_data": axis_data,
+                    "payload": payload,
+                }
+                arrays = {}
+                metadata = {}
+                _add_array_exports("axis", axis_data, arrays, metadata)
+                _add_array_exports("payload", payload, arrays, metadata)
+                array_format = export_array_format_var.get()
+                if array_format not in {"npy", "zarr", "both"}:
+                    array_format = "npy"
+                array_dir = os.path.join(graph_dir, "arrays")
+                os.makedirs(array_dir, exist_ok=True)
+                array_files = {"npy": [], "zarr": []}
+                for key, value in arrays.items():
+                    safe_key = _safe_name(key)
+                    array = np.asarray(value)
+                    if array_format in {"npy", "both"}:
+                        path = os.path.join(array_dir, f"{safe_key}.npy")
+                        np.save(path, array)
+                        array_files["npy"].append(os.path.relpath(path, graph_dir))
+                    if array_format in {"zarr", "both"}:
+                        try:
+                            import zarr as _zarr
+                        except ImportError as exc:
+                            raise ImportError("Zarr export requires the 'zarr' package.") from exc
+                        path = os.path.join(array_dir, f"{safe_key}.zarr")
+                        try:
+                            _zarr.save(path, array.astype(str) if array.dtype == object else array)
+                            array_files["zarr"].append(os.path.relpath(path, graph_dir))
+                        except Exception as exc:
+                            metadata[f"{key}.zarr_export_error"] = str(exc)
+                            print(f"  Skipped Zarr array '{key}': {exc}")
+                with open(os.path.join(graph_dir, f"{graph_name}_data.pkl"), "wb") as handle:
+                    pickle.dump(bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
                 manifest = {
                     "title": title,
                     "source_figure": record.get("title"),
                     "axis_index": axis_index,
+                    "graph_kind": graph_kind,
+                    "one_graph_per_file": True,
+                    "files": {
+                        "png": f"{graph_name}.png",
+                        "svg": f"{graph_name}.svg",
+                        "pickle_data": f"{graph_name}_data.pkl",
+                        "array_format": array_format,
+                        "array_files": array_files,
+                    },
+                    "array_keys": sorted(arrays),
+                    "metadata": _json_safe(metadata),
                     "axis_data": _json_safe(axis_data),
                 }
-                with open(os.path.join(graph_dir, f"{graph_name}_data.json"), "w", encoding="utf-8") as handle:
+                with open(os.path.join(graph_dir, f"{graph_name}_manifest.json"), "w", encoding="utf-8") as handle:
                     json.dump(manifest, handle, indent=2)
                 exported.append(graph_dir)
         return exported
 
-    def export_all_sta_results():
-        """Export every STA lag image/fit and the complete numeric STA result."""
-        result = sta_state.get("result")
-        draw = sta_neuron_renderer.get("draw")
-        if result is None or draw is None:
-            messagebox.showinfo("No STA Results", "Run Spike-Triggered Averaging before exporting STA data.")
-            return
-        selected_dir = filedialog.askdirectory(title="Select Folder for All STA Data Export")
-        if not selected_dir:
-            return
-        export_root = os.path.join(selected_dir, f"waven_sta_all_neurons_{time.strftime('%Y%m%d_%H%M%S')}")
-        os.makedirs(export_root, exist_ok=True)
-        _ensure_sta_imports("STA data export")
-        sta_output_format = sta_output_format_var.get()
-        arrays_dir = os.path.join(export_root, "sta_arrays")
-        write_sta_result(result, Path(arrays_dir), sta_output_format)
-        n_neurons = int(result.images.shape[1])
-        print(f"[EXPORT] STA data and lag plots | format={sta_output_format} | neurons={n_neurons}")
-        try:
-            btn_export_all_sta.configure(state=tk.DISABLED)
-        except NameError:
-            pass
-        state = {"neuron_id": 0}
-
-        def export_next_sta_neuron():
-            neuron_id = state["neuron_id"]
-            if neuron_id >= n_neurons:
-                try:
-                    btn_export_all_sta.configure(state=tk.NORMAL)
-                except NameError:
-                    pass
-                print(f"[DONE] Exported STA data and {n_neurons} neuron plot sets\n       {export_root}")
-                messagebox.showinfo("Export Complete", f"Exported STA data and {n_neurons} neuron plot sets.\n\n{export_root}")
-                return
-            try:
-                draw(neuron_id, reveal=False)
-                neuron_dir = os.path.join(export_root, "plots", f"neuron_{neuron_id:05d}")
-                os.makedirs(neuron_dir, exist_ok=True)
-                for index, record in enumerate(_active_export_records("STA Receptive Fields"), start=1):
-                    _export_figure_record(record, neuron_dir, index=index)
-                state["neuron_id"] += 1
-                update_progress(100.0 * state["neuron_id"] / n_neurons, "Exporting STA data", f"Neuron {state['neuron_id']}/{n_neurons}")
-                root.after(1, export_next_sta_neuron)
-            except Exception as exc:
-                try:
-                    btn_export_all_sta.configure(state=tk.NORMAL)
-                except NameError:
-                    pass
-                print(f"[FAILED] STA export at neuron {neuron_id}: {exc}")
-                messagebox.showerror("Export Failed", f"Stopped at STA neuron {neuron_id}: {exc}")
-
-        root.after_idle(export_next_sta_neuron)
-
     def export_all_individual_graph_types_results():
-        """Export every available individual graph type for every neuron.
-
-        The normal coarse-RF selected-neuron figures include the correlation and
-        firing-rate orientation curves; when STA is available, its per-lag
-        receptive-field/Gabor figures are exported into a separate subfolder.
-        """
+        """Export selected one-graph files for every coarse-RF neuron."""
         rf_draw = individual_neuron_renderer.get("draw")
-        sta_draw = sta_neuron_renderer.get("draw")
         rf_count = np.asarray(analysis_state.get("spks", np.empty((0, 0, 0)))).shape[-1] if rf_draw else 0
-        sta_result = sta_state.get("result")
-        sta_count = int(sta_result.images.shape[1]) if sta_draw is not None and sta_result is not None else 0
-        if rf_count <= 0 and sta_count <= 0:
-            messagebox.showinfo("No Results", "Run coarse RF analysis and/or STA before exporting individual graph types.")
+        selected_kinds = _selected_export_kinds("all_individual")
+        if not selected_kinds:
+            messagebox.showinfo("No Selected Graphs", "Choose at least one individual graph type to export.")
             return
-        selected_dir = filedialog.askdirectory(title="Select Folder for Every Individual Graph Type Export")
+        if rf_count <= 0:
+            messagebox.showinfo("No Results", "Run Coarse RF Analysis before exporting individual graph types.")
+            return
+        selected_dir = filedialog.askdirectory(title="Select Folder for Single-Graph Export for Every Analyzed Neuron")
         if not selected_dir:
             return
-        export_root = os.path.join(selected_dir, f"waven_all_individual_graph_types_{time.strftime('%Y%m%d_%H%M%S')}")
+        export_root = os.path.join(selected_dir, f"waven_single_graphs_all_analyzed_neurons_{time.strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(export_root, exist_ok=True)
-        jobs = []
-        if rf_count > 0:
-            jobs.append(("coarse_rf", rf_count, rf_draw, "Individual neuron"))
-        if sta_count > 0:
-            jobs.append(("sta", sta_count, sta_draw, "STA Receptive Fields"))
-        print("[EXPORT] Every individual graph type | " + ", ".join(f"{name}={count}" for name, count, _draw, _tab in jobs))
+        jobs = [("coarse_rf", rf_count, rf_draw, "Individual neuron")]
+        print("[EXPORT] Selected single graphs | " + ", ".join(f"{name}={count}" for name, count, _draw, _tab in jobs))
         try:
             btn_export_all_individual_graph_types.configure(state=tk.DISABLED)
         except NameError:
@@ -2209,8 +2186,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
                 except NameError:
                     pass
-                print(f"[DONE] Exported every available individual graph type\n       {export_root}")
-                messagebox.showinfo("Export Complete", f"Exported every available individual graph type.\n\n{export_root}")
+                print(f"[DONE] Exported selected single-graph files\n       {export_root}")
+                messagebox.showinfo("Export Complete", f"Exported selected single-graph files.\n\n{export_root}")
                 return
             kind, count, draw, tab_name = jobs[state["job"]]
             neuron_id = state["neuron_id"]
@@ -2220,18 +2197,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 root.after(1, export_next_graph_type)
                 return
             try:
-                draw(neuron_id, switch_tab=False) if kind == "coarse_rf" else draw(neuron_id, reveal=False)
+                draw(neuron_id, switch_tab=False)
                 neuron_dir = os.path.join(export_root, kind, f"neuron_{neuron_id:05d}")
                 os.makedirs(neuron_dir, exist_ok=True)
                 records = _active_export_records(tab_name)
-                for index, record in enumerate(records, start=1):
-                    _export_figure_record(record, neuron_dir, index=index)
-                if kind == "coarse_rf":
-                    _export_individual_axes(records, neuron_dir)
+                _export_individual_axes(records, neuron_dir, selected_kinds)
                 state["neuron_id"] += 1
                 completed = sum(job[1] for job in jobs[:state["job"]]) + state["neuron_id"]
                 total = sum(job[1] for job in jobs)
-                update_progress(100.0 * completed / total, "Exporting individual graph types", f"{kind} neuron {state['neuron_id']}/{count}")
+                update_progress(100.0 * completed / total, "Exporting single graphs", f"{kind} neuron {state['neuron_id']}/{count}")
                 root.after(1, export_next_graph_type)
             except Exception as exc:
                 try:
@@ -2278,8 +2252,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     continue
                 if record.get("tab") == "all":
                     parent = frame_plot_all
-                elif record.get("tab") == "sta":
-                    parent = frame_plot_sta
                 else:
                     parent = frame_plot_individual
                 embed_interactive_figure(fig, parent, record.get("title"))
@@ -3565,170 +3537,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             except Exception:
                 pass
 
-    def render_sta_receptive_fields(result, neuron_id=None, switch_tab=True):
-        """Render one selected neuron's STA and phase-Gabor fit at every lag.
-
-        Each temporal lag gets a nested tab inside the ephys-only STA parent
-        tab.  Keeping one neuron per lag view makes signed ON/OFF subfields and
-        their fitted phase directly comparable without trying to tile thousands
-        of receptive fields into an unreadable overview.
-        """
-        sta_state["result"] = result
-
-        def draw(selected_neuron=None, reveal=True):
-            _ensure_plot_imports()
-            current = sta_state.get("result")
-            if current is None:
-                return
-            n_neurons = int(current.images.shape[1])
-            if n_neurons <= 0:
-                return
-            if selected_neuron is None:
-                return
-            selected_neuron = int(selected_neuron)
-            if not 0 <= selected_neuron < n_neurons:
-                raise ValueError(f"STA neuron index must be between 0 and {n_neurons - 1}.")
-
-            clear_plot_tab(frame_plot_sta)
-            lag_tabs = ctk.CTkTabview(
-                frame_plot_sta,
-                corner_radius=8,
-                fg_color="#EEF2FF",
-                segmented_button_selected_color=primary_btn,
-                segmented_button_selected_hover_color="#1D4ED8",
-            )
-            lag_tabs.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-            responsive = int(np.sum(current.significant[:, selected_neuron]))
-            try:
-                sta_update_label.configure(
-                    text=(
-                        f"Neuron {selected_neuron}: {responsive}/{len(current.lag_frames)} lags "
-                        "passed the circular-shuffle test"
-                    )
-                )
-            except Exception:
-                pass
-
-            for lag_index, lag_value in enumerate(current.lag_ms):
-                tab = lag_tabs.add(f"Lag {float(lag_value):.1f} ms")
-                tab_frame = ctk.CTkScrollableFrame(tab, fg_color="#F9FAFB", corner_radius=8)
-                tab_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-                tune_scrollable_frame(tab_frame, increment=36)
-                image = np.asarray(current.images[lag_index, selected_neuron], dtype=np.float32)
-                peak = float(current.peak_values[lag_index, selected_neuron])
-                noise = float(current.noise_std[lag_index, selected_neuron])
-                is_significant = bool(current.significant[lag_index, selected_neuron])
-                threshold = float(current.metadata.get("significance_sd", 3.0)) * noise
-                vmax = float(np.nanmax(np.abs(image))) if np.any(np.isfinite(image)) else 0.0
-                vmax = max(vmax, 1e-8)
-                fig, axes = plt.subplots(1, 2, figsize=(9, 4.5), constrained_layout=True)
-                rendered = axes[0].imshow(image, cmap="coolwarm", vmin=-vmax, vmax=vmax, aspect="equal")
-                fig.colorbar(rendered, ax=axes[0], fraction=0.046)
-                axes[0].set_title(f"STA, lag {float(lag_value):.1f} ms")
-                axes[0].set_xlabel("Stimulus x (px)")
-                axes[0].set_ylabel("Stimulus y (px)")
-
-                params = np.asarray(current.gabor_params[lag_index, selected_neuron], dtype=float)
-                if is_significant and np.all(np.isfinite(params[:9])):
-                    fitted = phase_gabor_image(params, image.shape[0], image.shape[1])
-                    fitted_max = max(float(np.nanmax(np.abs(fitted))), vmax, 1e-8)
-                    fit_plot = axes[1].imshow(
-                        fitted, cmap="coolwarm", vmin=-fitted_max, vmax=fitted_max, aspect="equal"
-                    )
-                    fig.colorbar(fit_plot, ax=axes[1], fraction=0.046)
-                    axes[1].set_title(
-                        "Phase-sensitive Gabor fit\n"
-                        f"RMSE {float(current.gabor_rmse[lag_index, selected_neuron]):.4g}"
-                    )
-                elif is_significant:
-                    axes[1].text(
-                        0.5, 0.5, "Passed shuffle test\nGabor fit did not converge",
-                        ha="center", va="center", transform=axes[1].transAxes,
-                    )
-                    axes[1].set_title("Phase-sensitive Gabor fit")
-                else:
-                    axes[1].text(
-                        0.5, 0.5, "Unresponsive / no RF found\nGabor fit skipped",
-                        ha="center", va="center", transform=axes[1].transAxes,
-                    )
-                    axes[1].set_title("Shuffle test")
-                axes[1].set_xlabel("Stimulus x (px)")
-                axes[1].set_ylabel("Stimulus y (px)")
-                fig._waven_caption = (
-                    f"Spike-count STA for neuron {selected_neuron}; peak={peak:.5g}, "
-                    f"shuffle SD={noise:.5g}, threshold={threshold:.5g}, "
-                    f"total spikes={float(current.total_spikes[lag_index, selected_neuron]):.0f}."
-                )
-                _set_figure_export_payload(
-                    fig,
-                    {
-                        "source": "Spike-Triggered Averaging",
-                        "neuron_id": selected_neuron,
-                        "lag_frames": int(current.lag_frames[lag_index]),
-                        "lag_ms": float(lag_value),
-                        "sta_image": image,
-                        "shuffle_noise_sd": noise,
-                        "peak_value": peak,
-                        "significant": is_significant,
-                        "gabor_parameter_names": current.metadata.get("gabor_parameter_names"),
-                        "phase_gabor_params": params,
-                        "phase_gabor_rmse": float(current.gabor_rmse[lag_index, selected_neuron]),
-                    },
-                )
-                embed_interactive_figure(
-                    fig,
-                    tab_frame,
-                    title=f"Neuron {selected_neuron} — STA lag {float(lag_value):.1f} ms",
-                    tab_name="STA Receptive Fields",
-                )
-
-            if reveal:
-                try:
-                    plot_tabs.set("STA Receptive Fields")
-                except Exception:
-                    pass
-
-        sta_neuron_renderer["draw"] = draw
-        if neuron_id is not None:
-            root.after(0, lambda: draw(neuron_id, switch_tab))
-        else:
-            def request_sta_neuron():
-                """Direct the user to the independent STA neuron selector."""
-                try:
-                    typed_neuron = int(sta_neuron_index_var.get().strip())
-                    if 0 <= typed_neuron < n_neurons:
-                        draw(typed_neuron, reveal=switch_tab)
-                        return
-                except (ValueError, AttributeError):
-                    pass
-                clear_plot_tab(frame_plot_sta)
-                ctk.CTkLabel(
-                    frame_plot_sta,
-                    text="STA is ready. Enter a valid STA Neuron Index, then click Display STA Neuron.",
-                    text_color="#3730A3",
-                    wraplength=600,
-                    justify="left",
-                ).pack(anchor="w", padx=14, pady=14)
-                try:
-                    sta_update_label.configure(
-                        text=f"STA complete for {n_neurons} neurons. Enter a valid STA Neuron Index to display its lag tabs."
-                    )
-                    sta_neuron_status_label.configure(
-                        text=f"STA complete. Enter an index from 0 to {n_neurons - 1}, then display it.",
-                        text_color="#9A3412",
-                    )
-                    sta_neuron_entry.configure(border_color="#F97316")
-                    sta_neuron_entry.focus_set()
-                except NameError:
-                    pass
-                if switch_tab:
-                    try:
-                        plot_tabs.set("STA Receptive Fields")
-                    except Exception:
-                        pass
-
-            root.after(0, request_sta_neuron)
-
     def embed_captured_figures(figures, parent, title_prefix):
         """Function for embed captured figures.
 
@@ -3808,121 +3616,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "sampling_rate": sampling_rate,
         }
 
-    def _validate_sta_availability():
-        """Guard STA even when an older GUI state re-enables its checkbox."""
-        if workflow != WORKFLOW_EPHYS:
-            raise ValueError("Spike-triggered averaging is available for ephys data only, not two-photon data.")
-        if _selected_wavelet_backend() != "convolution":
-            raise ValueError("Spike-triggered averaging is available only with the convolution backend.")
-
-    def _run_sta_from_counts(context, spike_counts):
-        """Compute/cache ephys STA from raw frame counts and the shared movie cache."""
-        _validate_sta_availability()
-        _ensure_sta_imports("ephys spike-triggered averaging")
-        _raise_if_cancelled()
-        if spike_counts is None:
-            spike_counts, counts_path = load_spike_counts_cache(context["neural_cache_dir"], mmap_mode=None)
-            print(f"Loaded STA spike counts from: {counts_path}")
-        movie_path = _find_movie_path()
-        movie_metadata = _movie_metadata(movie_path)
-        target_nx, target_ny = _stimulus_grid_dimensions("coarse", movie_path)
-        expected_shape = (movie_metadata["frames"], target_ny, target_nx)
-        downsample_path, _ = _find_compatible_downsample_cache(
-            movie_path, "coarse", expected_shape, _selected_downsample_format()
-        )
-        if downsample_path is None:
-            raise FileNotFoundError(
-                "STA needs the prepared coarse stimulus cache. Prepare Stimulus Cache first."
-            )
-        try:
-            max_lag_ms = float(sta_max_lag_ms_var.get())
-            n_shuffles = int(sta_shuffle_count_var.get())
-            significance_sd = float(sta_significance_sd_var.get())
-            random_seed = int(sta_random_seed_var.get())
-        except Exception as exc:
-            raise ValueError(f"Invalid STA option: {exc}") from exc
-        if not 3.0 <= significance_sd <= 5.0:
-            raise ValueError("STA shuffle threshold must be between 3 and 5 standard deviations.")
-        if max_lag_ms <= 0:
-            raise ValueError("STA maximum lag must be positive.")
-        if n_shuffles < 1:
-            raise ValueError("STA shuffle count must be at least one.")
-
-        update_progress(15, "Spike-triggered averaging", "Loading disk-backed stimulus movie and spike counts")
-        movie = load_array(downsample_path, mmap_mode="r")
-        sta_dir = context["neural_cache_dir"] / "sta"
-        print(
-            "[STA] Computing ephys STA from raw spike counts "
-            f"(lag <= {max_lag_ms:g} ms, {n_shuffles} circular shuffles, "
-            f"{significance_sd:g} SD threshold, {sta_output_format_var.get().upper()} cache)."
-        )
-        result = compute_sta(
-            movie,
-            spike_counts,
-            movie_metadata["fps"],
-            max_lag_ms=max_lag_ms,
-            n_shuffles=n_shuffles,
-            significance_sd=significance_sd,
-            random_seed=random_seed,
-            output_dir=sta_dir,
-            output_format=sta_output_format_var.get(),
-            cancel_event=_current_cancel_event(),
-        )
-        _raise_if_cancelled()
-        print(
-            f"[STA] Complete: {int(np.sum(result.significant))} responsive lag/neuron images; "
-            f"cache: {sta_dir}"
-        )
-        update_progress(92, "Spike-triggered averaging", "Preparing STA neuron selection")
-        render_sta_receptive_fields(result, switch_tab=True)
-        return result
-
-    def run_sta_analysis():
-        """Run the ephys-only STA from the raw-count cache after coarse setup."""
-        _validate_sta_availability()
-        if "neural" not in completed_actions:
-            raise RuntimeError("Create or validate the neural cache before running STA.")
-        if "downsample:coarse" not in completed_actions:
-            raise RuntimeError("Prepare the coarse stimulus cache before running STA.")
-        context = _neural_alignment_context()
-        try:
-            spike_counts, counts_path = load_spike_counts_cache(context["neural_cache_dir"], mmap_mode=None)
-        except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                f"{exc} STA needs the raw-count cache. Recreate the ephys neural cache from raw data."
-            ) from exc
-        print(f"[STA] Loaded raw frame spike-count cache: {counts_path} {tuple(spike_counts.shape)}")
-        return _run_sta_from_counts(context, spike_counts)
-
-    def display_sta_neuron():
-        """Validate the STA-only selector and render its per-lag receptive fields."""
-        result = sta_state.get("result")
-        if result is None or sta_neuron_renderer.get("draw") is None:
-            messagebox.showinfo("STA Not Ready", "Run Spike-Triggered Averaging before selecting an STA neuron.")
-            return
-        n_neurons = int(result.images.shape[1])
-        try:
-            neuron_id = int(sta_neuron_index_var.get().strip())
-        except ValueError:
-            sta_neuron_status_label.configure(
-                text=f"Enter an integer STA Neuron Index from 0 to {n_neurons - 1}.", text_color="#B91C1C"
-            )
-            sta_neuron_entry.configure(border_color="#DC2626")
-            sta_neuron_entry.focus_set()
-            return
-        if not 0 <= neuron_id < n_neurons:
-            sta_neuron_status_label.configure(
-                text=f"STA Neuron Index {neuron_id} is invalid. Use 0 to {n_neurons - 1}.", text_color="#B91C1C"
-            )
-            sta_neuron_entry.configure(border_color="#DC2626")
-            sta_neuron_entry.focus_set()
-            return
-        sta_neuron_entry.configure(border_color="#16A34A")
-        sta_neuron_status_label.configure(text=f"Displaying STA neuron {neuron_id}.", text_color="#166534")
-        sta_neuron_renderer["draw"](neuron_id, reveal=True)
-
     def create_neural_cache():
-        """Create or validate firing-rate and raw-count neural caches."""
+        """Create or validate the aligned neural firing-rate cache."""
         if "downsample:coarse" not in completed_actions:
             raise RuntimeError(
                 "Prepare Stimulus & Metadata first. Neural alignment uses the selected movie's "
@@ -4134,8 +3829,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except Exception as e:
             print(f"Coarse RF power cache loading failed: {e}")
             return False
-            
-        n_frames = min(nb_frames, w_c_downsampled.shape[0], spks.shape[1])
+
+        try:
+            expected_movie_shape = (movie_metadata["frames"], coarse_ny, coarse_nx)
+            downsample_path, _ = _find_compatible_downsample_cache(
+                movpath, "coarse", expected_movie_shape, _selected_downsample_format()
+            )
+            if downsample_path is None:
+                raise FileNotFoundError("No compatible prepared coarse stimulus cache was found.")
+            psth_sta_movie = load_array(downsample_path, mmap_mode="r")
+        except Exception as exc:
+            print(f"Coarse RF PSTH STA stimulus loading failed: {exc}")
+            return False
+
+        n_frames = min(nb_frames, w_c_downsampled.shape[0], spks.shape[1], psth_sta_movie.shape[0])
 
         if w_c_downsampled.ndim == 6:
             rf_nf = w_c_downsampled.shape[5]
@@ -4153,9 +3860,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                                 n_orientations=n_orientations,
                                                 plotting=False)
         update_progress(75, "Coarse receptive-field analysis", "Computing firing-rate OSI/gOSI")
-        # ``spks`` is the aligned neural cache.  For ephys it is the
-        # frame-bin firing rate produced from spike counts / bin duration in
-        # sta.py-style alignment; it is never replaced by RF correlations.
+        # ``spks`` is the aligned neural firing-rate cache.  It is never
+        # replaced by RF correlations; RF features only select response bins.
         # The wavelet energy only weights frames into orientation bins at each
         # neuron's already-established preferred RF features.
         orientation_selectivity = firing_rate_orientation_tuning(
@@ -4267,6 +3973,26 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ax3_5 = fig3.add_subplot(gs[3, :])
             ax3_6 = fig3.add_subplot(gs[4, :])
             ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4, ax3_5, ax3_6]
+            fig_sta = plt.figure(figsize=(10, 7), constrained_layout=True)
+            psth_sta_cache = {}
+
+            def _psth_sta_for_neuron(neuron_id, spike_train):
+                """Calculate a bounded, standard STA only when a neuron is inspected."""
+                cached = psth_sta_cache.get(neuron_id)
+                if cached is not None:
+                    return cached
+                fps = float(movie_metadata["fps"])
+                max_lag = int(np.floor(DEFAULT_MAX_WINDOW_MS * fps / 1000.0 + 1e-12))
+                result = compute_psth_sta(
+                    psth_sta_movie[:n_frames], spike_train[:n_frames], fps, max_lag,
+                    window_ms=DEFAULT_MAX_WINDOW_MS,
+                )
+                # Retain only a few selected-neuron results; a full all-neuron
+                # STA cube would be needlessly large for an interactive view.
+                if len(psth_sta_cache) >= 8:
+                    psth_sta_cache.pop(next(iter(psth_sta_cache)))
+                psth_sta_cache[neuron_id] = result
+                return result
 
             def correlation_tuning_ci(feature_matrix, trial_responses):
                 """Return 95% CIs from trial-wise feature/response correlations."""
@@ -4512,6 +4238,60 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         },
                     )
                     canvas3.draw()
+
+                    fig_sta.clear()
+                    try:
+                        sta_result = _psth_sta_for_neuron(neuron_id, spike_train)
+                    except ValueError as exc:
+                        fig_sta.text(
+                            0.5, 0.5, f"PSTH-weighted STA unavailable\n{exc}",
+                            ha="center", va="center",
+                        )
+                        _set_figure_export_payload(
+                            fig_sta,
+                            {"source": "Coarse RF PSTH-weighted STA", "neuron_id": neuron_id},
+                        )
+                    else:
+                        n_lags = int(sta_result.maps.shape[0])
+                        n_columns = min(4, n_lags)
+                        n_rows = int(np.ceil(n_lags / n_columns))
+                        axes_sta = np.asarray(fig_sta.subplots(n_rows, n_columns)).reshape(-1)
+                        sta_min = float(np.min(sta_result.maps))
+                        sta_max = float(np.max(sta_result.maps))
+                        if sta_max <= sta_min:
+                            sta_max = sta_min + 1e-6
+                        for lag_index, axis in enumerate(axes_sta):
+                            if lag_index >= n_lags:
+                                axis.set_visible(False)
+                                continue
+                            lag_ms = float(sta_result.lag_ms[lag_index])
+                            axis.imshow(
+                                sta_result.maps[lag_index], cmap="coolwarm", vmin=sta_min, vmax=sta_max,
+                                aspect="equal", origin="upper", interpolation="nearest",
+                            )
+                            peak_note = " — peak variance" if lag_index == sta_result.peak_lag_index else ""
+                            axis.set_title(f"STA lag {lag_ms:.1f} ms{peak_note}")
+                            axis.set_xlabel("Stimulus x (px)")
+                            axis.set_ylabel("Stimulus y (px)")
+                        fig_sta.suptitle(
+                            f"PSTH-weighted STA — neuron {neuron_id}; peak at "
+                            f"{sta_result.peak_lag_ms:.1f} ms (variance {sta_result.variances[sta_result.peak_lag_index]:.4g})"
+                        )
+                        _set_figure_export_payload(
+                            fig_sta,
+                            {
+                                "source": "Coarse RF PSTH-weighted STA",
+                                "neuron_id": neuron_id,
+                                "sta_maps": sta_result.maps,
+                                "sta_lag_frames": sta_result.lag_frames,
+                                "sta_lag_ms": sta_result.lag_ms,
+                                "sta_variances": sta_result.variances,
+                                "sta_peak_lag_frame": sta_result.peak_lag_frame,
+                                "sta_peak_lag_ms": sta_result.peak_lag_ms,
+                                "sta_peak_variance": float(sta_result.variances[sta_result.peak_lag_index]),
+                            },
+                        )
+                    canvas_sta.draw()
                     if switch_tab:
                         switch_to_individual_tab(flash=True)
                 except Exception as e:
@@ -4582,6 +4362,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 embed_interactive_figure(fig_osi_units, frame_plot_all, title="OSI and gOSI by Unit")
             canvas2 = embed_interactive_figure(fig2, frame_plot_individual, title="Spike Train")
             canvas3 = embed_interactive_figure(fig3, frame_plot_individual, title="Selected Neuron Tuning")
+            canvas_sta = embed_interactive_figure(
+                fig_sta, frame_plot_individual, title="PSTH-weighted Spike-Triggered Averages (0–300 ms)"
+            )
 
             def click_RF():
                 """Function for click RF."""
@@ -4606,6 +4389,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 ),
                 ("individual", "Spike Train", fig2),
                 ("individual", "Selected Neuron Tuning", fig3),
+                ("individual", "PSTH-weighted Spike-Triggered Averages (0–300 ms)", fig_sta),
             ]
             if fig_osi_units is not None:
                 figure_records.insert(3, ("all", "OSI and gOSI by Unit", fig_osi_units))
@@ -5080,12 +4864,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "downsample_format": _selected_downsample_format(),
                 "neural_source": _selected_neural_source(),
                 "neural_cache_format": _selected_neural_cache_format(),
-                "sta_max_lag_ms": sta_max_lag_ms_var.get(),
-                "sta_shuffle_count": sta_shuffle_count_var.get(),
-                "sta_significance_sd": sta_significance_sd_var.get(),
-            "sta_random_seed": sta_random_seed_var.get(),
-                "sta_output_format": sta_output_format_var.get(),
-                "sta_neuron_index": sta_neuron_index_var.get(),
                 "performance": _runtime_control_values(),
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
             },
@@ -5174,18 +4952,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             neural_cache_format = save_options.get("neural_cache_format")
             if neural_cache_format in {"npy", "zarr"}:
                 neural_cache_format_var.set(neural_cache_format)
-            sta_output_format = save_options.get("sta_output_format")
-            if sta_output_format in {"npy", "zarr"}:
-                sta_output_format_var.set(sta_output_format)
-            for key, variable in (
-                ("sta_max_lag_ms", sta_max_lag_ms_var),
-                ("sta_shuffle_count", sta_shuffle_count_var),
-                ("sta_significance_sd", sta_significance_sd_var),
-                ("sta_random_seed", sta_random_seed_var),
-                ("sta_neuron_index", sta_neuron_index_var),
-            ):
-                if key in save_options:
-                    variable.set(str(save_options[key]))
             _set_runtime_controls(save_options.get("performance") or {})
             suite2p_subject_dirs_var.set(
                 str(save_options.get("suite2p_subject_dirs", "")).strip()
@@ -5194,7 +4960,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             _apply_project_layout_defaults(force=True)
             try:
                 _refresh_neural_source_controls()
-                _refresh_sta_controls()
                 _refresh_downsample_controls()
                 _sync_completed_actions_from_artifacts()
                 refresh_action_buttons()
@@ -5806,7 +5571,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     plot_tabs.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
     all_neurons_tab = plot_tabs.add("All neurons")
     individual_neuron_tab = plot_tabs.add("Individual neuron")
-    sta_receptive_fields_tab = plot_tabs.add("STA Receptive Fields")
     frame_plot_all = ctk.CTkScrollableFrame(all_neurons_tab, fg_color="#F9FAFB", corner_radius=8)
     frame_plot_all.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
     tune_scrollable_frame(frame_plot_all, increment=36)
@@ -5822,18 +5586,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_plot_individual = ctk.CTkScrollableFrame(individual_neuron_tab, fg_color="#F9FAFB", corner_radius=8)
     frame_plot_individual.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
     tune_scrollable_frame(frame_plot_individual, increment=36)
-    sta_update_label = ctk.CTkLabel(
-        sta_receptive_fields_tab,
-        text="Run ephys STA from Coarse RF Analysis, then choose an STA Neuron Index to display receptive fields.",
-        fg_color="#EEF2FF",
-        text_color="#3730A3",
-        corner_radius=6,
-        height=30,
-    )
-    sta_update_label.pack(fill=tk.X, padx=4, pady=(4, 2))
-    frame_plot_sta = ctk.CTkScrollableFrame(sta_receptive_fields_tab, fg_color="#F9FAFB", corner_radius=8)
-    frame_plot_sta.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-    tune_scrollable_frame(frame_plot_sta, increment=36)
 
     # --- Session configuration ---
     frame_session = ttk.LabelFrame(frame_left, text="Session Configuration", padding=15)
@@ -5855,7 +5607,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             frame_params.configure(text=f"Experiment Configuration ({workflow_label})")
             render_parameter_fields(preserve_values=True)
             refresh_size_estimates()
-            _refresh_sta_controls()
         except NameError:
             pass
 
@@ -5898,15 +5649,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     initial_neural_format = gui_options.get("neural_cache_format", "npy")
     neural_cache_format_var = tk.StringVar(value=initial_neural_format if initial_neural_format in {"npy", "zarr"} else "npy")
-    sta_max_lag_ms_var = tk.StringVar(value=str(gui_options.get("sta_max_lag_ms", 150)))
-    sta_shuffle_count_var = tk.StringVar(value=str(gui_options.get("sta_shuffle_count", 100)))
-    sta_significance_sd_var = tk.StringVar(value=str(gui_options.get("sta_significance_sd", 3)))
-    sta_random_seed_var = tk.StringVar(value=str(gui_options.get("sta_random_seed", 0)))
-    initial_sta_output_format = gui_options.get("sta_output_format", "npy")
-    sta_output_format_var = tk.StringVar(
-        value=initial_sta_output_format if initial_sta_output_format in {"npy", "zarr"} else "npy"
-    )
-    sta_neuron_index_var = tk.StringVar(value=str(gui_options.get("sta_neuron_index", "")))
     suite2p_subject_dirs_var = tk.StringVar(
         value=str(
             gui_options.get("suite2p_subject_dirs", os.environ.get("WAVEN_SUBJECT_DIRS", ""))
@@ -5948,11 +5690,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ),
         (
             "amp", "WAVEN_AMP", False, "Tensor Core convolution (fast precision)",
-            "Uses CUDA float16 autocast only for wavelet convolution. Correlation and STA statistics retain their established precision.",
-        ),
-        (
-            "sta_fft", "WAVEN_STA_FFT", False, "FFT STA actual maps (experimental)",
-            "Uses bounded CUDA FFTs for many-lag in-memory STA runs; shuffled significance maps still use exact batched matrix products.",
+            "Uses CUDA float16 autocast only for wavelet convolution; Coarse RF statistics retain their established precision.",
         ),
     )
 
@@ -6077,7 +5815,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         refresh_scale_controls()
         try:
             _apply_runtime_controls()
-            _refresh_sta_controls()
         except NameError:
             pass
 
@@ -6542,7 +6279,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             else:
                 neural_cache_format_frame.grid_remove()
                 btn_create_neural_cache.configure(text="Validate Existing Neural Cache")
-            _refresh_sta_controls()
         except Exception:
             pass
 
@@ -6745,111 +6481,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     btn_runRF.pack(fill=tk.X)
 
-    sta_analysis_frame = ctk.CTkFrame(frame_analysis, fg_color="#F8FAFC", corner_radius=8)
-    sta_analysis_frame.pack(fill=tk.X, pady=(10, 0))
-    sta_analysis_frame.columnconfigure(1, weight=1)
-    ctk.CTkLabel(
-        sta_analysis_frame,
-        text="Spike-Triggered Averaging (ephys / convolution)",
-        text_color=text_color,
-        font=ctk.CTkFont(size=13, weight="bold"),
-    ).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 2))
-    sta_status_label = ctk.CTkLabel(
-        sta_analysis_frame,
-        text="Uses cached raw frame spike counts. The standard RF analysis remains firing-rate based.",
-        text_color=muted_text,
-        wraplength=420,
-        justify="left",
-    )
-    sta_status_label.grid(row=1, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 6))
-    sta_entries = []
-    for row, (label, variable) in enumerate((
-        ("Max lag (ms)", sta_max_lag_ms_var),
-        ("Shuffle count", sta_shuffle_count_var),
-        ("Threshold (SD)", sta_significance_sd_var),
-        ("Random seed", sta_random_seed_var),
-    ), start=2):
-        ctk.CTkLabel(sta_analysis_frame, text=label, text_color=muted_text).grid(
-            row=row, column=0, sticky="w", padx=10, pady=2
-        )
-        entry = ctk.CTkEntry(sta_analysis_frame, textvariable=variable, height=28, corner_radius=6)
-        entry.grid(row=row, column=1, sticky="ew", padx=(10, 10), pady=2)
-        sta_entries.append(entry)
-
-    ctk.CTkLabel(sta_analysis_frame, text="STA cache format", text_color=muted_text).grid(
-        row=6, column=0, sticky="w", padx=10, pady=(5, 2)
-    )
-    sta_format_frame = ctk.CTkFrame(sta_analysis_frame, fg_color="transparent")
-    sta_format_frame.grid(row=6, column=1, sticky="w", padx=(10, 10), pady=(5, 2))
-    sta_format_npy = ctk.CTkRadioButton(
-        sta_format_frame, text="NPY", variable=sta_output_format_var, value="npy", text_color=text_color
-    )
-    sta_format_npy.pack(side=tk.LEFT)
-    sta_format_zarr = ctk.CTkRadioButton(
-        sta_format_frame, text="Zarr (compressed)", variable=sta_output_format_var, value="zarr", text_color=text_color
-    )
-    sta_format_zarr.pack(side=tk.LEFT, padx=(12, 0))
-    sta_entries.extend([sta_format_npy, sta_format_zarr])
-
-    btn_run_sta = ctk.CTkButton(
-        sta_analysis_frame,
-        text="Run Spike-Triggered Averaging",
-        height=32,
-        corner_radius=6,
-        fg_color="#4F46E5",
-        hover_color="#4338CA",
-        command=run_in_thread(run_sta_analysis, "Spike-triggered averaging"),
-    )
-    btn_run_sta.grid(row=7, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 4))
-    ctk.CTkLabel(sta_analysis_frame, text="STA Neuron Index", text_color=text_color).grid(
-        row=8, column=0, sticky="w", padx=10, pady=(4, 6)
-    )
-    sta_neuron_entry = ctk.CTkEntry(
-        sta_analysis_frame, textvariable=sta_neuron_index_var, height=28, corner_radius=6, border_width=1
-    )
-    sta_neuron_entry.grid(row=8, column=1, sticky="ew", padx=(10, 10), pady=(4, 6))
-    btn_display_sta_neuron = ctk.CTkButton(
-        sta_analysis_frame,
-        text="Display STA Neuron",
-        height=30,
-        corner_radius=6,
-        fg_color="#6366F1",
-        hover_color="#4F46E5",
-        command=display_sta_neuron,
-    )
-    btn_display_sta_neuron.grid(row=9, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 4))
-    sta_neuron_status_label = ctk.CTkLabel(
-        sta_analysis_frame,
-        text="Run STA, then enter a valid index to display its lag-specific receptive fields.",
-        text_color=muted_text,
-        wraplength=420,
-        justify="left",
-    )
-    sta_neuron_status_label.grid(row=10, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-
-    def _refresh_sta_controls():
-        """Expose STA only for the supported ephys/convolution workflow."""
-        eligible = workflow == WORKFLOW_EPHYS and _selected_wavelet_backend() == "convolution"
-        try:
-            for entry in sta_entries:
-                entry.configure(state=tk.NORMAL if eligible else tk.DISABLED)
-            sta_neuron_entry.configure(state=tk.NORMAL if eligible else tk.DISABLED)
-            btn_display_sta_neuron.configure(state=tk.NORMAL if eligible else tk.DISABLED)
-            if eligible:
-                sta_status_label.configure(
-                    text="Raw ephys frame counts are aligned to the coarse stimulus cache. Shuffle-significant images receive phase-sensitive Gabor fits."
-                )
-            else:
-                sta_status_label.configure(
-                    text="STA is available only for ephys data with the convolution backend; two-photon and legacy workflows are excluded."
-                )
-            can_run = eligible and {"neural", "downsample:coarse"}.issubset(completed_actions)
-            btn_run_sta.configure(state=tk.NORMAL if can_run else tk.DISABLED)
-        except NameError:
-            pass
-
-    _refresh_sta_controls()
-
     btn_run_model_plots = ctk.CTkButton(
         frame_analysis,
         text="Run Model (Coarse RF)",
@@ -6904,59 +6535,98 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     export_format_segment.pack(side=tk.LEFT, padx=(10, 0))
     export_format_segment.set("npy")
 
-    ctk.CTkLabel(frame_export, text="All-neuron results", text_color=text_color,
-                 font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", pady=(4, 2))
+    def add_export_checkbox_group(parent, title, selection_name, options):
+        """Create a labelled, all-enabled-by-default graph-selection group."""
+        group = ttk.LabelFrame(parent, text=title, padding=(10, 7))
+        group.pack(fill=tk.X, pady=(5, 4))
+        options_frame = ctk.CTkFrame(group, fg_color="transparent")
+        options_frame.pack(fill=tk.X)
+        variables = export_selection_vars[selection_name]
+        for index, (kind, label) in enumerate(options):
+            variable = tk.BooleanVar(value=True)
+            variables[kind] = variable
+            ctk.CTkCheckBox(
+                options_frame,
+                text=label,
+                variable=variable,
+                onvalue=True,
+                offvalue=False,
+                text_color=text_color,
+                height=24,
+            ).grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 18), pady=2)
+        for column in range(2):
+            options_frame.columnconfigure(column, weight=1)
+        actions = ctk.CTkFrame(group, fg_color="transparent")
+        actions.pack(fill=tk.X, pady=(4, 0))
+        ctk.CTkButton(
+            actions, text="Select all", width=86, height=24, corner_radius=5,
+            command=lambda: [variable.set(True) for variable in variables.values()],
+        ).pack(side=tk.LEFT)
+        ctk.CTkButton(
+            actions, text="Clear all", width=86, height=24, corner_radius=5,
+            fg_color="#6B7280", hover_color="#4B5563",
+            command=lambda: [variable.set(False) for variable in variables.values()],
+        ).pack(side=tk.LEFT, padx=(6, 0))
+
+    ctk.CTkLabel(
+        frame_export, text="Section A — Current Display", text_color=text_color,
+        font=ctk.CTkFont(size=14, weight="bold"),
+    ).pack(anchor="w", pady=(6, 1))
+    ctk.CTkLabel(
+        frame_export,
+        text="Choose graph types, then export the figures currently visible in the All Neurons and/or Individual Neuron tabs.",
+        text_color=muted_text, wraplength=650, justify="left",
+    ).pack(anchor="w", pady=(0, 4))
+    add_export_checkbox_group(frame_export, "All-neuron graphs to include", "current_all", ALL_NEURON_GRAPH_OPTIONS)
+    add_export_checkbox_group(
+        frame_export, "Current individual-neuron graphs to include", "current_individual",
+        CURRENT_INDIVIDUAL_GRAPH_OPTIONS,
+    )
     btn_export_all_results = ctk.CTkButton(
         frame_export,
-        text="Export Every Displayed Graph",
+        text="Export Current GUI: All + Individual",
         fg_color="#2563EB",
         hover_color="#1D4ED8",
-        command=export_all_displayed_results,
+        command=export_current_gui_results,
     )
     btn_export_all_results.pack(fill=tk.X, pady=3)
     btn_export_all_neurons = ctk.CTkButton(
         frame_export,
-        text="Export All-Neuron Summary Graphs",
+        text="Export Current Display: All-Neuron Graphs",
         fg_color="#0891B2",
         hover_color="#0E7490",
         command=export_all_neurons_results,
     )
     btn_export_all_neurons.pack(fill=tk.X, pady=3)
-    ctk.CTkLabel(frame_export, text="Individual-neuron results", text_color=text_color,
-                 font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", pady=(10, 2))
     btn_export_individual_neuron = ctk.CTkButton(
         frame_export,
-        text="Export Current Neuron Graphs",
+        text="Export Current Display: Individual-Neuron Graphs",
         fg_color="#7C3AED",
         hover_color="#6D28D9",
         command=export_individual_neuron_results,
     )
     btn_export_individual_neuron.pack(fill=tk.X, pady=3)
-    btn_export_all_individual_neurons = ctk.CTkButton(
+    ctk.CTkLabel(
+        frame_export, text="Section B — Every Analyzed Neuron", text_color=text_color,
+        font=ctk.CTkFont(size=14, weight="bold"),
+    ).pack(anchor="w", pady=(12, 1))
+    ctk.CTkLabel(
         frame_export,
-        text="Export Graphs for Every Neuron",
-        fg_color="#059669",
-        hover_color="#047857",
-        command=export_all_individual_neurons_results,
+        text="Exports one graph per folder for every neuron. A spike train, RF map, azimuth, elevation, and each tuning curve are never combined into one graph-data bundle.",
+        text_color=muted_text, wraplength=650, justify="left",
+    ).pack(anchor="w", pady=(0, 4))
+    add_export_checkbox_group(
+        frame_export, "Single graph types to export for every neuron", "all_individual",
+        SINGLE_NEURON_GRAPH_OPTIONS,
     )
-    btn_export_all_individual_neurons.pack(fill=tk.X, pady=3)
     btn_export_all_individual_graph_types = ctk.CTkButton(
         frame_export,
-        text="Export Every Individual Graph Type for Every Neuron",
+        text="Export Selected Single-Graph Files for Every Neuron",
         fg_color="#0F766E",
         hover_color="#115E59",
         command=export_all_individual_graph_types_results,
     )
     btn_export_all_individual_graph_types.pack(fill=tk.X, pady=3)
-    btn_export_all_sta = ctk.CTkButton(
-        frame_export,
-        text="Export All STA Data and Lag Graphs",
-        fg_color="#4F46E5",
-        hover_color="#4338CA",
-        command=export_all_sta_results,
-    )
-    btn_export_all_sta.pack(fill=tk.X, pady=3)
-
     # --- Global Controls ---
     frame_controls = ttk.Frame(frame_left, style="TFrame")
     frame_controls.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 5))
@@ -6970,15 +6640,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         btn_prepare_full_model_wavelets,
         btn_submit_plot,
         btn_runRF,
-        btn_run_sta,
         btn_run_model_plots,
         btn_run_full_model_plots,
         btn_export_all_results,
         btn_export_all_neurons,
         btn_export_individual_neuron,
-        btn_export_all_individual_neurons,
         btn_export_all_individual_graph_types,
-        btn_export_all_sta,
         btn_save_state,
         btn_load_state,
     ]
@@ -7071,24 +6738,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             btn_prepare_full_model_wavelets: {"downsample:coarse", "gabor:full"},
             btn_submit_plot: {"neural", "wavelet:coarse_rf"},
             btn_runRF: {"rf"},
-            btn_run_sta: {"neural", "downsample:coarse"},
             btn_run_model_plots: {"rf", "wavelet:model"},
             btn_run_full_model_plots: {"rf", "wavelet:full_model"},
             btn_export_all_results: {"rf"},
             btn_export_all_neurons: {"rf"},
             btn_export_individual_neuron: {"rf"},
-            btn_export_all_individual_neurons: {"rf"},
             btn_export_all_individual_graph_types: {"rf"},
-            btn_export_all_sta: {"neural", "downsample:coarse"},
         }
         for button, required in prerequisites.items():
             button.configure(state=tk.NORMAL if required.issubset(completed_actions) else tk.DISABLED)
-        try:
-            _refresh_sta_controls()
-            if sta_state.get("result") is None:
-                btn_export_all_sta.configure(state=tk.DISABLED)
-        except NameError:
-            pass
         next_tabs = {
             "Stimulus video downsampling": "2 Session Setup",
             "Neural cache creation": "3 Gabor",

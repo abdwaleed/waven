@@ -30,9 +30,9 @@ by decoding, GPU convolution, or storage rather than guessing from CPU/GPU
 percentages alone.
 
 Run `python scripts/benchmark_runtime.py` from the repository root for a small
-synthetic comparison of CPU/GPU Coarse RF and the STA backends on the current
-machine. It performs no experiment-cache writes and is the recommended way to
-decide whether optional FFT or fast-precision modes are worthwhile locally.
+synthetic comparison of CPU/GPU Coarse RF and PSTH-weighted STA timing on the
+current machine. It performs no experiment-cache writes and is useful for
+checking whether fast-precision convolution modes are worthwhile locally.
 
 ### Performance and hardware choices
 
@@ -53,7 +53,6 @@ only when diagnosing a machine-specific driver or filesystem issue.
 | `WAVEN_MULTI_GPU` | off | Explicitly enables PyTorch batch-parallel convolution across all detected CUDA GPUs. Leave this off unless all GPUs are dedicated to the analysis. |
 | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile` runner for long, fixed-shape convolution jobs. The first chunks are slower while the runner compiles; disable after a compiler/driver issue. |
 | `WAVEN_AMP` | off | Explicit Tensor Core float16 autocast for convolution only. It changes convolution round-off, so use only after validating a representative run against default precision. |
-| `WAVEN_STA_FFT` | off | Experimental bounded CUDA FFT calculation of the actual STA maps when the movie is already in RAM and at least eight lags are requested. The circular-shuffle null retains exact batched GEMMs. |
 
 Multi-GPU is deliberately opt-in: it distributes independent frame batches,
 then gathers them in original order. It does not change filter settings or

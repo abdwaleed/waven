@@ -95,7 +95,7 @@ The checked-in `pipeline_config.json` uses the exact schema written by the GUI's
 | `neural_source` | `"data_dir"`, `"spks_path"` | `data_dir` means fresh/raw acquisition; `spks_path` means continue from an existing cache. |
 | `downsample_percent` | number from 0 through 100 | Spatial percentage applied to movie-metadata width and height. Coarse RF, Run Model, and Run Full Model all share this one grid. |
 | `gabor_format`, `downsample_format`, `neural_cache_format`, `wavelet_format` | `"npy"` or `"zarr"` | Initial cache formats for the corresponding stage. `wavelet_format` controls the three consumer-specific wavelet-product buttons. |
-| `performance` | object of booleans | GUI runtime choices: `autotune`, `prefetch`, `async_writer`, `time_major_conv`, `rf_gpu`, `multi_gpu`, `torch_compile`, `amp`, and `sta_fft`. They control scheduling/hardware only; `amp` is explicitly a fast-precision convolution option. |
+| `performance` | object of booleans | GUI runtime choices: `autotune`, `prefetch`, `async_writer`, `time_major_conv`, `rf_gpu`, `multi_gpu`, `torch_compile`, and `amp`. They control scheduling/hardware only; `amp` is explicitly a fast-precision convolution option. |
 | `suite2p_subject_dirs` | string | Optional two-photon timeline dataset roots, separated by the platform path separator (`;` on Windows, `:` on Linux/macOS). Leave `""` unless Suite2p timeline discovery needs folders outside `Dir`. |
 
 Example performance block:
@@ -109,8 +109,7 @@ Example performance block:
   "rf_gpu": true,
   "multi_gpu": false,
   "torch_compile": false,
-  "amp": false,
-  "sta_fft": false
+  "amp": false
 }
 ```
 

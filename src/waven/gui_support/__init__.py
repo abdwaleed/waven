@@ -11,6 +11,14 @@ from .helpers import (
     _safe_name,
     _zarr_output_path,
 )
+from .export_selection import (
+    ALL_NEURON_GRAPH_OPTIONS,
+    CURRENT_INDIVIDUAL_GRAPH_OPTIONS,
+    SINGLE_NEURON_GRAPH_OPTIONS,
+    classify_export_record,
+    classify_individual_axis,
+    graph_payload,
+)
 
 __all__ = [
     "ToolTip",
@@ -23,4 +31,10 @@ __all__ = [
     "_default_gabor_library_path",
     "_normalise_gabor_params",
     "_ordered_float_union",
+    "ALL_NEURON_GRAPH_OPTIONS",
+    "CURRENT_INDIVIDUAL_GRAPH_OPTIONS",
+    "SINGLE_NEURON_GRAPH_OPTIONS",
+    "classify_export_record",
+    "classify_individual_axis",
+    "graph_payload",
 ]
