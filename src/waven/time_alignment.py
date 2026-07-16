@@ -332,7 +332,10 @@ def align_ephys_data(
     with open(pkl_path, "rb") as data:
         import pickle
         pkl_data = pickle.load(data) # Make sure to actually load the pickle!
-        SAMPLING_RATE = pkl_data['metadata']['sampling_frequencies'][0]
+        try:
+            SAMPLING_RATE = pkl_data['metadata']['sampling_frequencies'][0]
+        except KeyError:
+            SAMPLING_RATE = pkl_data['metadata']['sampling_frequency']
         units = pkl_data['units']
 
     if stimulus_duration is None or stimulus_duration <= 0:
