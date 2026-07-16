@@ -29,6 +29,27 @@ That line is the reliable way to identify whether a particular run is limited
 by decoding, GPU convolution, or storage rather than guessing from CPU/GPU
 percentages alone.
 
+### Responsive exports
+
+Exports first snapshot the selected Matplotlib figures on the GUI thread, then
+restore them on a headless Agg canvas in one background writer. PNG/SVG
+rendering, per-axis cropping, NPY/Zarr array writing, pickles, and manifests
+therefore do not block Tk's event loop or make Windows display **Not
+Responding** during large exports. The writer is deliberately single-threaded:
+simultaneous SVG rendering and many small-array writes contend for the same
+CPU, disk, and Matplotlib global state, usually making a large export slower.
+The serialized snapshot preserves the same figures, data payloads, and output
+formats as the foreground exporter. When STA single-neuron graphs are included,
+their bounded NumPy batch calculation also runs in a worker; only Tk-owned
+figure construction and snapshotting remain on the UI thread.
+
+During **Run Coarse RF Analysis**, firing-rate orientation tuning groups neurons
+that share the same preferred wavelet feature. Each feature matrix is read once
+from a disk-backed cache and multiplied against all matching neural responses
+at once using NumPy/BLAS. OSI/gOSI still use the established per-neuron metric
+functions, so this only changes data scheduling and not the firing-rate or
+selectivity definitions.
+
 Run `python scripts/benchmark_runtime.py` from the repository root for a small
 synthetic comparison of CPU/GPU Coarse RF and PSTH-weighted STA timing on the
 current machine. It performs no experiment-cache writes and is useful for

@@ -203,17 +203,22 @@ def interp_event_responses(ts, spks, events, window = n.arange(-1,2,0.1), interp
     n_events = len(events)
     n_window = len(window)
     if mean_over_window: n_window = 1
-    if resp_shape is None: responses = n.zeros((n_events, n_cells, n_window)) * n.nan
-    else: responses = n.zeros((n_events,) + resp_shape + (n_window,)) * n.nan
-    for idx, event in enumerate(events):
-        if print_interval is not None:
-            if idx % print_interval == 0: print("%d of %d events " % (idx, len(events)))
-        event_window = window + event
-        if not mean_over_window:
-            responses[idx] = f_spks(event_window)
-        else:
-            responses[idx] = f_spks(event_window).mean(axis=-1, keepdims=True)
-    return responses        
+    # Query all event windows in one SciPy call.  This keeps the original
+    # interpolation method and output contract while removing the Python loop
+    # over tens of thousands of stimulus frames.  For ``spks`` shaped
+    # ``(cells, time)``, interp1d returns ``(cells, events, window)``.
+    event_windows = n.asarray(events)[:, None] + n.asarray(window)[None, :]
+    sampled = f_spks(event_windows)
+    responses = n.moveaxis(sampled, -2, 0)
+    if mean_over_window:
+        responses = responses.mean(axis=-1, keepdims=True)
+    if print_interval is not None and n_events:
+        print("%d event windows interpolated in one vectorized batch" % n_events)
+    if resp_shape is not None:
+        expected_shape = (n_events,) + tuple(resp_shape) + (n_window,)
+        if responses.shape != expected_shape:
+            responses = responses.reshape(expected_shape)
+    return responses
 
 
 def extract_event_responses(ts, spks, events, window = (-1, 2), remove_nans=False):

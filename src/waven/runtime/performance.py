@@ -228,6 +228,18 @@ def cpu_worker_count(cap: Optional[int] = None) -> int:
     return max(1, min(cores - 1, limit))
 
 
+def two_photon_io_worker_count(n_planes: int, cap: int = 4) -> int:
+    """Return a bounded worker count for independent Suite2p plane reads.
+
+    Suite2p planes live in separate memory-mapped files.  A small thread pool
+    overlaps those reads and the per-plane neuropil correction without copying
+    the large arrays between processes.  More workers tend to contend for the
+    same disk and memory bandwidth, particularly on Windows, so this is capped
+    deliberately rather than using every CPU core.
+    """
+    return max(1, min(max(1, int(n_planes)), max(1, int(cap)), cpu_worker_count(cap=cap)))
+
+
 def cpu_inner_thread_count(workers: int = 1) -> int:
     """Return a BLAS/OpenMP budget that avoids nested-worker oversubscription."""
     workers = max(1, int(workers))

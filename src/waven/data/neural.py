@@ -5,6 +5,7 @@ signals, align neural activity to stimulus trials, and transform ROI positions.
 Stimulus wavelet arrays are handled by :mod:`waven.stimulus`.
 """
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import matplotlib
 
@@ -21,6 +22,12 @@ from ..Analysis_Utils import *
 from ..suite2p.utils import cortex_lab_utils as clu
 from ..suite2p.utils import timelinepy as tlu
 from ..suite2p.utils import utils
+from ..runtime.performance import (
+    available_ram_bytes,
+    cpu_threadpool_scope,
+    enabled_feature,
+    two_photon_io_worker_count,
+)
 
 def loadExperiment(dirs, exp_info, pathdir, block_end, n_planes=1, n_repeat=6, n_frames=18000):
     """Function for loadExperiment.
@@ -279,16 +286,7 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
     """
     
     def load_plane_data(p, start_idx, end_idx):
-        """Function for load plane data.
-
-        Args:
-            p: Input value for this operation.
-            start_idx: Input value for this operation.
-            end_idx: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
+        """Load one plane without materialising unselected Suite2p ROIs."""
         mask = np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)
         if data_type == 'fluo':
             F = np.load(path + '/plane%d/F.npy' % p, mmap_mode='c')[mask]
@@ -296,6 +294,16 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
             return ne.evaluate("F - (0.7 * Fneu)")[:, start_idx:end_idx]
         else: # 'spk'
             return np.load(path + '/plane%d/spks.npy' % p, mmap_mode='c')[mask][:, start_idx:end_idx]
+
+    def load_plane_payload(p):
+        """Read one independent Suite2p plane and its selected ROI positions."""
+        activity = load_plane_data(p, None, None)
+        mask = np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)
+        stat = np.load(path + '/plane%d/stat.npy' % p, allow_pickle=True)
+        positions = np.asarray([entry['med'] for entry in stat[mask]])
+        if Nb_plane != 1:
+            positions = positions + np.asarray((1, p * 512))
+        return activity, positions
 
     if first:
         print('first session')
@@ -307,39 +315,46 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
         print('mid')
         slice_start, slice_end = block_end[0], block_end[1]
 
-    if Nb_plane != 1:
-        print('multiple planes')
-        if plane != -1:
-            print('loading planes nb ', plane)
-            spks = load_plane_data(plane, slice_start, slice_end)
-        else:
-            print('loading all planes')
-            M = [load_plane_data(p, None, None) for p in range(Nb_plane)]
-            min_len = M[-1].shape[1] if M else 0
-            spks = np.concatenate([m[:, :min_len] for m in M])[:, slice_start:slice_end]
+    plane_ids = [int(plane)] if plane != -1 else list(range(int(Nb_plane)))
+    parallel_io = enabled_feature("2P_PARALLEL_IO", default=True) and len(plane_ids) > 1
+    workers = two_photon_io_worker_count(len(plane_ids)) if parallel_io else 1
+    if workers > 1:
+        # Fancy indexing selected Suite2p ROIs materialises an in-RAM array.
+        # Reserve most of available memory for the OS, the final concatenated
+        # response array, and SciPy interpolation before allowing concurrent
+        # plane work. Reading only NPY headers here is inexpensive.
+        per_plane_bytes = []
+        source_name = 'F.npy' if data_type == 'fluo' else 'spks.npy'
+        temporary_factor = 3 if data_type == 'fluo' else 1
+        for p in plane_ids:
+            mask = np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)
+            source = np.load(path + '/plane%d/' % p + source_name, mmap_mode='r')
+            per_plane_bytes.append(int(mask.sum()) * int(source.shape[1]) * source.dtype.itemsize * temporary_factor)
+        largest_plane = max(per_plane_bytes, default=0)
+        memory_workers = max(1, int(available_ram_bytes() * 0.20) // max(1, largest_plane))
+        workers = max(1, min(workers, memory_workers))
+    print(f"Loading {len(plane_ids)} Suite2p plane(s) with {workers} I/O worker(s).")
+    # Each task opens its own memory maps and returns a compact selected-cell
+    # array.  ``executor.map`` preserves plane order, which preserves the
+    # historical neuron ordering used by saved RF and model artifacts.
+    if workers > 1:
+        with cpu_threadpool_scope(workers), ThreadPoolExecutor(max_workers=workers) as executor:
+            payloads = list(executor.map(load_plane_payload, plane_ids))
     else:
-        print('single plane')
-        spks = np.concatenate([load_plane_data(p, slice_start, slice_end) for p in range(Nb_plane)])
+        payloads = [load_plane_payload(p) for p in plane_ids]
 
-    if Nb_plane != 1:
-        if plane != -1:
-            if data_type == 'fluo':
-                print('loading planes nb ', plane)
-            neuron_pos = np.array([(1, plane * 512) + np.asarray([sta['med'] for sta in np.load(
-                path + '/plane%d/stat.npy' % plane, allow_pickle=True)[
-                np.load(path + '/plane%d/iscell.npy' % plane, mmap_mode='r')[:, 0].astype(bool)]])])[0]
-        else:
-            if data_type == 'fluo':
-                print('loading all planes')
-            neuron_pos = np.concatenate([(1, p * 512) + np.asarray([sta['med'] for sta in np.load(
-                path + '/plane%d/stat.npy' % p, allow_pickle=True)[
-                np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)]]) for p in range(1, Nb_plane)])
+    plane_activity = [activity for activity, _positions in payloads]
+    plane_positions = [positions for _activity, positions in payloads]
+    if len(plane_activity) > 1:
+        # Every plane must contribute the same acquisition duration to a
+        # trial-aligned tensor.  Trim all to the shortest available recording,
+        # not merely the final plane (which was an accidental legacy choice).
+        min_len = min(activity.shape[1] for activity in plane_activity)
+        spks = np.concatenate([activity[:, :min_len] for activity in plane_activity], axis=0)
     else:
-        if data_type == 'fluo':
-            print('single plane')
-        neuron_pos = np.concatenate([(1, p * 512) + np.asarray([sta['med'] for sta in np.load(
-            path + '/plane%d/stat.npy' % p, allow_pickle=True)[
-            np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)]]) for p in range(Nb_plane)])
+        spks = plane_activity[0]
+    spks = spks[:, slice_start:slice_end]
+    neuron_pos = np.concatenate(plane_positions, axis=0)
 
     print('shape spks : ', spks.shape)
     print('neuron_pos spks : ', neuron_pos.shape)
