@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -28,6 +28,7 @@ class AlignedNeuralData:
     neuron_pos: np.ndarray
     aligned_spikes: Optional[np.ndarray] = None
     unit_ids: Optional[np.ndarray] = None
+    unit_info: Optional[Sequence[Dict[str, Any]]] = None
 
 
 def _save_aligned_outputs(
@@ -36,9 +37,17 @@ def _save_aligned_outputs(
     save_dir: Optional[Path],
     output_format: str = "npy",
     unit_ids: Optional[Sequence[object]] = None,
+    unit_info: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> dict:
     """Persist aligned arrays beside the experiment data for later GUI reuse."""
-    return save_aligned_neural_cache(neuron_pos, spikes, save_dir, output_format, unit_ids=unit_ids)
+    return save_aligned_neural_cache(
+        neuron_pos,
+        spikes,
+        save_dir,
+        output_format,
+        unit_ids=unit_ids,
+        unit_info=unit_info,
+    )
 
 
 def load_two_photon_spikes(
@@ -158,11 +167,24 @@ def align_ephys_data(
         spikes = np.zeros((n_trials, nb_frames, n_neurons))
 
         unit_ids = np.asarray(list(units.keys()), dtype=object)
-        for neuron_idx, neuron_data in enumerate(units.values()):
+        unit_info = []
+        for neuron_idx, (unit_id, neuron_data) in enumerate(units.items()):
             
             position = np.asarray(neuron_data.get('position', []), dtype=float).ravel()
             neuron_pos[neuron_idx, :min(3, position.size)] = position[:3]
             spike_train = np.array(neuron_data['spike_train'])
+            shank_group = neuron_data.get("shank_group")
+            unit_info.append(
+                {
+                    "shank": f"shank{shank_group}" if shank_group is not None else "",
+                    "unit": f"unit{unit_id}",
+                    "shank_group": shank_group,
+                    "unit_id": unit_id,
+                    "position": position[:3].tolist(),
+                    "quality": neuron_data.get("label", ""),
+                    "n_spikes": int(neuron_data.get("n_spikes", spike_train.size)),
+                }
+            )
 
             for trial_idx, (start_time, end_time) in enumerate(zip(start_times, end_times)):
                 trial_pd_mask = (pd_time >= start_time) & (pd_time <= end_time)
@@ -203,7 +225,7 @@ def align_ephys_data(
                 spikes[trial_idx, :, neuron_idx] = firing_rate_hz
 
         # Return frame-aligned firing rates in Hz. Do not subtract timestamps here.
-        return neuron_pos, spikes, unit_ids
+        return neuron_pos, spikes, unit_ids, unit_info
     
     def handle_dropped_frames(frame_edges: list, nb_frames: int) -> None:
         """
@@ -348,20 +370,28 @@ def align_ephys_data(
     start_times, end_times = get_possible_trial_edges(freq, pd_time) 
     start_times, end_times = validate_edges(start_times, end_times, stimulus_duration, SAMPLING_RATE, 0.01)
 
-    neuron_pos, spikes, unit_ids = extract_pos_and_spikes(
+    neuron_pos, spikes, unit_ids, unit_info = extract_pos_and_spikes(
         units, start_times, end_times, pd_time, pd_state, nb_frames
     )
     
     print(neuron_pos.shape)
     print(spikes.shape)
     cache_dir = save_dir or data_dir
-    _save_aligned_outputs(neuron_pos, spikes, cache_dir, output_format, unit_ids=unit_ids)
+    _save_aligned_outputs(
+        neuron_pos,
+        spikes,
+        cache_dir,
+        output_format,
+        unit_ids=unit_ids,
+        unit_info=unit_info,
+    )
 
     return AlignedNeuralData(
         spikes=spikes,
         neuron_pos=neuron_pos,
         aligned_spikes=None,
         unit_ids=unit_ids,
+        unit_info=unit_info,
     )
 
 # TEST EPHYS CODE

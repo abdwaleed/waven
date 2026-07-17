@@ -51,3 +51,20 @@ def test_single_graph_payload_excludes_sibling_dashboard_arrays():
     assert graph["azimuth_correlation_tuning"] == [1, 2]
     assert "rf2d" not in graph
     assert "elevation_correlation_tuning" not in graph
+
+
+def test_orientation_axis_payload_uses_its_precomputed_reference_like_record():
+    correlation_record = {"unit_id": "shank0_unit0", "curve_kind": "correlation"}
+    rate_record = {"unit_id": "shank0_unit0", "curve_kind": "firing_rate"}
+    payload = {
+        "source": "Inspect Single Neuron",
+        "neuron_id": 0,
+        "orientation_correlation_export": correlation_record,
+        "orientation_firing_rate_export": rate_record,
+    }
+
+    correlation = graph_payload(payload, "orientation_correlation")
+    firing_rate = graph_payload(payload, "orientation_firing_rate")
+
+    assert correlation["orientation_export"] == correlation_record
+    assert firing_rate["orientation_export"] == rate_record

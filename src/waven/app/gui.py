@@ -84,6 +84,7 @@ from ..project_layout import (
 from ..storage.neural_cache import (
     find_neural_cache_pair,
     load_neural_cache_pair,
+    load_unit_info,
     load_unit_ids,
 )
 from ..stimulus.metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
@@ -96,6 +97,21 @@ _PLOT_IMPORTS_READY = False
 plt = None
 FigureCanvasTkAgg = None
 NavigationToolbar2Tk = None
+
+ORIENTATION_EXPORT_COMPARISON_NOTE = """WAVEN ORIENTATION-TUNING EXPORT NOTE
+
+These curves are derived from the Coarse RF Gabor-wavelet analysis, not from
+traditional discrete orientation-stimulus trials.  The firing-rate curve is a
+wavelet-energy-weighted firing-rate response at the neuron's preferred RF
+feature.  The correlation curve is the Pearson correlation between the
+frame-aligned neural response and each orientation's Gabor-wavelet feature.
+
+`trial_values` contains one frame-aligned trial estimate per orientation bin.
+It should therefore not be interpreted as a conventional repeated-static-
+orientation stimulus trial unless the stimulus design independently supports
+that interpretation.  Preferred orientation is the discrete orientation bin
+with the largest mean value; no interpolation or curve fitting is applied.
+"""
 
 
 def _ensure_plot_imports():
@@ -184,7 +200,8 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     """
     global _RF_IMPORTS_READY
     global compute_skewness_neurons, PearsonCorrelationPinkNoise
-    global repetability_trial3, firing_rate_orientation_tuning, close_orientation_curve
+    global repetability_trial3, correlation_orientation_tuning, firing_rate_orientation_tuning
+    global close_orientation_curve, orientation_selectivity_from_tuning
     if _RF_IMPORTS_READY:
         return
     _ensure_plot_imports()
@@ -195,14 +212,18 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     )
     from ..analysis.orientation_selectivity import (
         close_orientation_curve as _close_orientation_curve,
+        correlation_orientation_tuning as _correlation_orientation_tuning,
         firing_rate_orientation_tuning as _firing_rate_orientation_tuning,
+        orientation_selectivity_from_tuning as _orientation_selectivity_from_tuning,
     )
 
     compute_skewness_neurons = _compute_skewness_neurons
     PearsonCorrelationPinkNoise = _PearsonCorrelationPinkNoise
     repetability_trial3 = _repetability_trial3
     close_orientation_curve = _close_orientation_curve
+    correlation_orientation_tuning = _correlation_orientation_tuning
     firing_rate_orientation_tuning = _firing_rate_orientation_tuning
+    orientation_selectivity_from_tuning = _orientation_selectivity_from_tuning
     _RF_IMPORTS_READY = True
 
 
@@ -262,6 +283,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     Returns:
         Result produced by the operation.
     """
+    original_stdout, original_stderr = sys.stdout, sys.stderr
     param_defaults = dict(param_defaults or {})
     gui_options = dict(gui_options or {})
     if workflow not in (WORKFLOW_2P, WORKFLOW_EPHYS):
@@ -386,7 +408,24 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             self._buffer = []
             self._lock = threading.Lock()
             self._flush_pending = False
-            self.widget.after(self.flush_ms, self._poll_flush)
+            self._closed = False
+            self._after_id = None
+            self._schedule_poll()
+
+        def _schedule_poll(self):
+            """Schedule one poll while the Tk text widget still exists."""
+            if not self._closed:
+                self._after_id = self.widget.after(self.flush_ms, self._poll_flush)
+
+        def close(self):
+            """Stop polling before the application tears down its Tcl commands."""
+            self._closed = True
+            if self._after_id is not None:
+                try:
+                    self.widget.after_cancel(self._after_id)
+                except tk.TclError:
+                    pass
+                self._after_id = None
 
         def write(self, string):
             """Function for write.
@@ -394,7 +433,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             Args:
                 string: Input value for this operation.
             """
-            if not string:
+            if self._closed or not string:
                 return
             with self._lock:
                 self._buffer.append(string)
@@ -402,13 +441,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         def _poll_flush(self):
             """Flush buffered worker output from Tk's main thread."""
+            self._after_id = None
+            if self._closed:
+                return
             try:
                 self._flush()
             finally:
-                try:
-                    self.widget.after(self.flush_ms, self._poll_flush)
-                except Exception:
-                    pass
+                if not self._closed:
+                    try:
+                        self._schedule_poll()
+                    except tk.TclError:
+                        self._closed = True
 
         def _flush(self):
             """Function for flush."""
@@ -2417,6 +2460,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if file_options["data_pickle"]:
                     with open(os.path.join(graph_dir, "data.pkl"), "wb") as handle:
                         pickle.dump(bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                orientation_export = payload.get("orientation_export") if graph_kind in {
+                    "orientation_correlation", "orientation_firing_rate"
+                } else None
+                orientation_pickle = None
+                orientation_note = None
+                if isinstance(orientation_export, dict):
+                    orientation_note = "orientation_tuning_comparison_note.txt"
+                    with open(os.path.join(graph_dir, orientation_note), "w", encoding="utf-8") as handle:
+                        handle.write(ORIENTATION_EXPORT_COMPARISON_NOTE)
+                    if file_options["data_pickle"]:
+                        orientation_pickle = "orientation_tuning.pkl"
+                        with open(os.path.join(graph_dir, orientation_pickle), "wb") as handle:
+                            # This is intentionally the direct, reference-like
+                            # record rather than an export wrapper. It was fully
+                            # calculated during Run Coarse RF Analysis.
+                            pickle.dump(orientation_export, handle, protocol=pickle.HIGHEST_PROTOCOL)
                 manifest = {
                     "title": title,
                     "source_figure": record.get("title"),
@@ -2427,6 +2486,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         "png": "graph.png" if file_options["png"] else None,
                         "svg": "graph.svg" if file_options["svg"] else None,
                         "pickle_data": "data.pkl" if file_options["data_pickle"] else None,
+                        "orientation_tuning_pickle": orientation_pickle,
+                        "orientation_comparison_note": orientation_note,
                         "array_format": active_array_format if file_options["arrays"] else None,
                         "array_files": array_files,
                     },
@@ -4157,6 +4218,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         rf_extra = {
             "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
             "force_3d_graphs_to_2d": bool(force_2d_graphs_var.get()),
+            # Cached Coarse RF results before this schema lack the complete
+            # precomputed orientation-export records.
+            "orientation_export_schema": 2,
         }
         cached = _get_cached_entry("coarse_rf", extra=rf_extra)
         if cached:
@@ -4212,12 +4276,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         sigmas_deg = np.trunc(2 * deg_per_pix * sigmas * 100) / 100
 
         unit_ids = None
+        unit_info = None
         if _selected_neural_source() == "data_dir":
             cache_pair = find_neural_cache_pair(neural_cache_dir)
             if cache_pair is not None:
                 update_progress(10, "Coarse receptive-field analysis", "Loading aligned neural cache")
                 spks, neuron_pos, saved_spks_path, saved_pos_path = load_neural_cache_pair(neural_cache_dir)
                 unit_ids = load_unit_ids(neural_cache_dir, np.asarray(neuron_pos).shape[0])
+                unit_info = load_unit_info(neural_cache_dir, np.asarray(neuron_pos).shape[0])
                 print(f"Loaded aligned spikes from: {saved_spks_path}")
                 print(f"Loaded neuron positions from: {saved_pos_path}")
             else:
@@ -4248,6 +4314,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 spks = aligned.spikes
                 neuron_pos = aligned.neuron_pos
                 unit_ids = aligned.unit_ids
+                unit_info = aligned.unit_info
                 cache_pair = find_neural_cache_pair(neural_cache_dir)
                 saved_spks_path = cache_pair[0] if cache_pair else None
                 if saved_spks_path is not None:
@@ -4266,6 +4333,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     mmap_mode=None,
                 )
                 unit_ids = load_unit_ids(spks_folder, np.asarray(neuron_pos).shape[0])
+                unit_info = load_unit_info(spks_folder, np.asarray(neuron_pos).shape[0])
                 print(f"Loaded aligned spikes from: {loaded_spks_path}")
                 print(f"Loaded neuron positions from: {loaded_pos_path}")
             except Exception as e:
@@ -4342,12 +4410,117 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             w_c_downsampled,
             rfs_gabor,
         )
+        update_progress(82, "Coarse receptive-field analysis", "Precomputing correlation tuning exports")
+        correlation_selectivity = correlation_orientation_tuning(
+            spks[:, :n_frames, :],
+            w_c_downsampled,
+            rfs_gabor,
+            angles_deg=orientation_selectivity["angles_deg"],
+        )
+
+        def _orientation_export_records(selectivity, curve_kind):
+            """Build ready-to-serialize records; export never recomputes them."""
+            angles = np.asarray(selectivity["angles_deg"], dtype=float)
+            means = np.asarray(selectivity["orientation_tuning"], dtype=float)
+            trial_values = np.asarray(selectivity["trial_orientation_tuning"], dtype=float)
+            records = []
+            for neuron_id in range(means.shape[0]):
+                values = means[neuron_id]
+                trials = trial_values[:, neuron_id, :]
+                trial_counts = np.sum(np.isfinite(trials), axis=0)
+                std_values = np.full(values.shape, np.nan, dtype=float)
+                valid_std = trial_counts > 1
+                if np.any(valid_std):
+                    std_values[valid_std] = np.nanstd(trials[:, valid_std], axis=0, ddof=1)
+                sem_values = np.divide(
+                    std_values,
+                    np.sqrt(trial_counts),
+                    out=np.full(values.shape, np.nan, dtype=float),
+                    where=trial_counts > 1,
+                )
+                finite = np.isfinite(values)
+                if np.any(finite):
+                    valid_indices = np.flatnonzero(finite)
+                    preferred_bin = int(valid_indices[np.argmax(values[finite])])
+                    maximum = float(np.nanmax(values))
+                    minimum = float(np.nanmin(values))
+                    baseline = float(np.nanmean(values))
+                    denominator = abs(maximum) + abs(minimum)
+                    modulation_index = (maximum - minimum) / denominator if denominator > 1e-12 else np.nan
+                    preferred_angle = float(angles[preferred_bin])
+                    osi, gosi = orientation_selectivity_from_tuning(values, angles)
+                else:
+                    preferred_bin = None
+                    maximum = minimum = baseline = modulation_index = preferred_angle = osi = gosi = np.nan
+                cached_info = unit_info[neuron_id] if unit_info is not None and neuron_id < len(unit_info) else {}
+                raw_unit_id = unit_ids[neuron_id] if unit_ids is not None and neuron_id < len(unit_ids) else neuron_id
+                if isinstance(raw_unit_id, np.generic):
+                    raw_unit_id = raw_unit_id.item()
+                shank = cached_info.get("shank", "")
+                unit = cached_info.get("unit") or f"unit{raw_unit_id}"
+                record_unit_id = f"{shank}_{unit}" if shank else str(unit)
+                best_feature = np.asarray(rfs_gabor[1], dtype=int)[:5, neuron_id]
+                feature_x, feature_y, feature_orientation, feature_sigma, feature_frequency = (
+                    int(value) for value in best_feature
+                )
+                records.append(
+                    {
+                        "unit_id": record_unit_id,
+                        "curve_kind": curve_kind,
+                        "tuning": {
+                            "orientations": angles.tolist(),
+                            "mean_values": values.tolist(),
+                            "sem_values": sem_values.tolist(),
+                            "std_values": std_values.tolist(),
+                            "trial_counts": trial_counts.astype(int).tolist(),
+                            "trial_values": {
+                                float(angle): trials[:, orientation_index].tolist()
+                                for orientation_index, angle in enumerate(angles)
+                            },
+                            "osi": float(osi),
+                            "gosi": float(gosi),
+                            "preferred_orientation_bin": preferred_bin,
+                            "preferred_orientation_deg": float(preferred_angle),
+                            "modulation_index": float(modulation_index),
+                            "max_value": float(maximum),
+                            "min_value": float(minimum),
+                            "baseline_value": float(baseline),
+                            "value_label": "Firing rate (Hz)" if curve_kind == "firing_rate" else "Pearson correlation (r)",
+                            "preferred_orientation_method": "discrete maximum orientation bin (no fitting)",
+                        },
+                        "unit_info": {
+                            "original_unit_id": raw_unit_id,
+                            "shank": shank,
+                            "unit": unit,
+                            "unit_index": neuron_id,
+                            "quality": cached_info.get("quality", ""),
+                            "position": cached_info.get("position", np.asarray(neuron_pos[neuron_id]).tolist()),
+                            "n_spikes_total": cached_info.get("n_spikes", ""),
+                            "channel": "",
+                        },
+                        "gabor_feature": {
+                            "spatial_x_index": feature_x,
+                            "spatial_y_index": feature_y,
+                            "preferred_rf_orientation_bin": feature_orientation,
+                            "preferred_rf_orientation_deg": float(angles[feature_orientation]),
+                            "sigma_index": feature_sigma,
+                            "sigma_deg": float(sigmas_deg[feature_sigma]),
+                            "frequency_index": feature_frequency,
+                            "frequency_cycles_per_deg": float(rf_frequencies[feature_frequency]),
+                        },
+                    }
+                )
+            return records
+
+        firing_rate_orientation_exports = _orientation_export_records(orientation_selectivity, "firing_rate")
+        correlation_orientation_exports = _orientation_export_records(correlation_selectivity, "correlation")
         _write_recovery_step("coarse_rf_complete", wavelet_dir=parent_dir)
         analysis_state.clear()
         analysis_state.update(
             spks=spks,
             neuron_pos=neuron_pos,
             unit_ids=unit_ids,
+            unit_info=unit_info,
             rfs_gabor=rfs_gabor,
             wavelets_complex=w_c_downsampled,
             sigmas=sigmas,
@@ -4363,6 +4536,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             coarse_ny=coarse_ny,
             n_orientations=n_orientations,
             orientation_selectivity=orientation_selectivity,
+            correlation_selectivity=correlation_selectivity,
+            firing_rate_orientation_exports=firing_rate_orientation_exports,
+            correlation_orientation_exports=correlation_orientation_exports,
             nb_frames=nb_frames,
             wavelet_dir=parent_dir,
         )
@@ -4453,16 +4629,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # Keep the two orientation plots adjacent and identically sized.
             # This makes their distinct units (correlation versus firing rate)
             # comparable without implying a different x axis.
-            fig3 = plt.figure(figsize=(10, 11), constrained_layout=True)
-            gs = fig3.add_gridspec(4, 2)
+            fig3 = plt.figure(figsize=(10, 14), constrained_layout=True)
+            gs = fig3.add_gridspec(5, 2, height_ratios=(1.25, 1, 1, 1.5, 1))
             ax3_0 = fig3.add_subplot(gs[0, :])
             ax3_1 = fig3.add_subplot(gs[1, 0])
             ax3_2 = fig3.add_subplot(gs[1, 1])
             ax3_3 = fig3.add_subplot(gs[2, 0])
             ax3_4 = fig3.add_subplot(gs[2, 1])
-            ax3_5 = fig3.add_subplot(gs[3, 0])
-            ax3_6 = fig3.add_subplot(gs[3, 1])
-            ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4, ax3_5, ax3_6]
+            ax3_7 = fig3.add_subplot(gs[3, 0])
+            ax3_8 = fig3.add_subplot(gs[3, 1])
+            ax3_5 = fig3.add_subplot(gs[4, 0])
+            ax3_6 = fig3.add_subplot(gs[4, 1])
+            ax3 = [ax3_0, ax3_1, ax3_2, ax3_3, ax3_4, ax3_5, ax3_6, ax3_7, ax3_8]
             # Explicit layout and a borderless figure patch avoid the stray
             # top-left frame artifact that can remain after repeated Tk redraws.
             fig_sta = plt.figure(figsize=(10, 7), constrained_layout=False)
@@ -4650,18 +4828,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     feature_tuning = np.asarray(
                         rfs_gabor[0][neuron_id, best_x, best_y, :, :, best_frequency], dtype=float
                     )
-                    correlation_orientation_tuning = feature_tuning[:, best_sigma]
+                    correlation_orientation_tuning = np.asarray(
+                        analysis_state["correlation_selectivity"]["orientation_tuning"][neuron_id], dtype=float
+                    )
                     s_tuning = feature_tuning[best_orientation, :]
                     f_tuning = np.asarray(
                         rfs_gabor[0][neuron_id, best_x, best_y, best_orientation, best_sigma, :], dtype=float
                     )
                     if w_c_downsampled.ndim == 6:
-                        orientation_features = w_c_downsampled[:n_frames, best_x, best_y, :, best_sigma, best_frequency]
                         size_features = w_c_downsampled[:n_frames, best_x, best_y, best_orientation, :, best_frequency]
                     else:
-                        orientation_features = w_c_downsampled[:n_frames, best_x, best_y, :, best_sigma]
                         size_features = w_c_downsampled[:n_frames, best_x, best_y, best_orientation, :]
-                    ori_ci, ori_ci_trials = correlation_tuning_ci(orientation_features, trial_spikes[:, :n_frames])
+                    ori_ci = analysis_state["correlation_selectivity"].get("orientation_sem")
+                    ori_ci = None if ori_ci is None else np.asarray(ori_ci, dtype=float)[neuron_id]
+                    correlation_record = analysis_state["correlation_orientation_exports"][neuron_id]
+                    firing_rate_record = analysis_state["firing_rate_orientation_exports"][neuron_id]
+                    ori_ci_trials = int(min(correlation_record["tuning"]["trial_counts"]))
                     size_ci, size_ci_trials = correlation_tuning_ci(size_features, trial_spikes[:, :n_frames])
                     rate_orientation_tuning = np.asarray(
                         analysis_state["orientation_selectivity"]["orientation_tuning"][neuron_id],
@@ -4690,6 +4872,46 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     rate_angles, rate_ori_tun = close_orientation_curve(
                         base_orientation_angles, rate_orientation_tuning
                     )
+
+                    def _orientation_stats_panel(axis, export_record):
+                        """Render only the statistics prepared by Coarse RF analysis."""
+                        tuning_record = export_record["tuning"]
+                        record = export_record["unit_info"]
+                        position = record.get("position", np.asarray(neuron_pos[neuron_id]).tolist())
+                        if isinstance(position, (list, tuple, np.ndarray)):
+                            position_text = "[" + ", ".join(f"{float(value):.3f}" for value in position) + "]"
+                        else:
+                            position_text = str(position or "")
+                        shank = record.get("shank") or ""
+                        unit = record.get("unit") or ""
+                        quality = record.get("quality") or ""
+                        n_spikes = record.get("n_spikes_total", "")
+                        stats_text = (
+                            f"TUNING STATISTICS ({tuning_record['value_label']})\n"
+                            f"OSI: {tuning_record['osi']:.3f}\n"
+                            f"gOSI: {tuning_record['gosi']:.3f}\n"
+                            f"Preferred bin: {tuning_record['preferred_orientation_bin']}\n"
+                            f"Preferred: {tuning_record['preferred_orientation_deg']:.1f} deg\n"
+                            f"Mod. Index: {tuning_record['modulation_index']:.3f}\n"
+                            f"Max: {tuning_record['max_value']:.4g}\n"
+                            f"Min: {tuning_record['min_value']:.4g}\n"
+                            f"Baseline: {tuning_record['baseline_value']:.4g}\n"
+                            f"Trials: {min(tuning_record['trial_counts'])}\n\n"
+                            "UNIT INFO\n"
+                            f"Shank: {shank}\n"
+                            f"Unit: {unit}\n"
+                            "Channel: \n"
+                            f"Position: {position_text}\n"
+                            f"Quality: {quality}\n"
+                            f"N spikes: {n_spikes}"
+                        )
+                        axis.set_axis_off()
+                        axis.text(
+                            0.02, 0.97, stats_text, transform=axis.transAxes,
+                            ha="left", va="top", family="monospace", fontsize=8,
+                            bbox={"boxstyle": "round,pad=0.65", "facecolor": "#F8FAFC", "edgecolor": "#94A3B8"},
+                        )
+
                     selectivity_text = f"OSI {neuron_osi:.6f}, gOSI {neuron_gosi:.6f}"
                     for extra_ax in [axis for axis in list(fig3.axes) if axis not in ax3]:
                         extra_ax.remove()
@@ -4782,6 +5004,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     ax3[4].set_ylabel("Firing rate (Hz)" if workflow == WORKFLOW_EPHYS else "Activity (a.u.)")
                     ax3[4].set_xticks([0, 90, 180])
                     ax3[4].legend(fontsize=8)
+                    _orientation_stats_panel(ax3[7], correlation_record)
+                    _orientation_stats_panel(ax3[8], firing_rate_record)
                     _set_figure_export_payload(
                         fig3,
                         {
@@ -4796,6 +5020,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "osi": neuron_osi,
                             "gosi": neuron_gosi,
                             "osi_source": "firing_rate",
+                            "orientation_correlation_export": correlation_record,
+                            "orientation_firing_rate_export": firing_rate_record,
                             "size_tuning": s_tuning,
                             "size_correlation_ci_95": size_ci,
                             "frequency_tuning": f_tuning if has_frequency_axis else None,
@@ -5970,6 +6196,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
+    terminal_redirect = None
     keep_awake = KeepAwake("waven analysis GUI is open")
     keep_awake.start()
     workflow_label = workflow_display_name(workflow)
@@ -5978,8 +6205,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def on_closing():
         """Function for on closing."""
         if messagebox.askokcancel("Quit", "Are you sure you want to close the application? Unsaved temporary data will be removed."):
+            cancel_event = active_task.get("cancel_event")
+            if cancel_event is not None:
+                cancel_event.set()
+            if terminal_redirect is not None:
+                terminal_redirect.close()
+            # ``after`` commands retain Python callback names in Tcl.  Cancel
+            # every outstanding callback while those commands still exist so
+            # CustomTkinter's DPI monitor and our output poller cannot fire
+            # after ``destroy`` removes their registered commands.
+            try:
+                for after_id in root.tk.call("after", "info"):
+                    root.after_cancel(after_id)
+            except tk.TclError:
+                pass
             keep_awake.stop()
             cleanup_temporary_directories()
+            sys.stdout, sys.stderr = original_stdout, original_stderr
             root.quit()
             root.destroy()
 
@@ -6223,8 +6465,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     text_log.bind("<MouseWheel>", _terminal_mousewheel)
     text_log.bind("<Button-4>", lambda event: (text_log.yview_scroll(-3, "units"), "break")[1])
     text_log.bind("<Button-5>", lambda event: (text_log.yview_scroll(3, "units"), "break")[1])
-    sys.stdout = RedirectText(text_log)
-    sys.stderr = RedirectText(text_log)
+    terminal_redirect = RedirectText(text_log)
+    sys.stdout = terminal_redirect
+    sys.stderr = terminal_redirect
 
     # Set sensible initial sash positions after layout
     root.update_idletasks()
@@ -7589,4 +7832,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     try:
         root.mainloop()
     finally:
+        if terminal_redirect is not None:
+            terminal_redirect.close()
+        if sys.stdout is terminal_redirect:
+            sys.stdout = original_stdout
+        if sys.stderr is terminal_redirect:
+            sys.stderr = original_stderr
         keep_awake.stop()

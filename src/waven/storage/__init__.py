@@ -5,6 +5,7 @@ from .binary_movie import SignedBinaryMovie
 from .neural_cache import (
     find_neural_cache_pair,
     load_neural_cache_pair,
+    load_unit_info,
     normalize_neural_cache_format,
     save_aligned_neural_cache,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "find_neural_cache_pair",
     "load_array",
     "load_neural_cache_pair",
+    "load_unit_info",
     "normalize_neural_cache_format",
     "save_aligned_neural_cache",
     "SignedBinaryMovie",

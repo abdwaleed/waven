@@ -4,6 +4,7 @@ import numpy as np
 
 from waven.analysis.orientation_selectivity import (
     close_orientation_curve,
+    correlation_orientation_tuning,
     firing_rate_orientation_tuning,
     orientation_selectivity_from_tuning,
 )
@@ -125,4 +126,29 @@ def test_firing_rate_tuning_reads_each_storage_chunk_once_per_time_tile():
     np.testing.assert_allclose(result["orientation_tuning"], expected_tuning, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(
         result["trial_orientation_tuning"], expected_trial_tuning, rtol=1e-12, atol=1e-12
+    )
+
+
+def test_correlation_tuning_precomputes_trial_curves_without_changing_rf_means():
+    wavelets = np.zeros((4, 1, 1, 2, 1), dtype=float)
+    wavelets[:, 0, 0, 0, 0] = [0, 1, 2, 3]
+    wavelets[:, 0, 0, 1, 0] = [3, 2, 1, 0]
+    spikes = np.array(
+        [
+            [[0.0], [1.0], [2.0], [3.0]],
+            [[3.0], [2.0], [1.0], [0.0]],
+        ]
+    )
+    # The mean orientation curve is the pre-existing RF value, while the new
+    # trial values are Pearson r estimates ready for export.
+    rf_values = np.array([[[[[[0.25]], [[-0.25]]]]]])
+    preferred_indices = np.array([[0], [0], [0], [0], [0]])
+
+    result = correlation_orientation_tuning(
+        spikes, wavelets, (rf_values, preferred_indices), angles_deg=[0, 90]
+    )
+
+    np.testing.assert_allclose(result["orientation_tuning"], [[0.25, -0.25]])
+    np.testing.assert_allclose(
+        result["trial_orientation_tuning"][:, 0, :], [[1.0, -1.0], [-1.0, 1.0]]
     )

@@ -88,8 +88,18 @@ _PAYLOAD_KEYS = {
     "receptive_field": ("rf2d", "best_params"),
     "elevation": ("elevation_correlation_tuning",),
     "azimuth": ("azimuth_correlation_tuning",),
-    "orientation_correlation": ("orientation_correlation_tuning", "orientation_correlation_ci_95"),
-    "orientation_firing_rate": ("orientation_firing_rate_tuning", "osi", "gosi", "osi_source"),
+    "orientation_correlation": (
+        "orientation_correlation_tuning",
+        "orientation_correlation_ci_95",
+        "orientation_correlation_export",
+    ),
+    "orientation_firing_rate": (
+        "orientation_firing_rate_tuning",
+        "osi",
+        "gosi",
+        "osi_source",
+        "orientation_firing_rate_export",
+    ),
     "size_tuning": ("size_tuning", "size_correlation_ci_95"),
     "spatial_frequency": ("frequency_tuning", "frequency_tuning_available"),
     "sta": (
@@ -108,4 +118,8 @@ def graph_payload(payload: Any, graph_kind: str) -> Dict[str, Any]:
     for key in _PAYLOAD_KEYS.get(graph_kind, ()):
         if key in payload:
             result[key] = payload[key]
+    if graph_kind == "orientation_correlation" and "orientation_correlation_export" in result:
+        result["orientation_export"] = result["orientation_correlation_export"]
+    elif graph_kind == "orientation_firing_rate" and "orientation_firing_rate_export" in result:
+        result["orientation_export"] = result["orientation_firing_rate_export"]
     return result

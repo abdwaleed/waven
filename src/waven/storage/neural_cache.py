@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -150,8 +150,9 @@ def save_aligned_neural_cache(
     save_dir: Optional[Path],
     output_format: str = "npy",
     unit_ids: Optional[Sequence[object]] = None,
+    unit_info: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Path]:
-    """Persist aligned ``pos`` and ``spikes`` caches in NPY or Zarr format."""
+    """Persist aligned ``pos``/``spikes`` caches and optional unit metadata."""
     fmt = normalize_neural_cache_format(output_format)
     output_dir = Path(".") if save_dir is None else Path(save_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -171,6 +172,16 @@ def save_aligned_neural_cache(
         with unit_ids_path.open("w", encoding="utf-8") as handle:
             json.dump(values, handle, indent=2, default=str)
         result["unit_ids"] = unit_ids_path
+    if unit_info is not None:
+        unit_info_path = output_dir / "unit_info.json"
+        values = list(unit_info)
+        if len(values) != int(np.asarray(neuron_pos).shape[0]):
+            raise ValueError(
+                "unit_info must contain one entry for every neuron in the neural cache."
+            )
+        with unit_info_path.open("w", encoding="utf-8") as handle:
+            json.dump({"version": 1, "units": values}, handle, indent=2, default=str)
+        result["unit_info"] = unit_info_path
     return result
 
 
@@ -196,10 +207,33 @@ def load_unit_ids(directory: Path, n_neurons: Optional[int] = None) -> Optional[
     return values
 
 
+def load_unit_info(directory: Path, n_neurons: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
+    """Load EPHYS unit metadata preserved beside an aligned neural cache.
+
+    Older caches do not have this optional sidecar and return ``None``.  The
+    JSON object wrapper leaves room for future metadata without changing the
+    one-record-per-neuron contract used by the GUI.
+    """
+    path = Path(directory) / "unit_info.json"
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    values = payload.get("units") if isinstance(payload, dict) else payload
+    if not isinstance(values, list) or not all(isinstance(value, dict) for value in values):
+        raise ValueError("unit_info.json must contain a list of per-neuron metadata objects.")
+    if n_neurons is not None and len(values) != int(n_neurons):
+        raise ValueError(
+            f"unit_info.json contains {len(values)} records but the neural cache has {n_neurons} neurons."
+        )
+    return values
+
+
 __all__ = [
     "SUPPORTED_NEURAL_CACHE_FORMATS",
     "find_neural_cache_pair",
     "load_neural_cache_pair",
+    "load_unit_info",
     "load_unit_ids",
     "neural_cache_path",
     "normalize_neural_cache_format",
