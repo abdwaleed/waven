@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterator, Optional, Tuple
 
 import numpy as np
@@ -42,10 +43,45 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
     x_chunk = max(1, min(nx, int(chunks[1])))
     y_chunk = max(1, min(ny, int(chunks[2])))
     n_neurons = int(response.shape[1])
-    result = np.empty((n_neurons, n_features), dtype=np.float32)
     # Float64 running statistics are deliberate.  Wavelet power can have a
     # sizeable positive baseline while the correlation signal is small.
     response = np.asarray(response, dtype=np.float64)
+    result = np.empty((n_neurons, n_features), dtype=np.float32)
+    # Response summaries are identical for every spatial tile.  Computing them
+    # once avoids repeatedly centering the same 18,000 x N-neuron matrix while
+    # retaining the numerically stable parallel/Welford covariance update.
+    response_schedule = []
+    response_mean = np.zeros(n_neurons, dtype=np.float64)
+    response_m2 = np.zeros(n_neurons, dtype=np.float64)
+    response_seen = 0
+    for time_start in range(0, n_time, time_chunk):
+        time_end = min(n_time, time_start + time_chunk)
+        response_block = response[time_start:time_end]
+        batch_size = time_end - time_start
+        response_block_mean = response_block.mean(axis=0, dtype=np.float64)
+        centered_response = response_block - response_block_mean
+        total = response_seen + batch_size
+        response_mean_before = response_mean.copy()
+        correction_scale = response_seen * batch_size / total if response_seen else 0.0
+        if response_seen:
+            response_delta = response_block_mean - response_mean
+            response_m2 += response_delta * response_delta * correction_scale
+        response_m2 += np.einsum(
+            "ij,ij->j", centered_response, centered_response, dtype=np.float64
+        )
+        response_mean += (response_block_mean - response_mean) * (batch_size / total)
+        response_schedule.append(
+            (
+                time_start,
+                time_end,
+                batch_size,
+                response_block_mean,
+                centered_response,
+                response_mean_before,
+                correction_scale,
+            )
+        )
+        response_seen = total
     total_tiles = math.ceil(nx / x_chunk) * math.ceil(ny / y_chunk)
     tile_number = 0
     telemetry = OperationTelemetry("Coarse RF correlation")
@@ -65,112 +101,143 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
         "RF correlation using stable chunk-aligned covariance: "
         f"time={time_chunk}, x={x_chunk}, y={y_chunk}; {total_tiles} spatial tiles."
     )
-    for x_start in range(0, nx, x_chunk):
-        x_end = min(nx, x_start + x_chunk)
-        for y_start in range(0, ny, y_chunk):
-            y_end = min(ny, y_start + y_chunk)
-            tile_features = (x_end - x_start) * (y_end - y_start) * features_per_pixel
-            feature_mean = np.zeros(tile_features, dtype=np.float64)
-            feature_m2 = np.zeros(tile_features, dtype=np.float64)
-            response_mean = np.zeros(n_neurons, dtype=np.float64)
-            response_m2 = np.zeros(n_neurons, dtype=np.float64)
-            cross = np.zeros((tile_features, n_neurons), dtype=np.float64)
-            cross_tensor = None
-            if use_gpu:
-                required = tile_features * n_neurons * np.dtype(np.float64).itemsize * 3
-                if required < gpu_available_vram_bytes() * 0.35:
-                    try:
-                        cross_tensor = torch.zeros(
-                            (tile_features, n_neurons), dtype=torch.float64, device="cuda:0"
-                        )
-                    except RuntimeError:
-                        cross_tensor = None
-            seen = 0
-            for time_start in range(0, n_time, time_chunk):
-                time_end = min(n_time, time_start + time_chunk)
-                batch_size = time_end - time_start
-                read_start = time.perf_counter()
-                block = np.asarray(
-                    stimulus[time_start:time_end, x_start:x_end, y_start:y_end, ...],
-                    dtype=np.float64,
-                ).reshape(batch_size, tile_features)
-                telemetry.add("input", time.perf_counter() - read_start, block.nbytes)
-                response_block = response[time_start:time_end]
-                block_mean = block.mean(axis=0, dtype=np.float64)
-                response_block_mean = response_block.mean(axis=0, dtype=np.float64)
-                centered_block = block - block_mean
-                centered_response = response_block - response_block_mean
-                total = seen + batch_size
-                if seen:
-                    correction_scale = seen * batch_size / total
-                    feature_delta = block_mean - feature_mean
-                    response_delta = response_block_mean - response_mean
-                    cross += feature_delta[:, None] * response_delta[None, :] * correction_scale
-                    feature_m2 += feature_delta * feature_delta * correction_scale
-                    response_m2 += response_delta * response_delta * correction_scale
-                if cross_tensor is not None:
-                    try:
-                        compute_start = time.perf_counter()
-                        block_tensor = torch.as_tensor(centered_block, dtype=torch.float64, device="cuda:0")
-                        response_tensor = (
-                            response_gpu[time_start:time_end]
-                            - torch.as_tensor(response_block_mean, dtype=torch.float64, device="cuda:0")
-                            if response_gpu is not None
-                            else torch.as_tensor(centered_response, dtype=torch.float64, device="cuda:0")
-                        )
-                        cross_tensor += block_tensor.T @ response_tensor
-                        telemetry.add("gpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
-                        del block_tensor, response_tensor
-                    except RuntimeError as exc:
-                        print(f"RF GPU tile fell back to CPU: {exc}")
-                        # Preserve completed GPU chunks before finishing this
-                        # and remaining chunks with the numerically identical
-                        # CPU calculation.
-                        cross += cross_tensor.cpu().numpy()
-                        del cross_tensor
-                        torch.cuda.empty_cache()
-                        cross += centered_block.T @ centered_response
-                        cross_tensor = None
-                else:
-                    compute_start = time.perf_counter()
-                    cross += centered_block.T @ centered_response
-                    telemetry.add("cpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
-                feature_m2 += np.einsum("ij,ij->j", centered_block, centered_block, dtype=np.float64)
-                response_m2 += np.einsum(
-                    "ij,ij->j", centered_response, centered_response, dtype=np.float64
+    # One reader overlaps decompression/storage latency for the next time chunk
+    # with the covariance and GPU work for the current one.  It touches a
+    # different immutable Zarr chunk, and is intentionally limited to one
+    # thread so it does not turn a storage-bound analysis into disk contention.
+    prefetch_executor = (
+        ThreadPoolExecutor(max_workers=1)
+        if enabled_feature("RF_PREFETCH", default=True)
+        else None
+    )
+    try:
+        for x_start in range(0, nx, x_chunk):
+            x_end = min(nx, x_start + x_chunk)
+            for y_start in range(0, ny, y_chunk):
+                y_end = min(ny, y_start + y_chunk)
+                tile_features = (x_end - x_start) * (y_end - y_start) * features_per_pixel
+                feature_mean = np.zeros(tile_features, dtype=np.float64)
+                feature_m2 = np.zeros(tile_features, dtype=np.float64)
+                cross = np.zeros((tile_features, n_neurons), dtype=np.float64)
+                cross_tensor = None
+                if use_gpu:
+                    required = tile_features * n_neurons * np.dtype(np.float64).itemsize * 3
+                    if required < gpu_available_vram_bytes() * 0.35:
+                        try:
+                            cross_tensor = torch.zeros(
+                                (tile_features, n_neurons), dtype=torch.float64, device="cuda:0"
+                            )
+                        except RuntimeError:
+                            cross_tensor = None
+
+                def read_block(schedule_item):
+                    time_start, time_end, batch_size, *_unused = schedule_item
+                    read_start = time.perf_counter()
+                    block = np.asarray(
+                        stimulus[time_start:time_end, x_start:x_end, y_start:y_end, ...],
+                        dtype=np.float64,
+                    ).reshape(batch_size, tile_features)
+                    return block, time.perf_counter() - read_start
+
+                future = (
+                    prefetch_executor.submit(read_block, response_schedule[0])
+                    if prefetch_executor is not None
+                    else None
                 )
-                feature_mean += (block_mean - feature_mean) * (batch_size / total)
-                response_mean += (response_block_mean - response_mean) * (batch_size / total)
-                seen = total
-            if cross_tensor is not None:
-                cross += cross_tensor.cpu().numpy()
-                del cross_tensor
-            denominator = np.sqrt(feature_m2[:, None] * response_m2[None, :])
-            tile_corr = np.divide(
-                cross,
-                denominator,
-                out=np.zeros_like(cross, dtype=np.float64),
-                where=denominator > 1e-12,
-            )
-            # A valid Pearson coefficient cannot exceed one.  The clip only
-            # removes last-bit roundoff and prevents a malformed cache from
-            # silently becoming a false preferred feature.
-            np.clip(tile_corr, -1.0, 1.0, out=tile_corr)
-            # x/y tiles are contiguous only when x has one value.  Assign one
-            # x row at a time to preserve C-order flattening exactly.
-            row_features = (y_end - y_start) * features_per_pixel
-            for local_x, global_x in enumerate(range(x_start, x_end)):
-                row_start = (global_x * ny + y_start) * features_per_pixel
-                row_end = row_start + row_features
-                local_start = local_x * row_features
-                result[:, row_start:row_end] = tile_corr[local_start:local_start + row_features].T
-            tile_number += 1
-            if tile_number % 8 == 0 or tile_number == total_tiles:
-                print(f"RF correlation spatial tiles: {tile_number}/{total_tiles}")
-            telemetry.maybe_report()
+                seen = 0
+                for schedule_index, schedule_item in enumerate(response_schedule):
+                    (
+                        time_start,
+                        time_end,
+                        batch_size,
+                        response_block_mean,
+                        centered_response,
+                        response_mean_before,
+                        correction_scale,
+                    ) = schedule_item
+                    if future is None:
+                        block, read_seconds = read_block(schedule_item)
+                    else:
+                        wait_start = time.perf_counter()
+                        block, read_seconds = future.result()
+                        telemetry.add("input_wait", time.perf_counter() - wait_start)
+                    next_index = schedule_index + 1
+                    future = (
+                        prefetch_executor.submit(read_block, response_schedule[next_index])
+                        if prefetch_executor is not None and next_index < len(response_schedule)
+                        else None
+                    )
+                    telemetry.add("input", read_seconds, block.nbytes)
+                    block_mean = block.mean(axis=0, dtype=np.float64)
+                    centered_block = block - block_mean
+                    total = seen + batch_size
+                    if seen:
+                        feature_delta = block_mean - feature_mean
+                        response_delta = response_block_mean - response_mean_before
+                        cross += feature_delta[:, None] * response_delta[None, :] * correction_scale
+                        feature_m2 += feature_delta * feature_delta * correction_scale
+                    if cross_tensor is not None:
+                        try:
+                            compute_start = time.perf_counter()
+                            block_tensor = torch.as_tensor(centered_block, dtype=torch.float64, device="cuda:0")
+                            response_tensor = (
+                                response_gpu[time_start:time_end]
+                                - torch.as_tensor(response_block_mean, dtype=torch.float64, device="cuda:0")
+                                if response_gpu is not None
+                                else torch.as_tensor(centered_response, dtype=torch.float64, device="cuda:0")
+                            )
+                            cross_tensor += block_tensor.T @ response_tensor
+                            telemetry.add("gpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
+                            del block_tensor, response_tensor
+                        except RuntimeError as exc:
+                            print(f"RF GPU tile fell back to CPU: {exc}")
+                            # Preserve completed GPU chunks before finishing this
+                            # and remaining chunks with the numerically identical
+                            # CPU calculation.
+                            cross += cross_tensor.cpu().numpy()
+                            del cross_tensor
+                            torch.cuda.empty_cache()
+                            cross += centered_block.T @ centered_response
+                            cross_tensor = None
+                    else:
+                        compute_start = time.perf_counter()
+                        cross += centered_block.T @ centered_response
+                        telemetry.add("cpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
+                    feature_m2 += np.einsum("ij,ij->j", centered_block, centered_block, dtype=np.float64)
+                    feature_mean += (block_mean - feature_mean) * (batch_size / total)
+                    seen = total
+                if cross_tensor is not None:
+                    cross += cross_tensor.cpu().numpy()
+                    del cross_tensor
+                denominator = np.sqrt(feature_m2[:, None] * response_m2[None, :])
+                tile_corr = np.divide(
+                    cross,
+                    denominator,
+                    out=np.zeros_like(cross, dtype=np.float64),
+                    where=denominator > 1e-12,
+                )
+                # A valid Pearson coefficient cannot exceed one.  The clip only
+                # removes last-bit roundoff and prevents a malformed cache from
+                # silently becoming a false preferred feature.
+                np.clip(tile_corr, -1.0, 1.0, out=tile_corr)
+                # x/y tiles are contiguous only when x has one value.  Assign one
+                # x row at a time to preserve C-order flattening exactly.
+                row_features = (y_end - y_start) * features_per_pixel
+                for local_x, global_x in enumerate(range(x_start, x_end)):
+                    row_start = (global_x * ny + y_start) * features_per_pixel
+                    row_end = row_start + row_features
+                    local_start = local_x * row_features
+                    result[:, row_start:row_end] = tile_corr[local_start:local_start + row_features].T
+                tile_number += 1
+                if tile_number % 8 == 0 or tile_number == total_tiles:
+                    print(f"RF correlation spatial tiles: {tile_number}/{total_tiles}")
+                telemetry.maybe_report()
+    finally:
+        if prefetch_executor is not None:
+            prefetch_executor.shutdown(wait=True)
+        if response_gpu is not None:
+            del response_gpu
     telemetry.report()
-    if response_gpu is not None:
-        del response_gpu
     return result
 
 

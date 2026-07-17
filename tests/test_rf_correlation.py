@@ -35,3 +35,9 @@ def test_structured_correlation_matches_reference_with_large_power_baseline(monk
     np.testing.assert_allclose(actual, reference, rtol=0.0, atol=2e-6)
     assert np.isfinite(actual).all()
     assert np.abs(actual).max() <= 1.0
+
+    # Prefetch changes only I/O scheduling; the stable covariance result must
+    # remain bit-for-bit identical to the synchronous read path.
+    monkeypatch.setenv("WAVEN_RF_PREFETCH", "0")
+    synchronous = streaming_cross_correlation(stimulus, response)
+    np.testing.assert_allclose(actual, synchronous, rtol=0.0, atol=0.0)

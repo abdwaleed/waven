@@ -7,7 +7,24 @@ import pytest
 
 from waven.storage.array_store import load_array
 from waven.runtime.task_control import OperationCancelled
-from waven.wavelets.decomposition import waveletPowerDecompositionConv
+from waven.wavelets.decomposition import _coarse_power_zarr_layout, waveletPowerDecompositionConv
+
+
+def test_coarse_power_layout_is_write_and_rf_read_aligned():
+    """The same time/sigma tiles must serve writing and RF tile reads."""
+    shape = (18_000, 137, 77, 18, 4)
+    chunks = _coarse_power_zarr_layout(shape, frame_chunk_size=1024, filter_group_size=2)
+
+    assert chunks[0] == 1024
+    assert chunks[3] == shape[3]
+    assert chunks[4] == 2
+    assert 1 <= chunks[1] <= shape[1]
+    assert 1 <= chunks[2] <= shape[2]
+    # The old fixed 16 x 16 grid needed 45 RF spatial reads.  This layout
+    # deliberately uses fewer, still bounded tiles for the real workload.
+    old_tiles = int(np.ceil(shape[1] / 16) * np.ceil(shape[2] / 16))
+    new_tiles = int(np.ceil(shape[1] / chunks[1]) * np.ceil(shape[2] / chunks[2]))
+    assert new_tiles < old_tiles
 
 
 def test_time_major_coarse_power_matches_group_major(tmp_path, monkeypatch):

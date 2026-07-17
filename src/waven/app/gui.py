@@ -3550,6 +3550,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "backend": backend,
                 "shape": coarse_power_shape,
                 "phase": coarse_phase_fingerprint,
+                # Chunking and codec determine both direct-write throughput and
+                # the spatial read plan used by Coarse RF correlation.  A
+                # versioned fingerprint makes an older 16 x 16/zstd cache
+                # regenerate once instead of silently retaining the old I/O
+                # bottleneck after this performance upgrade.
+                "storage_layout": "time-sigma-aligned-lz4-v2",
             }
         )
 

@@ -39,6 +39,7 @@ from ..runtime.performance import (
     convolution_precision_scope,
     autotuned_frame_chunk_size,
     compute_devices,
+    cpu_worker_count,
     enabled_feature,
     gpu_available_vram_bytes,
     gpu_vram_bytes,
@@ -55,6 +56,59 @@ from .filters import has_enough_ram
 def _array_bytes(shape, dtype=np.float32):
     """Return exact bytes for an array shape/dtype pair."""
     return int(math.prod(tuple(int(v) for v in shape)) * np.dtype(dtype).itemsize)
+
+
+def _coarse_power_zarr_layout(final_shape, frame_chunk_size, filter_group_size, target_bytes=96 * 1024**2):
+    """Choose write-oriented, RF-read-aligned chunks for coarse power.
+
+    Each direct-convolution result covers one time range and one sigma group.
+    Matching those dimensions prevents read/modify/recompress writes.  Spatial
+    chunks target roughly 96 MiB of raw data (with a small alignment allowance)
+    so Zarr performs substantially fewer codec/store operations than the former
+    fixed 16 x 16 layout, while remaining comfortably bounded for a writer.
+    Coarse-RF correlation consumes the same spatial chunks as tiles.
+    """
+    num_frames, nx, ny, n_orientations, n_sigmas = (int(value) for value in final_shape)
+    time_chunk = min(num_frames, max(1, int(frame_chunk_size)))
+    sigma_chunk = min(n_sigmas, max(1, int(filter_group_size)))
+    bytes_per_pixel = max(
+        1,
+        time_chunk * n_orientations * sigma_chunk * np.dtype(np.float32).itemsize,
+    )
+    pixel_budget = max(1, int(target_bytes) // bytes_per_pixel)
+
+    def spatial_candidates(limit):
+        values = {1, int(limit)}
+        values.update(range(8, int(limit) + 1, 8))
+        return tuple(sorted(values))
+
+    allowance = max(1, int(pixel_budget * 1.25))
+    candidates = []
+    for x_chunk in spatial_candidates(nx):
+        for y_chunk in spatial_candidates(ny):
+            pixels = x_chunk * y_chunk
+            if pixels <= allowance:
+                tile_count = math.ceil(nx / x_chunk) * math.ceil(ny / y_chunk)
+                candidates.append((tile_count, -pixels, x_chunk, y_chunk))
+    if not candidates:
+        x_chunk, y_chunk = 1, 1
+    else:
+        _tile_count, _negative_pixels, x_chunk, y_chunk = min(candidates)
+    return time_chunk, x_chunk, y_chunk, n_orientations, sigma_chunk
+
+
+def _coarse_power_compressor(blosc_type):
+    """Return a speed-first codec for the intermediate coarse-RF cache."""
+    codec = os.environ.get("WAVEN_COARSE_ZARR_CODEC", "lz4").strip().lower()
+    if codec not in {"lz4", "zstd"}:
+        print(f"Unknown WAVEN_COARSE_ZARR_CODEC={codec!r}; using lz4.")
+        codec = "lz4"
+    if codec == "zstd":
+        return blosc_type(cname="zstd", clevel=3, shuffle=blosc_type.BITSHUFFLE), "zstd level 3"
+    # Coarse power is an intermediate cache read once by RF correlation.  LZ4
+    # greatly reduces encoder backpressure on typical Windows/NVMe systems;
+    # users who prioritize smaller caches can explicitly select zstd.
+    return blosc_type(cname="lz4", clevel=1, shuffle=blosc_type.BITSHUFFLE), "lz4 level 1"
 
 
 class _AsyncSliceWriter:
@@ -883,6 +937,7 @@ def downsample_video_binary(
     """
     if chunk_size is None:
         chunk_size = video_downsample_chunk_size()
+    chunk_size = max(16, int(chunk_size))
     import cv2
     import numpy as np
     import skimage.transform
@@ -907,6 +962,44 @@ def downsample_video_binary(
     )
     
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Reset video
+
+    # ``skimage.transform.resize`` over a large 3-D frame stack was the
+    # dominant stage in real recordings: it allocated a float volume for an
+    # entire decode chunk and used only one CPU core.  Binary stimuli are much
+    # more efficiently downsampled frame-wise with area interpolation.  CUDA
+    # uses a bounded batch of the same area-averaging operation; CPU fallback
+    # uses OpenCV, which releases the GIL so independent chunks can overlap.
+    cropped_height, cropped_width = xe - xi, ye - yi
+    bytes_per_gpu_frame = max(1, cropped_height * cropped_width * np.dtype(np.float32).itemsize)
+    free_resize_vram = gpu_available_vram_bytes()
+    use_gpu_resize = (
+        enabled_feature("DOWNSAMPLE_GPU", default=True)
+        and torch.cuda.is_available()
+        # Reserve room for at least eight frames plus interpolation and transfer
+        # buffers.  Falling back before worker startup is safer than a CUDA OOM.
+        and free_resize_vram >= bytes_per_gpu_frame * 6 * 8
+    )
+    resize_prefetch = enabled_feature("PREFETCH", default=True)
+    resize_workers = 1 if use_gpu_resize else cpu_worker_count(cap=4)
+    max_pending_chunks = (
+        (2 if use_gpu_resize else resize_workers + 1)
+        if resize_prefetch
+        else 1
+    )
+    source_frame_bytes = max(1, int(first_img.shape[0]) * int(first_img.shape[1]))
+    pipeline_budget = max(64 * 1024**2, int(available_ram_bytes() * 0.12))
+    max_chunk_from_pipeline = max(16, pipeline_budget // (source_frame_bytes * max_pending_chunks))
+    chunk_size = min(chunk_size, max_chunk_from_pipeline)
+    resize_backend = "CUDA area interpolation" if use_gpu_resize else "OpenCV area interpolation"
+    gpu_batch_size = 0
+    if use_gpu_resize:
+        # Input, interpolation workspace, and transfer buffers coexist on the
+        # GPU.  Use only a small fraction of free VRAM so the downsampler can
+        # run safely alongside the rest of the application.
+        gpu_batch_size = max(
+            8,
+            min(256, free_resize_vram // max(1, bytes_per_gpu_frame * 6)),
+        )
     
     output_format = str(output_format or "npy").lower()
     if output_format not in {"npy", "zarr"}:
@@ -955,35 +1048,71 @@ def downsample_video_binary(
     def resize_binary_chunk(frames):
         resize_start = time.perf_counter()
         actual_len = len(frames)
-        chunk_arr = (np.stack(frames, axis=0) > 100).astype(np.float32)
-        chunk_cropped = chunk_arr[:, xi:xe, yi:ye]
-        resized = skimage.transform.resize(
-            chunk_cropped, (actual_len, shape[0], shape[1]), anti_aliasing=True
-        )
-        return resized >= 0.5, time.perf_counter() - resize_start
+        resized = np.empty((actual_len, shape[0], shape[1]), dtype=bool)
+        source_bytes = 0
+        if use_gpu_resize:
+            for batch_start in range(0, actual_len, gpu_batch_size):
+                check_cancelled(cancel_event)
+                batch_end = min(actual_len, batch_start + gpu_batch_size)
+                batch = np.stack(frames[batch_start:batch_end], axis=0)
+                cropped = np.ascontiguousarray(batch[:, xi:xe, yi:ye] > 100, dtype=np.float32)
+                source_bytes += cropped.nbytes
+                with torch.inference_mode():
+                    tensor = torch.from_numpy(cropped).unsqueeze(1).to("cuda:0", non_blocking=False)
+                    reduced = F.interpolate(tensor, size=shape, mode="area")
+                    resized[batch_start:batch_end] = reduced.squeeze(1).cpu().numpy() >= 0.5
+                del tensor, reduced
+        else:
+            for frame_index, frame in enumerate(frames):
+                check_cancelled(cancel_event)
+                cropped = frame[xi:xe, yi:ye]
+                source_bytes += cropped.nbytes
+                binary = np.ascontiguousarray(cropped > 100, dtype=np.uint8)
+                binary *= np.uint8(255)
+                interpolation = (
+                    cv2.INTER_AREA
+                    if cropped.shape[0] >= shape[0] and cropped.shape[1] >= shape[1]
+                    else cv2.INTER_LINEAR
+                )
+                reduced = cv2.resize(binary, (shape[1], shape[0]), interpolation=interpolation)
+                resized[frame_index] = reduced >= 128
+        return resized, time.perf_counter() - resize_start, source_bytes
 
-    # One resize worker overlaps CPU interpolation with the serial OpenCV
-    # decoder.  The queue is bounded to two chunks, preserving RAM headroom and
-    # output order while preventing the UI/system from being overwhelmed.
+    # Bounded in-flight resize chunks overlap serial video decoding with either
+    # GPU interpolation or several GIL-free OpenCV workers.  The queue budget
+    # above prevents this from recreating the former multi-gigabyte float-stack
+    # peak in RAM.
     pending = []
-    executor = ThreadPoolExecutor(max_workers=1) if enabled_feature("PREFETCH", default=True) else None
+    executor = (
+        ThreadPoolExecutor(max_workers=resize_workers)
+        if resize_prefetch
+        else None
+    )
 
     def write_next():
         nonlocal frame_idx
-        frames, future = pending.pop(0)
+        pending_item, future = pending.pop(0)
         if future is None:
-            resized, resize_seconds = resize_binary_chunk(frames)
+            frames = pending_item
+            actual_len = len(frames)
+            resized, resize_seconds, source_bytes = resize_binary_chunk(frames)
         else:
-            resized, resize_seconds = future.result()
+            actual_len = int(pending_item)
+            resized, resize_seconds, source_bytes = future.result()
         write_start = time.perf_counter()
-        output_mmap[frame_idx:frame_idx + len(frames)] = resized
-        telemetry.add("resize", resize_seconds, resized.nbytes)
+        output_mmap[frame_idx:frame_idx + actual_len] = resized
+        telemetry.add("resize", resize_seconds, source_bytes)
         telemetry.add("output", time.perf_counter() - write_start, resized.nbytes)
         telemetry.maybe_report()
-        frame_idx += len(frames)
+        frame_idx += actual_len
         print(progress_message("Video downsample", frame_idx, total_frames, progress_start, unit="frames"))
 
-    print(f"Downsampling {total_frames} frames directly to disk...", end="\n\n")
+    backend_detail = f"; GPU batch={gpu_batch_size}" if use_gpu_resize else ""
+    print(
+        f"Downsampling {total_frames} frames directly to disk | backend={resize_backend}, "
+        f"workers={resize_workers}, frame chunk={chunk_size}, queue={max_pending_chunks}{backend_detail}",
+        end="\n\n",
+    )
     try:
         while True:
             check_cancelled(cancel_event)
@@ -996,12 +1125,14 @@ def downsample_video_binary(
             if len(frames_buffer) == chunk_size:
                 frames = frames_buffer
                 frames_buffer = []
-                pending.append((frames, executor.submit(resize_binary_chunk, frames) if executor else None))
-                if len(pending) >= 2:
+                future = executor.submit(resize_binary_chunk, frames) if executor else None
+                pending.append((len(frames) if future is not None else frames, future))
+                if len(pending) >= max_pending_chunks:
                     write_next()
         check_cancelled(cancel_event)
         if frames_buffer:
-            pending.append((frames_buffer, executor.submit(resize_binary_chunk, frames_buffer) if executor else None))
+            future = executor.submit(resize_binary_chunk, frames_buffer) if executor else None
+            pending.append((len(frames_buffer) if future is not None else frames_buffer, future))
         while pending:
             write_next()
     finally:
@@ -1648,13 +1779,8 @@ def waveletPowerDecompositionConv(
         ) // 2)
     filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
     if zarr_chunks is None:
-        # Time-major scheduling writes one frame/filter tile at a time.  The old
-        # layout put all sigmas in a compressed chunk, so each group rewrote the
-        # same chunk repeatedly.  Aligning time and sigma chunks with writes
-        # avoids that read-modify-compress bottleneck.
-        zarr_chunks = (
-            min(num_frames, frame_chunk_size), min(nx, 16), min(ny, 16),
-            int(n_orientations), filter_group_size,
+        zarr_chunks = _coarse_power_zarr_layout(
+            final_shape, frame_chunk_size, filter_group_size,
         )
     zarr_chunks = tuple(min(int(dim), max(1, int(chunk))) for dim, chunk in zip(final_shape, zarr_chunks))
     save_path = os.path.join(folder_path, f"{output_stem}.zarr")
@@ -1665,11 +1791,16 @@ def waveletPowerDecompositionConv(
         sort_keys=True,
     )
     progress = _ConvolutionProgress(save_path, final_shape, progress_kind)
+    compressor, compressor_description = _coarse_power_compressor(Blosc)
     power = _open_resumable_zarr(
         zarr, save_path, final_shape, zarr_chunks,
-        Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE), progress,
+        compressor, progress,
     )
     print(f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, sigma group={filter_group_size}")
+    print(
+        f"Direct coarse RF power cache layout | chunks={zarr_chunks}; "
+        f"compressor={compressor_description}"
+    )
     start_time = time.time()
     telemetry = OperationTelemetry("Direct coarse RF power")
     writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
