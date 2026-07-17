@@ -1881,6 +1881,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         packaging = packaging or _selected_export_packaging()
         if packaging == "folder":
             return export_root
+        print("[EXPORT] Creating ZIP archive for completed export files.")
         archive = shutil.make_archive(export_root, "zip", root_dir=os.path.dirname(export_root), base_dir=os.path.basename(export_root))
         if packaging == "zip":
             # ``export_root`` is generated exclusively for this action.  Only
@@ -1888,6 +1889,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # user-selected directory.
             shutil.rmtree(export_root)
         return archive if packaging == "zip" else f"{export_root}\nZIP: {archive}"
+
+    def _describe_export_options(file_options, packaging):
+        """Return a compact, terminal-friendly description of an export job."""
+        file_labels = {
+            "png": "PNG",
+            "svg": "SVG",
+            "data_pickle": "data pickle",
+            "figure_pickle": "figure pickle",
+            "arrays": "arrays",
+            "manifest": "manifest",
+        }
+        selected_files = [label for key, label in file_labels.items() if file_options.get(key)]
+        return f"files={', '.join(selected_files) or 'none'} | delivery={packaging}"
 
     def _selected_export_kinds(selection_name):
         """Return graph kinds ticked in one Export-tab checkbox group."""
@@ -2133,18 +2147,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showerror("Export Failed", f"Could not prepare {title} for export: {exc}")
             print(f"Failed to snapshot graph '{title}': {exc}")
             return
+        packaging = _selected_export_packaging()
+        print(f"[EXPORT] Queued graph '{title}' | " + _describe_export_options(snapshot["file_options"], packaging))
 
         def write_export():
             try:
                 export_root = os.path.join(export_dir, f"waven_export_{time.strftime('%Y%m%d_%H%M%S')}")
                 os.makedirs(export_root, exist_ok=True)
+                print(f"[EXPORT] Writing graph 1/1: '{title}'")
                 graph_dir = _export_figure_record(snapshot, export_root, index=1)
-                destination = _package_export_root(export_root)
+                print(f"[EXPORT] Wrote graph 1/1: {graph_dir}")
+                destination = _package_export_root(export_root, packaging)
             except Exception as exc:
-                print(f"Failed to export graph '{title}': {exc}")
+                print(f"[EXPORT] Failed graph '{title}': {exc}")
                 root.after(0, lambda error=str(exc): messagebox.showerror("Export Failed", f"Could not export {title}: {error}"))
                 return False
-            print(f"Exported graph '{title}' with reusable data to: {destination}")
+            print(f"[DONE] Exported graph '{title}' with reusable data to: {destination}")
             root.after(0, lambda: messagebox.showinfo("Export Complete", f"Exported {title}.\n\n{destination}"))
             return True
 
@@ -2167,6 +2185,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showerror("Export Failed", f"Could not prepare displayed figures for export: {exc}")
             print(f"Failed to snapshot displayed figures: {exc}")
             return
+        file_options = dict(snapshots[0]["file_options"])
+        packaging = _selected_export_packaging()
+        print(
+            f"[EXPORT] Queued {export_label} | graphs={len(snapshots)} | "
+            + _describe_export_options(file_options, packaging)
+        )
         export_root = os.path.join(selected_dir, f"waven_export_{time.strftime('%Y%m%d_%H%M%S')}")
         def write_export():
             exported = []
@@ -2176,10 +2200,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 for index, record in enumerate(snapshots, start=1):
                     tab_dir = os.path.join(export_root, _export_safe_name(record.get("tab") or "plots", 24))
                     os.makedirs(tab_dir, exist_ok=True)
+                    title = record.get("title") or f"graph {index}"
+                    print(f"[EXPORT] Writing displayed graph {index}/{len(snapshots)}: '{title}'")
                     try:
-                        exported.append(_export_figure_record(record, tab_dir, index=index))
+                        graph_dir = _export_figure_record(record, tab_dir, index=index)
+                        exported.append(graph_dir)
+                        print(f"[EXPORT] Wrote displayed graph {index}/{len(snapshots)}: {graph_dir}")
                     except Exception as exc:
-                        title = record.get("title") or f"graph {index}"
                         failures.append({"index": index, "title": title, "error": str(exc)})
                         print(f"[EXPORT] Skipped '{title}': {exc}")
                     update_progress(100.0 * index / len(snapshots), "Exporting displayed graphs", f"{index}/{len(snapshots)}")
@@ -2189,11 +2216,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "graphs": exported,
                     "failures": failures,
                 }
-                if _selected_export_files()["manifest"]:
+                if file_options["manifest"]:
                     with open(os.path.join(export_root, "export_manifest.json"), "w", encoding="utf-8") as handle:
                         json.dump(_json_safe(manifest), handle, indent=2)
-                destination = _package_export_root(export_root)
-                print(f"Exported {len(exported)} displayed graph(s) with reusable data to: {destination}")
+                destination = _package_export_root(export_root, packaging)
+                print(f"[DONE] Exported {len(exported)} displayed graph(s) with reusable data to: {destination}")
                 def show_result():
                     if failures:
                         messagebox.showwarning(
@@ -2434,7 +2461,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         jobs = [("coarse_rf", rf_count, rf_draw, "Individual neuron")]
         sta_batch = individual_neuron_renderer.get("sta_batch") if "sta" in selected_kinds else None
         sta_batch_size = individual_neuron_renderer.get("sta_batch_size") if sta_batch is not None else None
-        print("[EXPORT] Selected single graphs | " + ", ".join(f"{name}={count}" for name, count, _draw, _tab in jobs))
+        batch_file_options = _selected_export_files()
+        batch_packaging = _selected_export_packaging()
+        print(
+            "[EXPORT] Queued selected single graphs | "
+            + ", ".join(f"{name}={count}" for name, count, _draw, _tab in jobs)
+            + " | graph types=" + ", ".join(sorted(selected_kinds))
+            + " | " + _describe_export_options(batch_file_options, batch_packaging)
+        )
         try:
             btn_export_all_individual_graph_types.configure(state=tk.DISABLED)
         except NameError:
@@ -2459,7 +2493,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "selected_graph_kinds": sorted(selected_kinds),
                     "skipped_neurons": state["failures"],
                 }
-                if _selected_export_files()["manifest"]:
+                if batch_file_options["manifest"]:
                     try:
                         with open(os.path.join(export_root, "export_manifest.json"), "w", encoding="utf-8") as handle:
                             json.dump(_json_safe(batch_manifest), handle, indent=2)
@@ -2468,11 +2502,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         # point. A missing summary must not turn a successful
                         # long-running batch export into a reported failure.
                         print(f"[EXPORT] Could not write batch manifest: {exc}")
-                packaging = _selected_export_packaging()
-
                 def finish_delivery():
                     try:
-                        destination = _package_export_root(export_root, packaging)
+                        destination = _package_export_root(export_root, batch_packaging)
                     except Exception as exc:
                         def show_packaging_error(error=str(exc)):
                             try:
@@ -2490,7 +2522,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
                         except NameError:
                             pass
-                        print(f"[DONE] Exported selected single-graph files\n       {destination}")
+                        completed = sum(job[1] for job in jobs) - len(state["failures"])
+                        print(
+                            f"[DONE] Exported selected single-graph files | "
+                            f"neuron bundles={completed}/{sum(job[1] for job in jobs)}\n       {destination}"
+                        )
                         if state["failures"]:
                             messagebox.showwarning(
                                 "Export Completed with Skips",
@@ -2557,10 +2593,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
                 def write_neuron_graphs():
                     try:
-                        _export_individual_axes(
+                        exported_graphs = _export_individual_axes(
                             snapshots, neuron_dir, selected_kinds,
                             array_format=batch_array_format,
-                            file_options=_selected_export_files(),
+                            file_options=batch_file_options,
                         )
                     except Exception as exc:
                         def record_failure(error=str(exc)):
@@ -2577,6 +2613,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         state["neuron_id"] += 1
                         completed = sum(job[1] for job in jobs[:state["job"]]) + state["neuron_id"]
                         total = sum(job[1] for job in jobs)
+                        if completed == 1 or completed == total or completed % 10 == 0:
+                            print(
+                                f"[EXPORT] Completed {completed}/{total} neuron bundles "
+                                f"({len(exported_graphs)} graph file(s) for neuron {neuron_id})."
+                            )
                         update_progress(
                             100.0 * completed / total,
                             "Exporting single graphs",
@@ -4512,6 +4553,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 firing-rate metrics.
                 """
                 try:
+                    neuron_id = int(neuron_id)
+                    if np.asarray(spks).ndim != 3:
+                        raise ValueError("The aligned neural cache must have shape (trials, frames, neurons).")
+                    neural_neuron_count = int(spks.shape[2])
+                    rf_neuron_count = int(rfs_gabor[0].shape[0])
+                    if neural_neuron_count != rf_neuron_count:
+                        raise ValueError(
+                            "The neural cache and receptive-field tensor disagree on the number of neurons "
+                            f"({neural_neuron_count} versus {rf_neuron_count})."
+                        )
+                    if not 0 <= neuron_id < neural_neuron_count:
+                        raise IndexError(
+                            f"Neuron ID {neuron_id} is outside the loaded range 0-{neural_neuron_count - 1}."
+                        )
                     if not for_export:
                         entry_neuron.delete(0, tk.END)
                         entry_neuron.insert(0, str(neuron_id))
@@ -4519,6 +4574,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     trial_spikes = spks[:, :, neuron_id]
                     spike_train = np.mean(trial_spikes, axis=0)
                     ax2.clear()
+                    ax2.set_axis_on()
                     ax2.plot(
                         np.arange(spike_train.shape[0]),
                         spike_train,
@@ -4613,7 +4669,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     selectivity_text = f"OSI {neuron_osi:.6f}, gOSI {neuron_gosi:.6f}"
                     for extra_ax in [axis for axis in list(fig3.axes) if axis not in ax3]:
                         extra_ax.remove()
-                    for ax in ax3: ax.clear()
+                    for ax in ax3:
+                        ax.clear()
+                        ax.set_axis_on()
 
                     rf_limit = float(np.nanmax(np.abs(rf2d)))
                     rf_limit = max(rf_limit, 1e-8)
@@ -4791,6 +4849,30 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         switch_to_individual_tab(flash=True)
                 except Exception as e:
                     print(f"Error drawing selected neuron: {e}")
+                    # Never leave an older selected-neuron rendering visible
+                    # after a failed draw: it can look like a data artifact
+                    # even though it belongs to a previous selection/session.
+                    if not for_export:
+                        try:
+                            ax2.clear()
+                            ax2.text(0.5, 0.5, "Selected neuron unavailable", ha="center", va="center")
+                            ax2.set_axis_off()
+                            for extra_ax in [axis for axis in list(fig3.axes) if axis not in ax3]:
+                                extra_ax.remove()
+                            for ax in ax3:
+                                ax.clear()
+                                ax.set_axis_off()
+                            ax3[0].text(0.5, 0.5, str(e), ha="center", va="center", wrap=True)
+                            fig_sta.clear()
+                            fig_sta.set_constrained_layout(False)
+                            fig_sta.patch.set_edgecolor("none")
+                            fig_sta.patch.set_linewidth(0)
+                            fig_sta.text(0.5, 0.5, f"PSTH-weighted STA unavailable\n{e}", ha="center", va="center", wrap=True)
+                            canvas2.draw()
+                            canvas3.draw()
+                            canvas_sta.draw()
+                        except Exception as clear_error:
+                            print(f"Error clearing failed selected-neuron plots: {clear_error}")
 
             def onpick(event):
                 """Function for onpick.
@@ -4866,14 +4948,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             def click_RF():
                 """Function for click RF."""
                 try:
-                    neuron_id = int(param_entries["Neuron ID"].get())
+                    neuron_id = _selected_neuron_id()
                     draw_individual_neuron(neuron_id)
                 except Exception as e:
                     print(f"Failed to plot RF: {e}")
 
             btn_runRF.configure(command=click_RF)
             try:
-                draw_individual_neuron(int(param_entries["Neuron ID"].get()))
+                draw_individual_neuron(_selected_neuron_id())
             except Exception:
                 pass
             figure_records = [
@@ -7026,7 +7108,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ).grid(row=0, column=0, sticky="w", pady=3, padx=(0, 10))
 
     entry_neuron = ctk.CTkEntry(rf_wrap, height=30, corner_radius=6, border_width=1)
-    entry_neuron.insert(0, '1173')
+    # A session has an unknown neuron count until its neural cache is loaded.
+    # Zero is valid for every non-empty cache; the selection helper clamps a
+    # later user entry to the session's actual zero-based range.
+    entry_neuron.insert(0, '0')
     entry_neuron.grid(row=0, column=1, sticky="ew")
     param_entries['Neuron ID'] = entry_neuron
 
