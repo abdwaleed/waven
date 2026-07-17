@@ -1,6 +1,9 @@
 """Orientation selectivity metrics for tuning curves."""
 from __future__ import annotations
 
+import math
+import time
+
 import numpy as np
 
 
@@ -178,6 +181,9 @@ def firing_rate_orientation_tuning(spikes, wavelets_complex, rfs, angles_deg=Non
     if angles_deg is None:
         angles_deg = np.linspace(0, 180, n_orientations, endpoint=False)
 
+    if np.asarray(angles_deg).size != n_orientations:
+        raise ValueError("angles_deg must match the coarse wavelet orientation axis")
+    angles_deg = np.asarray(angles_deg, dtype=float)
     osi = np.full(n_neurons, np.nan, dtype=float)
     gosi = np.full(n_neurons, np.nan, dtype=float)
     orientation_tuning = np.full((n_neurons, n_orientations), np.nan, dtype=float)
@@ -186,11 +192,21 @@ def firing_rate_orientation_tuning(spikes, wavelets_complex, rfs, angles_deg=Non
         trial_orientation_tuning = np.full(
             (trial_responses.shape[0], n_neurons, n_orientations), np.nan, dtype=float
         )
-    # Disk-backed wavelet caches make one independent ``T x orientation`` read
-    # per neuron expensive. Neurons sharing a preferred x/y/size/frequency
-    # feature use exactly the same weights, so group them and let NumPy/BLAS
-    # calculate all weighted rates in that group at once.
-    feature_groups = {}
+
+    # A point selection from Zarr still decompresses its complete storage chunk.
+    # The earlier feature-group loop therefore reread a spatial/time chunk for
+    # almost every neuron.  Group preferred features by their Zarr chunk, read
+    # each time/spatial/sigma/frequency tile once, then gather all matching
+    # neuron weights and accumulate weighted means in a batched einsum.
+    chunks = tuple(int(value) for value in (getattr(wavelets, "chunks", None) or wavelet_shape))
+    time_chunk = max(1, min(n_frames, chunks[0]))
+    x_chunk = max(1, min(wavelet_shape[1], chunks[1]))
+    y_chunk = max(1, min(wavelet_shape[2], chunks[2]))
+    sigma_chunk = max(1, min(wavelet_shape[4], chunks[4]))
+    frequency_chunk = (
+        max(1, min(wavelet_shape[5], chunks[5])) if len(wavelet_shape) == 6 else 1
+    )
+    chunk_groups = {}
     for neuron_idx in range(n_neurons):
         x, y, _o, size_idx, freq_idx = maxes[:5, neuron_idx]
         if not (
@@ -200,84 +216,153 @@ def firing_rate_orientation_tuning(spikes, wavelets_complex, rfs, angles_deg=Non
             and (len(wavelet_shape) == 5 or 0 <= freq_idx < wavelet_shape[5])
         ):
             continue
-        key = (int(x), int(y), int(size_idx), int(freq_idx) if len(wavelet_shape) == 6 else 0)
-        feature_groups.setdefault(key, []).append(neuron_idx)
+        key = (
+            int(x) // x_chunk,
+            int(y) // y_chunk,
+            int(size_idx) // sigma_chunk,
+            int(freq_idx) // frequency_chunk if len(wavelet_shape) == 6 else 0,
+        )
+        chunk_groups.setdefault(key, []).append(neuron_idx)
 
-    for (x, y, size_idx, freq_idx), neuron_indices in feature_groups.items():
-        if len(wavelet_shape) == 5:
-            weights = np.asarray(wavelets[:n_frames, x, y, :, size_idx], dtype=float)
-        else:
-            weights = np.asarray(wavelets[:n_frames, x, y, :, size_idx, freq_idx], dtype=float)
-        weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
-        weights = np.clip(weights, 0.0, None)
-        denom = np.sum(weights, axis=0)
-        if len(neuron_indices) == 1:
-            # Avoid matrix-multiplication overhead when no feature is shared,
-            # and retain the original summation order for that common case.
-            neuron_idx = neuron_indices[0]
-            rates = np.clip(
-                np.nan_to_num(responses[:n_frames, neuron_idx], nan=0.0), 0.0, None
+    valid_neuron_ids = np.array(
+        [neuron_id for neuron_ids in chunk_groups.values() for neuron_id in neuron_ids], dtype=int
+    )
+    weighted_sum = np.zeros((n_neurons, n_orientations), dtype=np.float64)
+    weight_sum = np.zeros((n_neurons, n_orientations), dtype=np.float64)
+    trial_weighted_sum = (
+        np.zeros((trial_responses.shape[0], n_neurons, n_orientations), dtype=np.float64)
+        if trial_responses is not None
+        else None
+    )
+    total_groups = len(chunk_groups)
+    report_every = max(1, min(10, math.ceil(total_groups / 10)))
+    read_seconds = 0.0
+    compute_seconds = 0.0
+    started = time.perf_counter()
+    print(
+        f"[FIRING RATE] Starting chunk-batched orientation tuning | "
+        f"neurons={valid_neuron_ids.size}/{n_neurons} | feature chunks={total_groups} | "
+        f"time chunk={time_chunk}"
+    )
+    for group_number, ((x_group, y_group, sigma_group, frequency_group), neuron_ids) in enumerate(
+        chunk_groups.items(), start=1
+    ):
+        neuron_ids = np.asarray(neuron_ids, dtype=int)
+        feature_indices = maxes[:5, neuron_ids]
+        x0, y0 = x_group * x_chunk, y_group * y_chunk
+        sigma0 = sigma_group * sigma_chunk
+        frequency0 = frequency_group * frequency_chunk
+        x1 = min(wavelet_shape[1], x0 + x_chunk)
+        y1 = min(wavelet_shape[2], y0 + y_chunk)
+        sigma1 = min(wavelet_shape[4], sigma0 + sigma_chunk)
+        frequency1 = (
+            min(wavelet_shape[5], frequency0 + frequency_chunk)
+            if len(wavelet_shape) == 6
+            else 1
+        )
+        local_x = feature_indices[0] - x0
+        local_y = feature_indices[1] - y0
+        local_sigma = feature_indices[3] - sigma0
+        local_frequency = feature_indices[4] - frequency0
+        for time_start in range(0, n_frames, time_chunk):
+            time_end = min(n_frames, time_start + time_chunk)
+            read_started = time.perf_counter()
+            if len(wavelet_shape) == 5:
+                block = np.asarray(wavelets[time_start:time_end, x0:x1, y0:y1, :, sigma0:sigma1])
+                weights = np.asarray(
+                    np.moveaxis(block[:, local_x, local_y, :, local_sigma], 0, 1),
+                    dtype=np.float64,
+                )
+            else:
+                block = np.asarray(
+                    wavelets[
+                        time_start:time_end, x0:x1, y0:y1, :, sigma0:sigma1, frequency0:frequency1
+                    ]
+                )
+                weights = np.asarray(
+                    np.moveaxis(
+                        block[:, local_x, local_y, :, local_sigma, local_frequency], 0, 1
+                    ),
+                    dtype=np.float64,
+                )
+            read_seconds += time.perf_counter() - read_started
+            compute_started = time.perf_counter()
+            np.nan_to_num(weights, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+            np.maximum(weights, 0.0, out=weights)
+            rates = np.take(responses[time_start:time_end], neuron_ids, axis=1)
+            weighted_sum[neuron_ids] += np.sum(
+                weights * rates[:, :, None], axis=0, dtype=np.float64
             )
-            orientation_tuning[neuron_idx] = np.divide(
-                np.sum(weights * rates[:, None], axis=0),
-                denom,
-                out=np.zeros(n_orientations, dtype=float),
-                where=denom > 0,
-            )
-            if trial_orientation_tuning is not None:
+            weight_sum[neuron_ids] += weights.sum(axis=0, dtype=np.float64)
+            if trial_weighted_sum is not None:
                 trial_rates = np.clip(
-                    np.nan_to_num(trial_responses[:, :n_frames, neuron_idx], nan=0.0),
+                    np.nan_to_num(
+                        np.take(trial_responses[:, time_start:time_end, :], neuron_ids, axis=2),
+                        nan=0.0,
+                        posinf=0.0,
+                        neginf=0.0,
+                    ),
                     0.0,
                     None,
                 )
-                trial_orientation_tuning[:, neuron_idx, :] = np.divide(
-                    np.sum(weights[None, :, :] * trial_rates[:, :, None], axis=1),
-                    denom[None, :],
-                    out=np.zeros((trial_rates.shape[0], n_orientations), dtype=float),
-                    where=denom[None, :] > 0,
+                trial_weighted_sum[:, neuron_ids] += np.sum(
+                    weights[None, :, :, :] * trial_rates[:, :, :, None],
+                    axis=1,
+                    dtype=np.float64,
                 )
-            continue
+            compute_seconds += time.perf_counter() - compute_started
+        if group_number % report_every == 0 or group_number == total_groups:
+            print(
+                f"[FIRING RATE] Feature chunks {group_number}/{total_groups} | "
+                f"neurons in chunk={neuron_ids.size} | read={read_seconds:.1f}s | compute={compute_seconds:.1f}s"
+            )
 
-        group_rates = np.clip(
-            np.nan_to_num(np.take(responses[:n_frames], neuron_indices, axis=1), nan=0.0),
-            0.0,
-            None,
+    metric_started = time.perf_counter()
+    if valid_neuron_ids.size:
+        orientation_tuning[valid_neuron_ids] = np.divide(
+            weighted_sum[valid_neuron_ids],
+            weight_sum[valid_neuron_ids],
+            out=np.zeros((valid_neuron_ids.size, n_orientations), dtype=float),
+            where=weight_sum[valid_neuron_ids] > 0,
         )
-        group_tuning = np.divide(
-            weights.T @ group_rates,
-            denom[:, None],
-            out=np.zeros((n_orientations, len(neuron_indices)), dtype=float),
-            where=denom[:, None] > 0,
-        )
-        orientation_tuning[neuron_indices] = group_tuning.T
         if trial_orientation_tuning is not None:
-            trial_rates = np.clip(
-                np.nan_to_num(
-                    np.take(trial_responses[:, :n_frames, :], neuron_indices, axis=2),
-                    nan=0.0,
-                ),
-                0.0,
-                None,
-            )
-            trial_orientation_tuning[:, neuron_indices, :] = np.divide(
-                np.einsum("to,ntg->ngo", weights, trial_rates, optimize=True),
-                denom[None, None, :],
+            trial_orientation_tuning[:, valid_neuron_ids] = np.divide(
+                trial_weighted_sum[:, valid_neuron_ids],
+                weight_sum[None, valid_neuron_ids],
                 out=np.zeros(
-                    (trial_rates.shape[0], len(neuron_indices), n_orientations), dtype=float
+                    (trial_responses.shape[0], valid_neuron_ids.size, n_orientations), dtype=float
                 ),
-                where=denom[None, None, :] > 0,
+                where=weight_sum[None, valid_neuron_ids] > 0,
             )
 
-    # Keep the established metric routines as the single numerical definition
-    # of OSI and gOSI; the optimized path only changes how tuning sums are
-    # scheduled and read from disk.
-    for neuron_idx in range(n_neurons):
-        tuning = orientation_tuning[neuron_idx]
-        osi[neuron_idx], gosi[neuron_idx] = orientation_selectivity_from_tuning(
-            tuning,
-            angles_deg,
+        # Tuning is explicitly non-negative above, so this vectorized form is
+        # numerically equivalent to calculate_osi/calculate_gosi while avoiding
+        # a Python-level metric pass over every neuron.
+        rates = np.nan_to_num(orientation_tuning[valid_neuron_ids], nan=0.0)
+        preferred = np.argmax(rates, axis=1)
+        orientation_angles = angles_deg % 180.0
+        orthogonal = (orientation_angles[preferred] + 90.0) % 180.0
+        distances = np.abs(((orientation_angles[None, :] - orthogonal[:, None] + 90.0) % 180.0) - 90.0)
+        orthogonal_indices = np.argmin(distances, axis=1)
+        preferred_rates = rates[np.arange(rates.shape[0]), preferred]
+        orthogonal_rates = rates[np.arange(rates.shape[0]), orthogonal_indices]
+        osi_denominator = preferred_rates + orthogonal_rates
+        osi_values = np.divide(
+            preferred_rates - orthogonal_rates,
+            osi_denominator,
+            out=np.full(valid_neuron_ids.size, np.nan, dtype=float),
+            where=osi_denominator > 0,
         )
-
+        phase = np.exp(2j * np.deg2rad(orientation_angles))
+        gosi_denominator = rates.sum(axis=1)
+        gosi_values = np.divide(
+            np.abs(rates @ phase),
+            gosi_denominator,
+            out=np.full(valid_neuron_ids.size, np.nan, dtype=float),
+            where=gosi_denominator > 0,
+        )
+        osi[valid_neuron_ids] = osi_values
+        gosi[valid_neuron_ids] = gosi_values
     result = {
         "angles_deg": np.asarray(angles_deg, dtype=float),
         "orientation_tuning": orientation_tuning,
@@ -291,4 +376,10 @@ def firing_rate_orientation_tuning(spikes, wavelets_complex, rfs, angles_deg=Non
             result["orientation_sem"] = np.nanstd(
                 trial_orientation_tuning, axis=0, ddof=1
             ) / np.sqrt(trial_orientation_tuning.shape[0])
+    metric_seconds = time.perf_counter() - metric_started
+    print(
+        f"[FIRING RATE] Completed orientation tuning | elapsed={time.perf_counter() - started:.1f}s | "
+        f"chunk reads={read_seconds:.1f}s | weighted sums={compute_seconds:.1f}s | "
+        f"OSI/gOSI and SEM={metric_seconds:.1f}s"
+    )
     return result

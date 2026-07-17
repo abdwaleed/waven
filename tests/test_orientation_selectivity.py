@@ -82,3 +82,47 @@ def test_grouped_firing_rate_tuning_matches_the_per_neuron_calculation():
     np.testing.assert_allclose(
         result["trial_orientation_tuning"], expected_trial_tuning, rtol=1e-12, atol=1e-12
     )
+
+
+def test_firing_rate_tuning_reads_each_storage_chunk_once_per_time_tile():
+    """Preferred features in one Zarr chunk must be read together."""
+
+    class CountingChunkedArray:
+        def __init__(self, values, chunks):
+            self.values = values
+            self.shape = values.shape
+            self.chunks = chunks
+            self.read_count = 0
+
+        def __getitem__(self, item):
+            self.read_count += 1
+            return self.values[item]
+
+    spikes = np.arange(2 * 6 * 4, dtype=float).reshape(2, 6, 4) % 7
+    wavelets = (
+        np.arange(6 * 8 * 8 * 3 * 2, dtype=float).reshape(6, 8, 8, 3, 2) % 5
+    ) + 1
+    # Neurons 0/1 share one (x, y, sigma) storage chunk; neurons 2/3 share a
+    # second.  With two time tiles, the optimized implementation makes four
+    # reads, instead of independently reading a tile for every neuron.
+    chunked_wavelets = CountingChunkedArray(wavelets, chunks=(3, 4, 4, 3, 2))
+    indices = np.array(
+        [
+            [0, 1, 5, 6],
+            [0, 2, 5, 7],
+            [0, 0, 0, 0],
+            [0, 1, 1, 0],
+            [0, 0, 0, 0],
+        ]
+    )
+
+    expected_tuning, expected_trial_tuning = _reference_firing_rate_tuning(
+        spikes, wavelets, (None, indices)
+    )
+    result = firing_rate_orientation_tuning(spikes, chunked_wavelets, (None, indices))
+
+    assert chunked_wavelets.read_count == 4
+    np.testing.assert_allclose(result["orientation_tuning"], expected_tuning, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(
+        result["trial_orientation_tuning"], expected_trial_tuning, rtol=1e-12, atol=1e-12
+    )

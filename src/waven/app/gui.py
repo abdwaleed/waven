@@ -4156,6 +4156,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _ensure_rf_imports("coarse RF analysis")
         rf_extra = {
             "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
+            "force_3d_graphs_to_2d": bool(force_2d_graphs_var.get()),
         }
         cached = _get_cached_entry("coarse_rf", extra=rf_extra)
         if cached:
@@ -4375,26 +4376,40 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             plt.close('all')
 
             pos_dim = neuron_pos.shape[1] if getattr(neuron_pos, "ndim", 0) == 2 else 0
-            has_z = pos_dim >= 3
+            plot_neuron_pos = neuron_pos
+            plot_axis_labels = ("X (um)", "Y (um)", "Z (um)")
+            dropped_position_axis = None
+            if force_2d_graphs_var.get() and pos_dim >= 3:
+                coordinate_means = np.nanmean(neuron_pos[:, :3], axis=0)
+                dropped_position_axis = int(np.nanargmin(np.abs(coordinate_means)))
+                retained_position_axes = [axis for axis in range(3) if axis != dropped_position_axis]
+                plot_neuron_pos = neuron_pos[:, retained_position_axes]
+                plot_axis_labels = tuple(plot_axis_labels[axis] for axis in retained_position_axes)
+                print(
+                    "[PLOT] Forced 3D neuron positions to 2D | "
+                    f"ignored {('X', 'Y', 'Z')[dropped_position_axis]} axis "
+                    f"(mean={coordinate_means[dropped_position_axis]:.4g})"
+                )
+            has_z = plot_neuron_pos.shape[1] >= 3
             fig1 = plt.figure(figsize=(6, 5), constrained_layout=True)
             ax1 = fig1.add_subplot(111, projection='3d') if has_z else fig1.add_subplot(111)
             if has_z:
                 ax1.scatter(
-                    neuron_pos[:, 0], neuron_pos[:, 1], neuron_pos[:, 2],
+                    plot_neuron_pos[:, 0], plot_neuron_pos[:, 1], plot_neuron_pos[:, 2],
                     c='k', alpha=0.3, label="Neurons", picker=True, rasterized=True,
                 )
-                ax1.set_zlabel("Z (um)")
+                ax1.set_zlabel(plot_axis_labels[2])
             else:
-                ax1.scatter(neuron_pos[:, 0], neuron_pos[:, 1], c='k', alpha=0.3, label="Neurons", picker=True, rasterized=True)
+                ax1.scatter(plot_neuron_pos[:, 0], plot_neuron_pos[:, 1], c='k', alpha=0.3, label="Neurons", picker=True, rasterized=True)
             ax1.set_title("Neuron Positions (µm)")
             ax1.set_xlabel("X (µm)")
             ax1.set_ylabel("Y (µm)")
 
             ax1.set_title("Neuron Positions")
-            ax1.set_xlabel("X (um)")
-            ax1.set_ylabel("Y (um)")
+            ax1.set_xlabel(plot_axis_labels[0])
+            ax1.set_ylabel(plot_axis_labels[1])
             if has_z:
-                ax1.set_zlabel("Z (um)")
+                ax1.set_zlabel(plot_axis_labels[2])
 
             subplot_kwargs = {"projection": "3d"} if has_z else {}
             fig10, axes10 = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True, subplot_kw=subplot_kwargs)
@@ -4412,13 +4427,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 title = ["Azimuth (deg)", "Elevation (deg)", "Orientation (deg)", "Size (deg)"][idx]
                 if has_z:
                     scatter = ax10[idx].scatter(
-                        neuron_pos[:, 0], neuron_pos[:, 1], neuron_pos[:, 2], s=5, c=values,
+                        plot_neuron_pos[:, 0], plot_neuron_pos[:, 1], plot_neuron_pos[:, 2], s=5, c=values,
                         cmap=cmap, alpha=point_alphas, rasterized=True, picker=True,
                     )
-                    ax10[idx].set_zlabel("Z (um)")
+                    ax10[idx].set_zlabel(plot_axis_labels[2])
                 else:
                     scatter = ax10[idx].scatter(
-                        neuron_pos[:, 0], neuron_pos[:, 1], s=5, c=values,
+                        plot_neuron_pos[:, 0], plot_neuron_pos[:, 1], s=5, c=values,
                         cmap=cmap, alpha=point_alphas, rasterized=True, picker=True,
                     )
                 fig10.colorbar(scatter, ax=ax10[idx], fraction=0.046)
@@ -4454,6 +4469,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             fig_sta.patch.set_edgecolor("none")
             fig_sta.patch.set_linewidth(0)
             psth_sta_cache = {}
+            sta_render_in_progress = [False]
 
             def _psth_sta_for_neuron(neuron_id, spike_train):
                 """Calculate a bounded, standard STA only when a neuron is inspected."""
@@ -4541,7 +4557,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
                 return ci, int(np.nanmin(counts[valid_columns]))
 
-            def draw_individual_neuron(neuron_id, switch_tab=True, sta_result=None, for_export=False):
+            def draw_individual_neuron(
+                neuron_id, switch_tab=True, sta_result=None, sta_error=None, for_export=False
+            ):
                 """Refresh the selected-neuron spike and receptive-field panels.
 
                 Args:
@@ -4794,7 +4812,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     fig_sta.patch.set_edgecolor("none")
                     fig_sta.patch.set_linewidth(0)
                     try:
-                        sta_result = sta_result or _psth_sta_for_neuron(neuron_id, spike_train)
+                        if sta_error is not None:
+                            raise ValueError(sta_error)
+                        if sta_result is None:
+                            sta_result = _psth_sta_for_neuron(neuron_id, spike_train)
                     except ValueError as exc:
                         fig_sta.text(
                             0.5, 0.5, f"PSTH-weighted STA unavailable\n{exc}",
@@ -4880,6 +4901,55 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         except Exception as clear_error:
                             print(f"Error clearing failed selected-neuron plots: {clear_error}")
 
+            def draw_individual_neuron_async(neuron_id, switch_tab=True, on_complete=None):
+                """Prepare the expensive STA off Tk's event loop, then render it."""
+                try:
+                    neuron_id = int(neuron_id)
+                    cached_sta = psth_sta_cache.get(neuron_id)
+                except Exception as exc:
+                    print(f"Failed to prepare selected neuron: {exc}")
+                    return
+                if sta_render_in_progress[0]:
+                    print("[PSTH STA] A selected-neuron request is already running; ignoring the extra request.")
+                    return
+
+                def finish(sta_result=None, sta_error=None):
+                    try:
+                        draw_individual_neuron(
+                            neuron_id,
+                            switch_tab=switch_tab,
+                            sta_result=sta_result,
+                            sta_error=sta_error,
+                        )
+                    finally:
+                        sta_render_in_progress[0] = False
+                        btn_runRF.configure(state=tk.NORMAL, text="Inspect Single Neuron")
+                        if on_complete is not None:
+                            on_complete()
+
+                if cached_sta is not None:
+                    finish(sta_result=cached_sta)
+                    return
+
+                sta_render_in_progress[0] = True
+                btn_runRF.configure(state=tk.DISABLED, text="Preparing Single Neuron…")
+                print(f"[PSTH STA] Preparing neuron {neuron_id} off the GUI thread")
+
+                def prepare_sta():
+                    try:
+                        spike_train = np.mean(np.asarray(spks[:, :, neuron_id]), axis=0)
+                        result = _psth_sta_for_neuron(neuron_id, spike_train)
+                    except Exception as exc:
+                        root.after(0, lambda: finish(sta_error=str(exc)))
+                    else:
+                        root.after(0, lambda: finish(sta_result=result))
+
+                threading.Thread(
+                    target=prepare_sta,
+                    name=f"waven-sta-neuron-{neuron_id}",
+                    daemon=True,
+                ).start()
+
             def onpick(event):
                 """Function for onpick.
 
@@ -4887,7 +4957,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     event: Input value for this operation.
                 """
                 try:
-                    draw_individual_neuron(int(event.ind[0]))
+                    draw_individual_neuron_async(int(event.ind[0]))
                 except Exception as e:
                     print(f"Error drawing pick event: {e}")
 
@@ -4904,6 +4974,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 {
                     "source": "Run Coarse RF Analysis",
                     "neuron_pos": neuron_pos,
+                    "plotted_neuron_pos": plot_neuron_pos,
+                    "force_3d_graphs_to_2d": bool(force_2d_graphs_var.get()),
+                    "dropped_position_axis": dropped_position_axis,
                     "response_correlation": respcorr,
                     "skewness": skewness,
                     "filter_mask": filter_mask,
@@ -4916,6 +4989,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "retinotopy": np.asarray(rfs_gabor[2]),
                     "best_params": np.asarray(rfs_gabor[1]),
                     "neuron_pos": neuron_pos,
+                    "plotted_neuron_pos": plot_neuron_pos,
+                    "force_3d_graphs_to_2d": bool(force_2d_graphs_var.get()),
+                    "dropped_position_axis": dropped_position_axis,
                     "sigmas_deg": sigmas_deg,
                     "frequencies": rf_frequencies,
                     "analysis_coverage": analysis_coverage,
@@ -4955,15 +5031,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 """Function for click RF."""
                 try:
                     neuron_id = _selected_neuron_id()
-                    draw_individual_neuron(neuron_id)
+                    draw_individual_neuron_async(neuron_id)
                 except Exception as e:
                     print(f"Failed to plot RF: {e}")
 
             btn_runRF.configure(command=click_RF)
-            try:
-                draw_individual_neuron(_selected_neuron_id())
-            except Exception:
-                pass
             figure_records = [
                 ("all", "Neuron Layout", fig1),
                 ("all", "Population Retinotopy Maps", fig10),
@@ -4978,16 +5050,26 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ]
             if fig_osi_units is not None:
                 figure_records.insert(3, ("all", "OSI and gOSI by Unit", fig_osi_units))
-            _put_cached_entry(
-                "coarse_rf",
-                {
-                    "analysis_state": _state_for_plot_cache(analysis_state),
-                    "figures": _figure_records(figure_records),
-                },
-                extra=rf_extra,
-            )
-            print("Plots rendered successfully.")
-            update_progress(100, "Coarse receptive-field analysis", "Plots ready")
+
+            def finish_plot_rendering():
+                _put_cached_entry(
+                    "coarse_rf",
+                    {
+                        "analysis_state": _state_for_plot_cache(analysis_state),
+                        "figures": _figure_records(figure_records),
+                    },
+                    extra=rf_extra,
+                )
+                print("Plots rendered successfully.")
+                update_progress(100, "Coarse receptive-field analysis", "Plots ready")
+
+            try:
+                draw_individual_neuron_async(
+                    _selected_neuron_id(), on_complete=finish_plot_rendering
+                )
+            except Exception as exc:
+                print(f"[PSTH STA] Initial selected-neuron render failed: {exc}")
+                finish_plot_rendering()
 
         root.after(0, render_gui_plots)
 
@@ -7091,8 +7173,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_analysis = ttk.LabelFrame(stage_analysis, text="Neural & RF Analysis", padding=15)
     frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
+    force_2d_graphs_var = tk.BooleanVar(value=False)
+    coarse_rf_controls = ctk.CTkFrame(frame_analysis, fg_color="transparent")
+    coarse_rf_controls.pack(fill=tk.X, pady=(0, 10))
     btn_submit_plot = ctk.CTkButton(
-        frame_analysis,
+        coarse_rf_controls,
         text="Run Coarse RF Analysis",
         height=34,
         corner_radius=6,
@@ -7100,7 +7185,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#065F46",
         command=run_in_thread(plot_data, "Coarse receptive-field analysis"),
     )
-    btn_submit_plot.pack(fill=tk.X, pady=(0, 10))
+    btn_submit_plot.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    ctk.CTkCheckBox(
+        coarse_rf_controls,
+        text="Force 3D graphs to 2D",
+        variable=force_2d_graphs_var,
+        text_color=text_color,
+        checkbox_width=18,
+        checkbox_height=18,
+    ).pack(side=tk.RIGHT, padx=(12, 0))
 
     ttk.Separator(frame_analysis, orient="horizontal").pack(fill=tk.X, pady=8)
 
