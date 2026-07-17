@@ -75,6 +75,36 @@ def enabled_feature(name: str, default: bool = True) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def configure_zarr_codec_threads(max_threads: int = 8) -> Optional[int]:
+    """Configure a bounded Blosc pool for large Zarr cache reads and writes.
+
+    Numcodecs uses a process-wide native worker count.  A single writer thread
+    otherwise leaves large cache compression/decompression serial, while an
+    unbounded setting can make the GUI and GPU feeder contend with the codec.
+    ``WAVEN_ZARR_THREADS`` overrides the automatic setting; the earlier
+    coarse-specific name remains accepted for existing user configurations.
+    """
+    requested = os.environ.get(
+        "WAVEN_ZARR_THREADS", os.environ.get("WAVEN_COARSE_ZARR_THREADS", "")
+    ).strip()
+    automatic = min(max(1, int(max_threads)), max(1, (os.cpu_count() or 2) - 1))
+    try:
+        threads = int(requested) if requested else automatic
+    except ValueError:
+        print(f"Invalid WAVEN_ZARR_THREADS={requested!r}; using automatic codec threads.")
+        threads = automatic
+    threads = max(1, min(32, threads))
+    try:
+        from numcodecs import blosc as numcodecs_blosc
+
+        numcodecs_blosc.set_nthreads(threads)
+        return threads
+    except Exception:
+        # Numcodecs is optional for non-Zarr workflows, and some legacy
+        # releases expose no thread-control API.
+        return None
+
+
 def _gpu_descriptor(device_id: int) -> Dict[str, object]:
     """Return the hardware traits relevant to synchronous DataParallel work."""
     properties = torch.cuda.get_device_properties(int(device_id))

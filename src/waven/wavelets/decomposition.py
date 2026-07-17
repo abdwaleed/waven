@@ -35,6 +35,7 @@ from tqdm import tqdm
 from ..runtime.performance import (
     OperationTelemetry,
     available_ram_bytes,
+    configure_zarr_codec_threads,
     configure_torch_cpu_threads,
     convolution_precision_scope,
     autotuned_frame_chunk_size,
@@ -1749,6 +1750,7 @@ def waveletPowerDecompositionConv(
     videodata, sigmas, folder_path, n_orientations, phase_offsets=None,
     kernel_cache_path=None, frame_chunk_size=None, filter_group_size=None,
     output_stem="coarse_rf_power", zarr_chunks=None, cancel_event=None,
+    progress_signature=None,
 ):
     """Write coarse wavelet power directly, without temporary phase caches.
 
@@ -1762,6 +1764,7 @@ def waveletPowerDecompositionConv(
     except ImportError as exc:
         raise ImportError("Direct coarse RF power requires zarr and numcodecs.") from exc
     device = resolve_compute_device(prefer_gpu=True)
+    codec_threads = configure_zarr_codec_threads()
     num_frames, ny, nx = videodata.shape
     sigmas = np.asarray(sigmas, dtype=float)
     thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
@@ -1784,10 +1787,15 @@ def waveletPowerDecompositionConv(
         )
     zarr_chunks = tuple(min(int(dim), max(1, int(chunk))) for dim, chunk in zip(final_shape, zarr_chunks))
     save_path = os.path.join(folder_path, f"{output_stem}.zarr")
+    # The regular artifact metadata is intentionally written only after every
+    # tile completes.  Include the caller's input fingerprint in the separate
+    # progress sidecar so a cancelled cache can safely resume, but never be
+    # reused after its stimulus/crop parameters changed.
     progress_kind = json.dumps(
         {"product": "coarse_rf_power", "sigmas": sigmas.tolist(),
          "orientations": int(n_orientations),
-         "phase_offsets": list(phase_offsets) if phase_offsets is not None else []},
+         "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
+         "resume_signature": progress_signature},
         sort_keys=True,
     )
     progress = _ConvolutionProgress(save_path, final_shape, progress_kind)
@@ -1796,10 +1804,31 @@ def waveletPowerDecompositionConv(
         zarr, save_path, final_shape, zarr_chunks,
         compressor, progress,
     )
+    # An interrupted run can be restarted when free VRAM differs.  In that
+    # case autotuning may select a new frame size, but writing it into an
+    # existing Zarr time chunk causes expensive read/modify/recompress cycles.
+    # Continue with the persisted layout instead.  Its matching progress tiles
+    # then remain directly reusable and every resumed write is chunk aligned.
+    persisted_chunks = tuple(int(value) for value in getattr(power, "chunks", ()) or ())
+    if progress.reusable and len(persisted_chunks) == len(final_shape):
+        persisted_time_chunk = max(1, persisted_chunks[0])
+        if persisted_time_chunk != int(frame_chunk_size):
+            print(
+                "Resume: retaining interrupted cache time chunk "
+                f"{persisted_time_chunk} instead of newly tuned {frame_chunk_size}."
+            )
+            frame_chunk_size = persisted_time_chunk
+        # Keep a smaller-or-equal old sigma tile for resumability.  Never grow
+        # a resumed group above the current safe VRAM-derived estimate.
+        persisted_sigma_chunk = max(1, persisted_chunks[-1])
+        if persisted_sigma_chunk <= int(filter_group_size):
+            filter_group_size = persisted_sigma_chunk
+        zarr_chunks = persisted_chunks
     print(f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, sigma group={filter_group_size}")
     print(
         f"Direct coarse RF power cache layout | chunks={zarr_chunks}; "
         f"compressor={compressor_description}"
+        + (f"; Blosc threads={codec_threads}" if codec_threads is not None else "")
     )
     start_time = time.time()
     telemetry = OperationTelemetry("Direct coarse RF power")

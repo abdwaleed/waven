@@ -103,3 +103,43 @@ def test_direct_coarse_power_resumes_completed_filter_groups(tmp_path, monkeypat
     assert "skipping completed sigma group 1/2" in capsys.readouterr().out
     assert not progress_path.exists()
     assert np.asarray(load_array(output_path, mmap_mode="r")).shape == (5, 6, 7, 2, 2)
+
+
+def test_direct_coarse_power_resume_keeps_the_persisted_time_chunk(tmp_path, monkeypatch, capsys):
+    """A changed VRAM estimate must not cause partial Zarr chunk rewrites."""
+    pytest.importorskip("zarr")
+
+    class CancelBeforeSecondGroup:
+        def __init__(self):
+            self.calls = 0
+
+        def is_set(self):
+            self.calls += 1
+            return self.calls >= 4
+
+    common = dict(
+        videodata=np.random.default_rng(31).normal(size=(5, 7, 6)).astype(np.float32),
+        sigmas=np.array([1.0, 1.5]),
+        folder_path=str(tmp_path),
+        n_orientations=2,
+        phase_offsets=(0.0, np.pi / 2),
+        filter_group_size=1,
+        output_stem="layout_resume",
+    )
+    monkeypatch.setenv("WAVEN_AMP", "0")
+    monkeypatch.setenv("WAVEN_TORCH_COMPILE", "0")
+    monkeypatch.setenv("WAVEN_MULTI_GPU", "0")
+    monkeypatch.setenv("WAVEN_TIME_MAJOR_CONV", "0")
+    monkeypatch.setenv("WAVEN_ASYNC_WRITER", "0")
+    monkeypatch.setenv("WAVEN_AUTOTUNE", "0")
+    monkeypatch.setenv("WAVEN_PREFETCH", "0")
+
+    with pytest.raises(OperationCancelled):
+        waveletPowerDecompositionConv(
+            frame_chunk_size=2, cancel_event=CancelBeforeSecondGroup(), **common
+        )
+
+    output_path = waveletPowerDecompositionConv(frame_chunk_size=3, **common)
+    output = load_array(output_path, mmap_mode="r")
+    assert output.chunks[0] == 2
+    assert "retaining interrupted cache time chunk 2 instead of newly tuned 3" in capsys.readouterr().out

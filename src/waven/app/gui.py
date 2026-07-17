@@ -201,6 +201,7 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     global _RF_IMPORTS_READY
     global compute_skewness_neurons, PearsonCorrelationPinkNoise
     global repetability_trial3, correlation_orientation_tuning, firing_rate_orientation_tuning
+    global orientation_tuning_bundle
     global close_orientation_curve, orientation_selectivity_from_tuning
     if _RF_IMPORTS_READY:
         return
@@ -214,6 +215,7 @@ def _ensure_rf_imports(label="coarse RF analysis"):
         close_orientation_curve as _close_orientation_curve,
         correlation_orientation_tuning as _correlation_orientation_tuning,
         firing_rate_orientation_tuning as _firing_rate_orientation_tuning,
+        orientation_tuning_bundle as _orientation_tuning_bundle,
         orientation_selectivity_from_tuning as _orientation_selectivity_from_tuning,
     )
 
@@ -223,6 +225,7 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     close_orientation_curve = _close_orientation_curve
     correlation_orientation_tuning = _correlation_orientation_tuning
     firing_rate_orientation_tuning = _firing_rate_orientation_tuning
+    orientation_tuning_bundle = _orientation_tuning_bundle
     orientation_selectivity_from_tuning = _orientation_selectivity_from_tuning
     _RF_IMPORTS_READY = True
 
@@ -3005,6 +3008,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return True
         metadata = _read_artifact_metadata(path)
         if metadata is None:
+            if os.path.exists(f"{path}.waven-progress.json"):
+                print(
+                    "Existing artifact is an incomplete convolution cache; "
+                    f"continuing from its saved tiles: {path}"
+                )
+                return False
             print(f"Existing artifact has no parameter metadata, regenerating: {path}")
             return False
         if kind is not None and metadata.get("kind") != kind:
@@ -3719,6 +3728,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         kernel_cache_path=coarse_kernel_cache_path,
                         output_stem=os.path.splitext(os.path.basename(coarse_power_path))[0],
                         cancel_event=_current_cancel_event(),
+                        progress_signature=coarse_power_fingerprint,
                     )
                     _raise_if_cancelled()
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
@@ -4400,23 +4410,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                                 neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
                                                 n_orientations=n_orientations,
                                                 plotting=False)
-        update_progress(75, "Coarse receptive-field analysis", "Computing firing-rate OSI/gOSI")
-        # ``spks`` is the aligned neural firing-rate cache.  It is never
-        # replaced by RF correlations; RF features only select response bins.
-        # The wavelet energy only weights frames into orientation bins at each
-        # neuron's already-established preferred RF features.
-        orientation_selectivity = firing_rate_orientation_tuning(
-            spks[:, :n_frames, :],
-            w_c_downsampled,
-            rfs_gabor,
+        update_progress(75, "Coarse receptive-field analysis", "Precomputing orientation tuning curves")
+        # Both curve types select the same preferred Gabor features.  Compute
+        # them in one chunk-batched traversal so this stage reads each Zarr
+        # feature tile once rather than once per curve type.
+        orientation_tunings = orientation_tuning_bundle(
+            spks[:, :n_frames, :], w_c_downsampled, rfs_gabor,
         )
-        update_progress(82, "Coarse receptive-field analysis", "Precomputing correlation tuning exports")
-        correlation_selectivity = correlation_orientation_tuning(
-            spks[:, :n_frames, :],
-            w_c_downsampled,
-            rfs_gabor,
-            angles_deg=orientation_selectivity["angles_deg"],
-        )
+        orientation_selectivity = orientation_tunings["firing_rate"]
+        correlation_selectivity = orientation_tunings["correlation"]
+        update_progress(82, "Coarse receptive-field analysis", "Preparing orientation tuning exports")
 
         def _orientation_export_records(selectivity, curve_kind):
             """Build ready-to-serialize records; export never recomputes them."""

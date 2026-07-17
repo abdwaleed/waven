@@ -16,6 +16,7 @@ import torch
 
 from ..runtime.performance import (
     OperationTelemetry,
+    configure_zarr_codec_threads,
     enabled_feature,
     gpu_available_vram_bytes,
     has_enough_ram,
@@ -85,6 +86,9 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
     total_tiles = math.ceil(nx / x_chunk) * math.ceil(ny / y_chunk)
     tile_number = 0
     telemetry = OperationTelemetry("Coarse RF correlation")
+    # This also applies when an existing coarse-power cache is reused in a
+    # later session, where the cache-writing stage did not configure Blosc.
+    codec_threads = configure_zarr_codec_threads()
     use_gpu = enabled_feature("RF_GPU", default=True) and torch.cuda.is_available()
     response_gpu = None
     if use_gpu:
@@ -100,6 +104,7 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
     print(
         "RF correlation using stable chunk-aligned covariance: "
         f"time={time_chunk}, x={x_chunk}, y={y_chunk}; {total_tiles} spatial tiles."
+        + (f" Blosc threads={codec_threads}." if codec_threads is not None else "")
     )
     # One reader overlaps decompression/storage latency for the next time chunk
     # with the covariance and GPU work for the current one.  It touches a

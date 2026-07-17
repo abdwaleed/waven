@@ -7,6 +7,7 @@ from waven.analysis.orientation_selectivity import (
     correlation_orientation_tuning,
     firing_rate_orientation_tuning,
     orientation_selectivity_from_tuning,
+    orientation_tuning_bundle,
 )
 
 
@@ -152,3 +153,49 @@ def test_correlation_tuning_precomputes_trial_curves_without_changing_rf_means()
     np.testing.assert_allclose(
         result["trial_orientation_tuning"][:, 0, :], [[1.0, -1.0], [-1.0, 1.0]]
     )
+
+
+def test_shared_orientation_bundle_matches_separate_curves_with_one_set_of_reads():
+    """The GUI path must not reread identical preferred-feature Zarr tiles."""
+
+    class CountingChunkedArray:
+        def __init__(self, values, chunks):
+            self.values = values
+            self.shape = values.shape
+            self.chunks = chunks
+            self.read_count = 0
+
+        def __getitem__(self, item):
+            self.read_count += 1
+            return self.values[item]
+
+    generator = np.random.default_rng(42)
+    spikes = generator.normal(size=(3, 6, 4))
+    wavelets = generator.random(size=(6, 8, 8, 3, 2))
+    indices = np.array(
+        [
+            [0, 1, 5, 6],
+            [0, 2, 5, 7],
+            [0, 0, 0, 0],
+            [0, 1, 1, 0],
+            [0, 0, 0, 0],
+        ]
+    )
+    rf_values = generator.normal(size=(4, 8, 8, 3, 2, 1))
+    expected_firing = firing_rate_orientation_tuning(spikes, wavelets, (rf_values, indices))
+    expected_correlation = correlation_orientation_tuning(spikes, wavelets, (rf_values, indices))
+
+    chunked_wavelets = CountingChunkedArray(wavelets, chunks=(3, 4, 4, 3, 2))
+    result = orientation_tuning_bundle(spikes, chunked_wavelets, (rf_values, indices))
+
+    # Two spatial feature groups x two time chunks.  Calling the established
+    # functions separately would make eight reads; the shared path makes four.
+    assert chunked_wavelets.read_count == 4
+    for key in ("orientation_tuning", "trial_orientation_tuning", "osi", "gosi"):
+        np.testing.assert_allclose(
+            result["firing_rate"][key], expected_firing[key], rtol=1e-12, atol=1e-12, equal_nan=True
+        )
+    for key in ("orientation_tuning", "trial_orientation_tuning"):
+        np.testing.assert_allclose(
+            result["correlation"][key], expected_correlation[key], rtol=1e-12, atol=1e-12, equal_nan=True
+        )
