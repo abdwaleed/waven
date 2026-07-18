@@ -301,8 +301,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     GABOR_LABELS = {
         "N_thetas": "Orientation Count",
-        "Sigmas": "Filter Sizes (px)",
-        "Frequencies": "Spatial Frequencies (cyc/px)",
+        "Sigmas": "Filter Sizes (analysis px)",
+        "Frequencies": "Spatial Frequencies (cyc/analysis px)",
         "Phases": "Phases (degrees)",
         "Save Path": "Gabor Cache Folder",
         "Coarse Library Path": "Coarse Gabor Folder",
@@ -318,9 +318,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "Block End": "Session Block Start Frame",
         "Resolution": "Microscope Resolution (µm/px)",
         "Sampling Rate (samples / sec)": "Recording Sampling Rate (Hz)",
-        "Sigmas": "RF Filter Sizes (px)",
-        "Sigmas Full Model": "Full-Model Filter Sizes (px)",
-        "Frequencies": "Stimulus Frequencies (cyc/px)",
+        "Sigmas": "RF Filter Sizes (analysis px)",
+        "Sigmas Full Model": "Full-Model Filter Sizes (analysis px)",
+        "Frequencies": "Stimulus Frequencies (cyc/analysis px)",
         "Visual Coverage": "Visual Field Coverage (°)",
         "Analysis Coverage": "Analysis Field Coverage (°)",
         "Number of Frames": "Frames per Trial",
@@ -392,9 +392,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "Visual Coverage": "[left, right, top, bottom] in degrees",
         "Analysis Coverage": "[left, right, top, bottom] in degrees",
         "N_thetas": "Integer orientation bins, e.g. 18",
-        "Sigmas": "Numeric list in analysis pixels, e.g. [2, 4, 8]",
-        "Sigmas Full Model": "Numeric list in analysis pixels, e.g. [2, 4, 8, 12]",
-        "Frequencies": "Numeric list in cycles/pixel, e.g. [0.02, 0.06, 0.1]",
+        "Sigmas": "Numeric list in square-degree analysis pixels, e.g. [2, 4, 8]",
+        "Sigmas Full Model": "Numeric list in square-degree analysis pixels, e.g. [2, 4, 8, 12]",
+        "Frequencies": "Numeric list in cycles/analysis pixel; displayed/exported values are converted to cpd",
         "Phases": "Numeric list in degrees, e.g. [0, 90]",
         "Neuron ID": "Zero-based neuron index, e.g. 1173",
     }
@@ -3289,10 +3289,26 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return read_movie_metadata(path or _find_movie_path())
 
     def _stimulus_grid_dimensions(scale=None, movie_path=None):
-        """Derive analysis-grid dimensions solely from movie metadata and percentage."""
+        """Derive a visual-angle-calibrated grid from movie metadata and coverage."""
+        try:
+            analysis_coverage = parse_literal(
+                param_entries["Analysis Coverage"].get(), "Analysis Coverage"
+            )
+        except (KeyError, NameError):
+            analysis_coverage = None
         return downsampled_grid_dimensions(
-            _movie_metadata(movie_path), _selected_downsample_percent()
+            _movie_metadata(movie_path), _selected_downsample_percent(), analysis_coverage
         )
+
+    def _analysis_degrees_per_pixel(movie_path=None):
+        """Return calibrated horizontal/vertical degrees per analysis pixel."""
+        analysis_coverage = parse_literal(
+            param_entries["Analysis Coverage"].get(), "Analysis Coverage"
+        )
+        grid_x, grid_y = _stimulus_grid_dimensions(movie_path=movie_path)
+        degrees_x = abs(float(analysis_coverage[0]) - float(analysis_coverage[1])) / grid_x
+        degrees_y = abs(float(analysis_coverage[2]) - float(analysis_coverage[3])) / grid_y
+        return degrees_x, degrees_y
 
     def _gabor_phase_offsets_radians():
         """The GUI accepts degrees; skimage convolution kernels require radians."""
@@ -3405,7 +3421,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _downsample_cache_crop_params(visual_coverage, analysis_coverage):
         """Return cache provenance for the pixel-accurate coverage crop."""
         return {
-            "crop_version": 2,
+            "crop_version": 3,
+            "grid_geometry": "square_visual_degrees_v1",
             "visual_coverage": [float(value) for value in visual_coverage],
             "analysis_coverage": [float(value) for value in analysis_coverage],
         }
@@ -3565,6 +3582,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
         analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
         crop_params = _downsample_cache_crop_params(visual_coverage, analysis_coverage)
+        grid_geometry_params = {
+            "degrees_per_pixel_x": abs(float(analysis_coverage[0]) - float(analysis_coverage[1])) / target_nx,
+            "degrees_per_pixel_y": abs(float(analysis_coverage[2]) - float(analysis_coverage[3])) / target_ny,
+        }
         reusable_path, reusable_format = _find_compatible_downsample_cache(
             movpath, scale, expected_shape, output_format, required_params=crop_params,
         )
@@ -3586,6 +3607,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "output_format": output_format,
                 "shape": expected_shape,
                 **crop_params,
+                **grid_geometry_params,
             }
         )
 
@@ -3594,7 +3616,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _register_cancel_cleanup_path(downsample_path)
         print(
             f"Downsampling video for {scale}: {target_nx} x {target_ny} "
-            f"({int(round(_selected_downsample_percent()))}% slider, {output_format.upper()})"
+            f"({int(round(_selected_downsample_percent()))}% horizontal sampling, "
+            f"{grid_geometry_params['degrees_per_pixel_x']:.4g} deg/px, {output_format.upper()})"
         )
         downsample_video_binary(
             movpath,
@@ -3614,7 +3637,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "downsampled_video",
             expected_shape,
             downsample_fingerprint,
-            params={"scale": scale, "format": output_format, "grid": (target_nx, target_ny), **crop_params},
+            params={
+                "scale": scale,
+                "format": output_format,
+                "grid": (target_nx, target_ny),
+                **crop_params,
+                **grid_geometry_params,
+            },
         )
         completed_actions.add("downsample:coarse")
         update_progress(100, "Stimulus downsample", "Downsampled movie ready")
@@ -4439,6 +4468,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # Cached Coarse RF results before this schema lack the complete
             # precomputed orientation-export records.
             "orientation_export_schema": 2,
+            # RF coordinates, sigma, and frequency values are now calibrated
+            # against square visual-degree pixels rather than movie pixels.
+            "visual_geometry_schema": 2,
         }
         cached = _get_cached_entry("coarse_rf", extra=rf_extra)
         if cached:
@@ -4466,13 +4498,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             movie_metadata = _movie_metadata()
             nx, ny = movie_metadata["width"], movie_metadata["height"]
             coarse_nx, coarse_ny = _stimulus_grid_dimensions("coarse")
+            degrees_per_pixel_x, degrees_per_pixel_y = _analysis_degrees_per_pixel()
+            if not np.isclose(degrees_per_pixel_x, degrees_per_pixel_y, rtol=0.01, atol=1e-6):
+                raise ValueError(
+                    "The prepared analysis grid is not square in visual degrees. "
+                    "Rebuild the stimulus cache with the current calibrated coverage."
+                )
+            degrees_per_pixel = (degrees_per_pixel_x + degrees_per_pixel_y) / 2.0
+            frequencies_cpd = frequencies / degrees_per_pixel
             n_orientations = int(gabor_entries["N_thetas"].get())
             ns = len(sigmas)
             spks_path = param_entries["Spks Path"].get()
             neural_cache_dir = Path(_folder_from_entry(param_entries, "Spks Path", _project_layout().neural_cache_dir))
             nb_frames = movie_metadata["frames"]
             movpath = _find_movie_path()
-            screen_ratio = abs(visual_coverage[0] - visual_coverage[1]) / nx
+            # Retained for compatibility with the RF API; this is now the actual
+            # calibrated analysis-pixel scale, not the original video-pixel scale.
+            screen_ratio = degrees_per_pixel
             xM, xm, yM, ym = analysis_coverage
             if workflow == WORKFLOW_2P:
                 n_planes = int(param_entries["Number of Planes"].get())
@@ -4490,8 +4532,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         pathdata = os.path.join(data_dirs[0], exp_info[0], exp_info[1], str(exp_info[2]))
         pathsuite2p = os.path.join(pathdata, 'suite2p')
-        deg_per_pix = abs(xM - xm) / nx
-        sigmas_deg = np.trunc(2 * deg_per_pix * sigmas * 100) / 100
+        # The downsampled grid is square in visual degrees.  Sigma is therefore
+        # a true Gabor Gaussian standard deviation in degrees, while the filter
+        # bank itself remains compact and efficient in pixel coordinates.
+        sigmas_deg = sigmas * degrees_per_pixel
 
         unit_ids = None
         unit_info = None
@@ -4612,10 +4656,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         if w_c_downsampled.ndim == 6:
             rf_nf = w_c_downsampled.shape[5]
-            rf_frequencies = frequencies[:rf_nf]
+            rf_frequencies = frequencies_cpd[:rf_nf]
         else:
             rf_nf = 1
-            rf_frequencies = frequencies[:1]
+            rf_frequencies = frequencies_cpd[:1]
 
         rf_feature_count = int(coarse_nx) * int(coarse_ny) * int(n_orientations) * int(ns) * int(rf_nf)
         rf_result_bytes = int(spks.shape[2]) * rf_feature_count * np.dtype(np.float32).itemsize
@@ -4765,6 +4809,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             sigmas=sigmas,
             sigmas_deg=sigmas_deg,
             frequencies=frequencies,
+            frequencies_cpd=frequencies_cpd,
             rf_frequencies=rf_frequencies,
             analysis_coverage=analysis_coverage,
             visual_coverage=visual_coverage,
@@ -7024,9 +7069,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             try:
                 metadata = _movie_metadata()
                 grid_width, grid_height = _stimulus_grid_dimensions()
+                degrees_x, degrees_y = _analysis_degrees_per_pixel()
                 gabor_dimensions_label.configure(
                     text=(f"Movie metadata: {metadata['width']} × {metadata['height']} px at "
-                          f"{metadata['fps']:.3g} fps  →  analysis grid {grid_width} × {grid_height} px")
+                          f"{metadata['fps']:.3g} fps  →  calibrated grid {grid_width} × {grid_height} px "
+                          f"({degrees_x:.4g} × {degrees_y:.4g} deg/px)")
                 )
             except (FileNotFoundError, ValueError, OSError):
                 gabor_dimensions_label.configure(

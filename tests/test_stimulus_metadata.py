@@ -29,3 +29,14 @@ def test_coverage_crop_bounds_rejects_analysis_outside_the_visual_field():
 def test_zero_downsample_percent_is_normalized_to_the_smallest_usable_grid():
     """Legacy saved GUI values of zero must not create a one-pixel cache."""
     assert downsampled_grid_dimensions({"width": 1920, "height": 1080}, 0) == (19, 11)
+
+
+def test_coverage_calibrated_grid_has_square_visual_angle_pixels():
+    """A 16:9 movie is resampled to the requested visual-field aspect ratio."""
+    width, height = downsampled_grid_dimensions(
+        {"width": 1280, "height": 720},
+        32,
+        analysis_coverage=(-69, 69, 56, -56),
+    )
+    assert (width, height) == (410, 333)
+    assert abs((138 / width) - (112 / height)) < 0.001

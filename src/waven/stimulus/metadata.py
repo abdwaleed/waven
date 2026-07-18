@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Sequence, Tuple, Union
 
-import cv2
 import numpy as np
 
 
@@ -17,6 +16,8 @@ MoviePath = Union[str, Path]
 
 def read_movie_metadata(path: MoviePath) -> Dict[str, float]:
     """Read validated width, height, frame count, FPS, and duration from a movie."""
+    import cv2
+
     movie_path = Path(path)
     capture = cv2.VideoCapture(str(movie_path))
     try:
@@ -39,18 +40,38 @@ def read_movie_metadata(path: MoviePath) -> Dict[str, float]:
     }
 
 
-def downsampled_grid_dimensions(metadata: Dict[str, float], percent: float) -> Tuple[int, int]:
-    """Return ``(width, height)`` from movie metadata and a usable percentage.
+def downsampled_grid_dimensions(
+    metadata: Dict[str, float],
+    percent: float,
+    analysis_coverage: Sequence[float] | None = None,
+) -> Tuple[int, int]:
+    """Return a usable analysis grid, optionally with square visual-angle pixels.
 
     A zero-sized stimulus grid has no scientific interpretation and previously
     collapsed to a misleading one-pixel cache.  Clamp legacy zero-percent
     configurations to the smallest supported setting (1%) instead.
+
+    When ``analysis_coverage`` is supplied, the percentage determines the
+    horizontal sampling density and the height is derived from the angular
+    field aspect ratio.  This deliberately resamples a non-square stimulus
+    video onto pixels that are square in visual degrees, so an isotropic Gabor
+    in pixel coordinates is also isotropic in the animal's visual field.
+    Callers omitting coverage retain the legacy video-aspect grid.
     """
     percent = max(1.0, min(100.0, float(percent)))
-    return (
-        max(1, int(round(float(metadata["width"]) * percent / 100.0))),
-        max(1, int(round(float(metadata["height"]) * percent / 100.0))),
-    )
+    width = max(1, int(round(float(metadata["width"]) * percent / 100.0)))
+    if analysis_coverage is None:
+        height = max(1, int(round(float(metadata["height"]) * percent / 100.0)))
+        return width, height
+    if len(analysis_coverage) != 4:
+        raise ValueError("Analysis Coverage must contain x_max, x_min, y_max, y_min.")
+    x_max, x_min, y_max, y_min = (float(value) for value in analysis_coverage)
+    x_span = abs(x_max - x_min)
+    y_span = abs(y_max - y_min)
+    if x_span <= 0 or y_span <= 0:
+        raise ValueError("Analysis Coverage must span non-zero horizontal and vertical fields.")
+    height = max(1, int(round(width * y_span / x_span)))
+    return width, height
 
 
 def coverage_ratios(
