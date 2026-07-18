@@ -7,6 +7,8 @@ and lets the legacy :mod:`receptive_fields` API remain a compatibility layer.
 from __future__ import annotations
 
 import math
+import os
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterator, Optional, Tuple
@@ -23,7 +25,39 @@ from ..runtime.performance import (
 )
 
 
-def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features):
+def _allocate_correlation_result(shape, output_path=None):
+    """Allocate RF correlations in RAM or a named NPY memmap safely."""
+    required_bytes = int(np.prod(shape, dtype=np.int64) * np.dtype(np.float32).itemsize)
+    if output_path is None:
+        if not has_enough_ram(required_bytes, safety_margin=1.50):
+            raise MemoryError(
+                "RF result tensor cannot be held safely in RAM: "
+                f"requires {required_bytes / 1024**3:.2f} GiB. Provide an RF output path "
+                "or reduce the feature-grid parameters."
+            )
+        return np.empty(shape, dtype=np.float32)
+    output_path = os.fspath(output_path)
+    output_folder = os.path.dirname(output_path) or "."
+    os.makedirs(output_folder, exist_ok=True)
+    free_bytes = shutil.disk_usage(output_folder).free
+    # ``w+`` replaces a previous RF result at this exact path. Its existing
+    # allocation is reclaimable, so include it in the preflight rather than
+    # falsely rejecting a recomputation on an otherwise full volume.
+    reclaimable_bytes = os.path.getsize(output_path) if os.path.isfile(output_path) else 0
+    if free_bytes + reclaimable_bytes < int(required_bytes * 1.10):
+        raise OSError(
+            "Insufficient disk space for disk-backed RF correlations: "
+            f"need {required_bytes * 1.10 / 1024**3:.2f} GiB, "
+            f"available {(free_bytes + reclaimable_bytes) / 1024**3:.2f} GiB."
+        )
+    print(
+        "Writing RF correlations to a disk-backed array to preserve RAM: "
+        f"{output_path} ({required_bytes / 1024**3:.2f} GiB)."
+    )
+    return np.lib.format.open_memmap(output_path, mode="w+", dtype=np.float32, shape=shape)
+
+
+def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features, output_path=None):
     """Correlate a 5/6-D tensor with stable, chunk-aligned covariance updates.
 
     The calculation uses the parallel/Welford covariance update.  In contrast
@@ -47,7 +81,7 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
     # Float64 running statistics are deliberate.  Wavelet power can have a
     # sizeable positive baseline while the correlation signal is small.
     response = np.asarray(response, dtype=np.float64)
-    result = np.empty((n_neurons, n_features), dtype=np.float32)
+    result = _allocate_correlation_result((n_neurons, n_features), output_path=output_path)
     # Response summaries are identical for every spatial tile.  Computing them
     # once avoids repeatedly centering the same 18,000 x N-neuron matrix while
     # retaining the numerically stable parallel/Welford covariance update.
@@ -242,6 +276,8 @@ def _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features
             prefetch_executor.shutdown(wait=True)
         if response_gpu is not None:
             del response_gpu
+        if hasattr(result, "flush"):
+            result.flush()
     telemetry.report()
     return result
 
@@ -251,6 +287,7 @@ def streaming_cross_correlation(
     response: np.ndarray,
     chunk_size: Optional[int] = None,
     n_time: Optional[int] = None,
+    output_path: Optional[str] = None,
 ) -> np.ndarray:
     """Return Pearson correlations while reading a disk-backed stimulus in blocks.
 
@@ -292,23 +329,20 @@ def streaming_cross_correlation(
         f"({n_time:,} frames × {n_neurons:,} neurons)."
     )
 
-    result_bytes = n_neurons * n_features * np.dtype(np.float32).itemsize
-    if not has_enough_ram(result_bytes, safety_margin=1.50):
-        raise MemoryError(
-            "RF result tensor cannot be held safely in RAM: "
-            f"requires {result_bytes / 1024**3:.2f} GiB. Reduce downsampling percentage, "
-            "orientation/sigma bins, or number of units before running RF analysis."
-        )
     if len(stimulus_shape) >= 4:
         # A structured Zarr tensor benefits from chunk-aligned temporal
         # accumulation; it is both faster and lower-I/O than reading all time
         # frames separately for each small spatial feature block.
-        return _chunk_aligned_structured_correlation(stimulus, response, n_time, n_features)
+        return _chunk_aligned_structured_correlation(
+            stimulus, response, n_time, n_features, output_path=output_path
+        )
 
     response -= response.mean(axis=0, keepdims=True)
     response /= np.maximum(response.std(axis=0, keepdims=True, ddof=1), 1e-9)
 
-    correlations = np.empty((n_neurons, n_features), dtype=np.float32)
+    correlations = _allocate_correlation_result(
+        (n_neurons, n_features), output_path=output_path
+    )
 
     def feature_blocks() -> Iterator[Tuple[int, int, Any]]:
         if len(stimulus_shape) == 2:
@@ -368,6 +402,8 @@ def streaming_cross_correlation(
     if response_tensor is not None:
         del response_tensor
         torch.cuda.empty_cache()
+    if hasattr(correlations, "flush"):
+        correlations.flush()
     return correlations
 
 

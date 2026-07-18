@@ -41,3 +41,19 @@ def test_structured_correlation_matches_reference_with_large_power_baseline(monk
     monkeypatch.setenv("WAVEN_RF_PREFETCH", "0")
     synchronous = streaming_cross_correlation(stimulus, response)
     np.testing.assert_allclose(actual, synchronous, rtol=0.0, atol=0.0)
+
+
+def test_structured_correlation_can_write_a_disk_backed_result(tmp_path, monkeypatch):
+    """Large GUI RF tensors remain sliceable without resident-RAM allocation."""
+    monkeypatch.setenv("WAVEN_RF_GPU", "0")
+    generator = np.random.default_rng(41)
+    stimulus = generator.normal(size=(64, 2, 3, 2, 1)).astype(np.float32)
+    response = generator.normal(size=(64, 3)).astype(np.float32)
+    output_path = tmp_path / "coarse_rf_correlations.npy"
+
+    expected = streaming_cross_correlation(stimulus, response)
+    actual = streaming_cross_correlation(stimulus, response, output_path=output_path)
+
+    assert output_path.exists()
+    assert isinstance(actual, np.memmap)
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=0.0)

@@ -158,7 +158,7 @@ def orientation_correction_for_stretches(visual_coverage, nx, ny, omax):
     return corrected_ori
 
 
-def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_coverage, screen_ratio, sigmas, frequencies, n_orientations=8, fil=[0], absolute=False, plotting=False, n_time=None):
+def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_coverage, screen_ratio, sigmas, frequencies, n_orientations=8, fil=[0], absolute=False, plotting=False, n_time=None, rf_output_path=None):
     """Compute a chunked RF-correlation tensor and preferred feature indices.
 
     Args:
@@ -179,6 +179,9 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
         absolute: Select preferred features by absolute correlation after output.
         plotting: Enable legacy Matplotlib diagnostic figures.
         n_time: Optional shared frame limit; avoids loading beyond aligned data.
+        rf_output_path: Optional NPY path for disk-backed correlation output.
+            Large parameter banks remain sliceable for plotting without
+            allocating the complete neuron-by-feature tensor in RAM.
 
     Returns:
         tuple: RF tensor with shape ``(neurons, x, y, orientations, sigmas,
@@ -187,11 +190,16 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
     """
     # Keep Zarr/memmap inputs structured.  Flattening a disk-backed wavelet
     # tensor forces a full in-memory allocation before correlation starts.
-    rfs = _safe_chunked_cross_corr(stim, resp, n_time=n_time)
+    rfs = _safe_chunked_cross_corr(
+        stim, resp, n_time=n_time, output_path=rf_output_path
+    )
     n_features = int(np.prod(stim.shape[1:], dtype=np.int64))
 
     if absolute:
-        rfs = np.abs(rfs)
+        # Keep large RF results disk-backed. ``np.abs(rfs)`` would materialize
+        # a second complete array for a memmap; the in-place form preserves the
+        # output file and its memory bound.
+        np.abs(rfs, out=rfs)
 
     for row in rfs:
         row[row >= 0.99] -= 1.0
@@ -264,6 +272,8 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
                 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if hasattr(rfs, "flush"):
+        rfs.flush()
     return rfs, maxe, maxe_corr, list(maxes)
 
 

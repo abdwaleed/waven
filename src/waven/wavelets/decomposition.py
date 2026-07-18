@@ -34,6 +34,7 @@ from tqdm import tqdm
 
 from ..runtime.performance import (
     OperationTelemetry,
+    amp_enabled,
     available_ram_bytes,
     configure_zarr_codec_threads,
     configure_torch_cpu_threads,
@@ -57,6 +58,70 @@ from .filters import has_enough_ram
 def _array_bytes(shape, dtype=np.float32):
     """Return exact bytes for an array shape/dtype pair."""
     return int(math.prod(tuple(int(v) for v in shape)) * np.dtype(dtype).itemsize)
+
+
+def _is_cuda_oom(exc):
+    """Return whether an exception is a recoverable CUDA allocation failure."""
+    return str(exc).lower().find("out of memory") >= 0
+
+
+def _release_cuda_working_set():
+    """Release failed-workspace allocations before a smaller retry."""
+    if not torch.cuda.is_available():
+        return
+    try:
+        torch.cuda.synchronize()
+    except Exception:
+        pass
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
+def _resource_aware_frame_chunk_size(
+    num_frames,
+    nx,
+    ny,
+    filter_count,
+    output_channels,
+    device,
+    kernel_shape=None,
+    output_buffer_count=1,
+):
+    """Choose a frame batch from the complete convolution working set.
+
+    The former generic autotuner considered only the input movie.  For a Gabor
+    bank, the convolution response and post-processing buffers scale with every
+    active parameter: orientation, sigma/frequency group, phase count, and the
+    output grid.  Estimating all live tensors keeps high-resolution banks from
+    selecting an input-safe but output-impossible batch.
+    """
+    frames = max(1, int(num_frames))
+    pixels = max(1, int(nx) * int(ny))
+    filter_count = max(1, int(filter_count))
+    output_channels = max(1, int(output_channels))
+    output_buffer_count = max(1, int(output_buffer_count))
+    output_dtype_bytes = 2 if str(device).startswith("cuda") and amp_enabled() else 4
+    # Input remains float32.  Response, squared/summed output, permutation,
+    # and transfer staging use the active convolution precision.
+    bytes_per_frame = pixels * (
+        np.dtype(np.float32).itemsize
+        + output_dtype_bytes * (filter_count + output_channels * output_buffer_count)
+    )
+    if kernel_shape is None:
+        kernel_bytes = 0
+    else:
+        kernel_height, kernel_width = (max(1, int(value)) for value in kernel_shape)
+        # Include the module copy plus a modest cuDNN/kernel-workspace reserve.
+        kernel_bytes = filter_count * kernel_height * kernel_width * np.dtype(np.float32).itemsize * 2
+    if str(device).startswith("cuda"):
+        # A 40% free-VRAM budget leaves room for cuDNN workspace, the display
+        # driver, asynchronous copies, and an interactive GUI.
+        budget = int(gpu_available_vram_bytes() * 0.40) - kernel_bytes
+    else:
+        # CPU convolution may still hold NumPy input, Torch output, and writer
+        # payloads at once; retain substantial OS/file-cache headroom.
+        budget = int(available_ram_bytes() * 0.20) - kernel_bytes
+    return max(1, min(frames, max(1, budget // max(1, bytes_per_frame))))
 
 
 def _coarse_power_zarr_layout(final_shape, frame_chunk_size, filter_group_size, target_bytes=96 * 1024**2):
@@ -98,6 +163,51 @@ def _coarse_power_zarr_layout(final_shape, frame_chunk_size, filter_group_size, 
     return time_chunk, x_chunk, y_chunk, n_orientations, sigma_chunk
 
 
+def _full_convolution_zarr_layout(
+    final_shape,
+    frame_chunk_size,
+    filter_group_size,
+    target_bytes=96 * 1024**2,
+):
+    """Choose full-model Zarr chunks that match its grouped write pattern.
+
+    Full-model convolution writes one sigma/frequency result at a time, but the
+    response payload holds every combination in the active group.  Spatial
+    chunks therefore cover the whole grouped payload budget while sigma and
+    frequency chunks remain one, avoiding read/modify/recompress work for each
+    individual result.
+    """
+    num_frames, nx, ny, n_orientations, _n_sigmas, _n_frequencies = (
+        int(value) for value in final_shape
+    )
+    time_chunk = min(num_frames, max(1, int(frame_chunk_size)))
+    group_size = max(1, int(filter_group_size))
+    bytes_per_pixel = max(
+        1,
+        time_chunk * n_orientations * group_size * np.dtype(np.float32).itemsize,
+    )
+    pixel_budget = max(1, int(target_bytes) // bytes_per_pixel)
+
+    def spatial_candidates(limit):
+        values = {1, int(limit)}
+        values.update(range(8, int(limit) + 1, 8))
+        return tuple(sorted(values))
+
+    allowance = max(1, int(pixel_budget * 1.25))
+    candidates = []
+    for x_chunk in spatial_candidates(nx):
+        for y_chunk in spatial_candidates(ny):
+            pixels = x_chunk * y_chunk
+            if pixels <= allowance:
+                tile_count = math.ceil(nx / x_chunk) * math.ceil(ny / y_chunk)
+                candidates.append((tile_count, -pixels, x_chunk, y_chunk))
+    if candidates:
+        _tile_count, _negative_pixels, x_chunk, y_chunk = min(candidates)
+    else:
+        x_chunk, y_chunk = 1, 1
+    return time_chunk, x_chunk, y_chunk, n_orientations, 1, 1
+
+
 def _coarse_power_compressor(blosc_type):
     """Return a speed-first codec for the intermediate coarse-RF cache."""
     codec = os.environ.get("WAVEN_COARSE_ZARR_CODEC", "lz4").strip().lower()
@@ -135,6 +245,12 @@ class _AsyncSliceWriter:
                 self.queue.task_done()
                 return
             callback, payload, byte_count, on_complete = task
+            if self.error is not None:
+                # After a capacity/I/O failure, discard already queued payloads
+                # instead of continuing writes that could consume the remaining
+                # safety reserve before the producer receives the exception.
+                self.queue.task_done()
+                continue
             try:
                 started = time.perf_counter()
                 callback(payload)
@@ -196,6 +312,73 @@ def _require_disk_space(folder_path, required_bytes, label):
             f"Insufficient disk space for {label}: need {required / 1024**3:.2f} GiB including headroom, "
             f"available {free / 1024**3:.2f} GiB."
         )
+
+
+class _CompressedCacheCapacityGuard:
+    """Stop a compressed Zarr cache before it can exhaust its volume.
+
+    A Zarr cache is written incrementally and its physical size depends on the
+    actual movie/filter values.  Reserving the whole uncompressed shape rejects
+    scientifically valid high-parameter runs, while assuming a compression
+    ratio can fill a disk.  This guard measures the first completed chunks,
+    projects their physical footprint, and preserves the partial cache for a
+    safe resume or parameter change.
+    """
+
+    def __init__(self, folder_path, total_logical_bytes, label, reserve_bytes=2 * 1024**3):
+        self.folder_path = str(folder_path)
+        self.total_logical_bytes = max(1, int(total_logical_bytes))
+        self.label = str(label)
+        self.initial_free = int(shutil.disk_usage(self.folder_path).free)
+        self.reserve_bytes = min(
+            max(256 * 1024**2, int(reserve_bytes)),
+            max(256 * 1024**2, self.initial_free // 5),
+        )
+        self.logical_written = 0
+        self._minimum_sample_bytes = min(self.total_logical_bytes, 64 * 1024**2)
+
+    def check_before_start(self):
+        if self.initial_free <= self.reserve_bytes:
+            raise OSError(
+                f"Insufficient free disk space to safely begin {self.label}: "
+                f"available {self.initial_free / 1024**3:.2f} GiB, "
+                f"reserve {self.reserve_bytes / 1024**3:.2f} GiB."
+            )
+
+    def record_completed_write(self, logical_bytes):
+        self.logical_written += max(0, int(logical_bytes))
+        free_now = int(shutil.disk_usage(self.folder_path).free)
+        physical_written = max(0, self.initial_free - free_now)
+        if free_now <= self.reserve_bytes:
+            raise OSError(
+                f"Stopping {self.label} before the volume is exhausted; only "
+                f"{free_now / 1024**3:.2f} GiB remains. The partial Zarr cache is resumable."
+            )
+        if self.logical_written < self._minimum_sample_bytes or physical_written <= 0:
+            return
+        projected_bytes = physical_written * self.total_logical_bytes / self.logical_written
+        usable_bytes = self.initial_free - self.reserve_bytes
+        if projected_bytes > usable_bytes:
+            raise OSError(
+                f"Compressed {self.label} is projected to require {projected_bytes / 1024**3:.2f} GiB "
+                f"on this volume, but only {usable_bytes / 1024**3:.2f} GiB is safely usable. "
+                "The partial Zarr cache is resumable; reduce any feature-grid parameter or choose a larger volume."
+            )
+
+
+def _prepare_compressed_cache_capacity(folder_path, logical_bytes, label):
+    """Permit compression-backed Zarr output while retaining a measured guard."""
+    os.makedirs(folder_path, exist_ok=True)
+    guard = _CompressedCacheCapacityGuard(folder_path, logical_bytes, label)
+    guard.check_before_start()
+    raw_gib = int(logical_bytes) / 1024**3
+    free_gib = guard.initial_free / 1024**3
+    if logical_bytes * 1.10 > guard.initial_free:
+        print(
+            f"{label} raw shape is {raw_gib:.2f} GiB but Zarr is compressed; "
+            f"starting with {free_gib:.2f} GiB free and monitoring physical usage."
+        )
+    return guard
 
 
 def _release_work_array(array, path):
@@ -462,29 +645,77 @@ def _gabor_kernel_for_conv(angle, sigma, phase, frequency=None, coupled_frequenc
     return np.asarray(kernel.T, dtype=np.float32)
 
 
-def _conv_frame_chunk_size(num_frames, nx=None, ny=None, n_channels=1):
-    """Return a conservative frame chunk size for convolution decomposition."""
+def _conv_frame_chunk_size(
+    num_frames,
+    nx=None,
+    ny=None,
+    n_channels=1,
+    filter_count=None,
+    output_channels=None,
+    device=None,
+    kernel_shape=None,
+    output_buffer_count=1,
+):
+    """Return a conservative, parameter-aware frame chunk size for convolution."""
+    device = device or resolve_compute_device(prefer_gpu=True)
+    if nx is not None and ny is not None and filter_count is not None:
+        return _resource_aware_frame_chunk_size(
+            num_frames,
+            nx,
+            ny,
+            filter_count,
+            output_channels if output_channels is not None else filter_count,
+            device,
+            kernel_shape=kernel_shape,
+            output_buffer_count=output_buffer_count,
+        )
     if nx is not None and ny is not None and enabled_feature("AUTOTUNE", default=True):
         return autotuned_frame_chunk_size(num_frames, nx, ny, n_channels=n_channels)
-    if resolve_compute_device(prefer_gpu=True) == "cuda":
+    if device == "cuda":
         return max(1, min(int(num_frames), 256))
     return max(1, min(int(num_frames), 128))
 
 
-def _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device, dtype_bytes=4):
-    """Return how many sigma/frequency groups to convolve together."""
+def _conv_filter_group_size(
+    frame_chunk_size,
+    nx,
+    ny,
+    n_orientations,
+    device,
+    dtype_bytes=None,
+    filter_channels=None,
+    output_channels=None,
+    output_buffer_count=2,
+):
+    """Return a safe number of sigma/frequency combinations per convolution.
+
+    A group expands every live response tensor.  Its limit therefore depends on
+    the actual phase/filter bank, output channels, precision, and spatial grid,
+    not simply on the number of orientation bins.  ``filter_channels`` and
+    ``output_channels`` describe one sigma/frequency combination; callers use
+    two filter channels for the fused real/imaginary coarse-power path.
+    """
     spatial_pixels = max(1, int(nx) * int(ny))
-    per_group_bytes = int(frame_chunk_size) * spatial_pixels * int(n_orientations) * int(dtype_bytes)
+    filter_channels = max(1, int(filter_channels or n_orientations))
+    output_channels = max(1, int(output_channels or n_orientations))
+    output_buffer_count = max(1, int(output_buffer_count))
+    if dtype_bytes is None:
+        dtype_bytes = 2 if str(device).startswith("cuda") and amp_enabled() else 4
+    # The input movie is shared by all groups; the response, post-processing,
+    # host-transfer staging, and writer payload scale with the group count.
+    per_group_bytes = int(frame_chunk_size) * spatial_pixels * int(dtype_bytes) * (
+        filter_channels + output_channels * output_buffer_count
+    )
     if per_group_bytes <= 0:
         return 1
-    if device == "cuda":
-        # Use free rather than total VRAM: the GUI, display driver, and prior
-        # tensors may already hold a substantial portion of the device.
-        budget = int(gpu_available_vram_bytes() * 0.45)
+    if str(device).startswith("cuda"):
+        # Use currently free VRAM and reserve room for cuDNN workspace, display
+        # memory, and an interactive GUI.
+        budget = int(gpu_available_vram_bytes() * 0.35)
         if budget <= 0:
-            budget = int(available_ram_bytes() * 0.25)
+            budget = int(available_ram_bytes() * 0.20)
         return max(1, min(32, budget // per_group_bytes))
-    budget = int(available_ram_bytes() * 0.35)
+    budget = int(available_ram_bytes() * 0.20)
     return max(1, min(8, budget // per_group_bytes))
 
 
@@ -585,12 +816,14 @@ def _conv2d_wavelet_bank(
         frames = np.asarray(videodata[start:end], dtype=np.float32)
         return frames, time.perf_counter() - read_start
 
-    # Start below the resource-derived ceiling, then adapt after measuring real
-    # transfer/compute time.  The ceiling is never exceeded, which preserves
-    # the RAM/VRAM safety contract even on a busy desktop.
+    # The resource planner already accounts for the complete live filter/output
+    # working set.  Begin at that planned size so each output matches its Zarr
+    # time chunk: smaller automatic batches force read/modify/recompress writes
+    # and were a major source of disk backpressure.  CUDA OOM handling below
+    # remains free to shrink repeatedly when the desktop is busier than the
+    # snapshot used by the planner.
     max_frame_chunk = max(1, int(frame_chunk_size))
-    adaptive = enabled_feature("AUTOTUNE", default=True)
-    active_frame_chunk = max(1, max_frame_chunk // 2) if adaptive else max_frame_chunk
+    active_frame_chunk = max_frame_chunk
     prefetch = enabled_feature("PREFETCH", default=True) and num_frames > active_frame_chunk
     executor = ThreadPoolExecutor(max_workers=1) if prefetch else None
     future = None
@@ -609,6 +842,45 @@ def _conv2d_wavelet_bank(
             return output, time.perf_counter() - compute_start
         finally:
             del frame_tensor, response, output_tensor
+
+    def convolve_with_backoff(frame_values, absolute_start):
+        """Yield successful subchunks, repeatedly shrinking after CUDA OOM.
+
+        Keep completed subchunks flowing to the writer instead of retaining a
+        list of multi-gigabyte host outputs while a failed batch is retried.
+        """
+        nonlocal active_frame_chunk
+        local_start = 0
+        safe_size = len(frame_values)
+        while local_start < len(frame_values):
+            remaining = len(frame_values) - local_start
+            attempt_size = min(safe_size, remaining)
+            try:
+                output, compute_seconds = convolve_frames(
+                    frame_values[local_start:local_start + attempt_size]
+                )
+            except RuntimeError as exc:
+                if (
+                    not str(device).startswith("cuda")
+                    or not _is_cuda_oom(exc)
+                    or attempt_size <= 1
+                ):
+                    raise
+                _release_cuda_working_set()
+                safe_size = max(1, attempt_size // 2)
+                active_frame_chunk = min(active_frame_chunk, safe_size)
+                print(
+                    f"CUDA convolution OOM; retrying {attempt_size} frames as "
+                    f"{safe_size}-frame blocks."
+                )
+                continue
+            yield (
+                absolute_start + local_start,
+                absolute_start + local_start + attempt_size,
+                output,
+                compute_seconds,
+            )
+            local_start += attempt_size
     try:
         if not str(device).startswith("cuda"):
             configure_torch_cpu_threads()
@@ -635,41 +907,17 @@ def _conv2d_wavelet_bank(
                 frames, read_seconds = read_frames(start, end)
             if telemetry is not None:
                 telemetry.add("input", read_seconds, frames.nbytes)
-            try:
-                outputs = [(start, end, *convolve_frames(frames))]
-            except RuntimeError as exc:
-                if not str(device).startswith("cuda") or "out of memory" not in str(exc).lower() or len(frames) <= 1:
-                    raise
-                # A busy desktop can invalidate the preflight VRAM estimate.
-                # Retry the same values in smaller blocks before failing the
-                # analysis, then retain that safer size for subsequent reads.
-                torch.cuda.empty_cache()
-                retry_size = max(1, len(frames) // 2)
-                active_frame_chunk = min(active_frame_chunk, retry_size)
-                print(f"CUDA convolution OOM; retrying {len(frames)} frames as {retry_size}-frame blocks.")
-                outputs = []
-                for local_start in range(0, len(frames), retry_size):
-                    local_end = min(local_start + retry_size, len(frames))
-                    output, compute_seconds = convolve_frames(frames[local_start:local_end])
-                    outputs.append((start + local_start, start + local_end, output, compute_seconds))
-            compute_seconds = max(item[3] for item in outputs)
-            for output_start, output_end, output, output_seconds in outputs:
+            for output_start, output_end, output, output_seconds in convolve_with_backoff(frames, start):
                 if telemetry is not None:
                     telemetry.add("gpu_compute_and_transfer", output_seconds, output.nbytes)
                 yield output_start, output_end, output
-            if adaptive and end < num_frames:
-                # A short first-pass measurement keeps responsive systems from
-                # being underfed while reducing batch pressure on slower or
-                # already-busy machines. Individual frame results are
-                # independent, so this changes scheduling only, not values.
-                if compute_seconds < 0.35 and active_frame_chunk < max_frame_chunk:
-                    active_frame_chunk = min(max_frame_chunk, max(active_frame_chunk + 1, int(active_frame_chunk * 1.25)))
-                elif compute_seconds > 2.0 and active_frame_chunk > 8:
-                    active_frame_chunk = max(8, int(active_frame_chunk * 0.70))
             start = end
     finally:
         if executor is not None:
             executor.shutdown(wait=True)
+        del multi_gpu_model, runner, kernel_tensor
+        if str(device).startswith("cuda"):
+            _release_cuda_working_set()
 
 
 @torch.no_grad()
@@ -757,8 +1005,8 @@ def _time_major_convolution_groups(
                     finally:
                         del response, output_tensor
             except RuntimeError as exc:
-                if str(device).startswith("cuda") and "out of memory" in str(exc).lower():
-                    torch.cuda.empty_cache()
+                if str(device).startswith("cuda") and _is_cuda_oom(exc):
+                    _release_cuda_working_set()
                     raise MemoryError(
                         "Time-major convolution lost its VRAM headroom; retrying with group-major scheduling."
                     ) from exc
@@ -767,6 +1015,8 @@ def _time_major_convolution_groups(
                 del frame_tensor
     finally:
         del runners
+        if str(device).startswith("cuda"):
+            _release_cuda_working_set()
 
 
 def convolution_kernel_cache_path(folder_path, kind):
@@ -1615,12 +1865,39 @@ def waveletDecompositionConv(
     output_stem = output_stem or f"dwt_videodata_{phase}"
     save_path = os.path.join(folder_path, f"{output_stem}.{output_format}")
     required_bytes = _array_bytes(final_shape, np.float32)
-    if frame_chunk_size is None:
-        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny)
+    frame_chunk_was_auto = frame_chunk_size is None
+    if frame_chunk_was_auto:
+        frame_chunk_size = _conv_frame_chunk_size(
+            num_frames,
+            nx,
+            ny,
+            filter_count=int(n_orientations),
+            output_channels=int(n_orientations),
+            device=device,
+            kernel_shape=tuple(kernel_cache.shape[-2:]) if kernel_cache is not None else None,
+            output_buffer_count=2,
+        )
     if filter_group_size is None:
-        filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
+        filter_group_size = _conv_filter_group_size(
+            frame_chunk_size, nx, ny, n_orientations, device,
+            output_buffer_count=2,
+        )
     filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
+    if frame_chunk_was_auto and filter_group_size > 1:
+        # Include every simultaneous sigma response in the frame plan.  This
+        # makes filter-size/sigma expansion as safe as orientation expansion.
+        frame_chunk_size = _conv_frame_chunk_size(
+            num_frames,
+            nx,
+            ny,
+            filter_count=int(n_orientations) * filter_group_size,
+            output_channels=int(n_orientations) * filter_group_size,
+            device=device,
+            kernel_shape=tuple(kernel_cache.shape[-2:]) if kernel_cache is not None else None,
+            output_buffer_count=2,
+        )
     progress = None
+    capacity_guard = None
 
     if output_format == "zarr":
         try:
@@ -1630,11 +1907,12 @@ def waveletDecompositionConv(
             raise ImportError(
                 "Zarr coarse-wavelet output requires the 'zarr' and 'numcodecs' packages."
             ) from exc
-        _require_disk_space(folder_path, required_bytes, f"convolution coarse wavelet phase {phase}")
+        capacity_guard = _prepare_compressed_cache_capacity(
+            folder_path, required_bytes, f"convolution coarse wavelet phase {phase}"
+        )
         if zarr_chunks is None:
-            zarr_chunks = (
-                min(num_frames, frame_chunk_size), min(nx, 16), min(ny, 16),
-                int(n_orientations), filter_group_size,
+            zarr_chunks = _coarse_power_zarr_layout(
+                final_shape, frame_chunk_size, filter_group_size,
             )
         zarr_chunks = tuple(
             min(int(dim), max(1, int(chunk)))
@@ -1704,18 +1982,21 @@ def waveletDecompositionConv(
             ), start=1):
                 def write_response(values, t0=start, t1=end, s0=group_start, s1=group_end):
                     wt_final[t0:t1, :, :, :, s0:s1] = values
+                def mark_completed(key=tile_key(start, end, group_start), byte_count=response.nbytes):
+                    if progress is not None:
+                        progress.mark(key)
+                    if capacity_guard is not None:
+                        capacity_guard.record_completed_write(byte_count)
                 if writer is not None:
                     writer.submit(
                         write_response, response, response.nbytes,
-                        on_complete=(lambda key=tile_key(start, end, group_start): progress.mark(key))
-                        if progress is not None else None,
+                        on_complete=mark_completed,
                     )
                 else:
                     write_start = time.perf_counter()
                     write_response(response)
                     telemetry.add("output", time.perf_counter() - write_start, response.nbytes)
-                    if progress is not None:
-                        progress.mark(tile_key(start, end, group_start))
+                    mark_completed()
                 print(progress_message(
                     f"Convolution coarse phase {phase}", end, num_frames,
                     chunk_start, unit="frames",
@@ -1725,13 +2006,22 @@ def waveletDecompositionConv(
             print(progress_message(f"Convolution coarse phase {phase}", completed_groups, total_groups, start_time, unit="groups"))
             gc.collect()
     finally:
-        if writer is not None:
-            writer.close()
-        if progress is not None:
-            progress.flush()
-
-    if device == "cuda":
-        torch.cuda.empty_cache()
+        writer_error = None
+        try:
+            if writer is not None:
+                writer.close()
+        except Exception as exc:
+            # A disk-capacity guard can fail inside the asynchronous writer.
+            # Flush completed-tile metadata before surfacing it so the cache is
+            # truly resumable rather than appearing corrupt on the next run.
+            writer_error = exc
+        finally:
+            if progress is not None:
+                progress.flush()
+            if device == "cuda":
+                _release_cuda_working_set()
+        if writer_error is not None:
+            raise writer_error
     if output_format == "zarr":
         progress.discard()
         print(f"Success! Saved convolution coarse Zarr array to {save_path}")
@@ -1772,15 +2062,55 @@ def waveletPowerDecompositionConv(
         kernel_cache_path, "coarse", sigmas, [], n_orientations, phase_offsets,
     ) if kernel_cache_path else None
     final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
-    _require_disk_space(folder_path, _array_bytes(final_shape, np.float32), "coarse RF power cache")
-    if frame_chunk_size is None:
-        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny, n_channels=2)
+    logical_cache_bytes = _array_bytes(final_shape, np.float32)
+    # A Zarr cache is compressed on disk.  Monitor its measured footprint rather
+    # than reserving an additional uncompressed 400+ GiB array up front.
+    capacity_guard = _prepare_compressed_cache_capacity(
+        folder_path, logical_cache_bytes, "coarse RF power cache"
+    )
+    kernel_shape = tuple(kernel_cache.shape[-2:]) if kernel_cache is not None else None
+    frame_chunk_was_auto = frame_chunk_size is None
+    if frame_chunk_was_auto:
+        frame_chunk_size = _conv_frame_chunk_size(
+            num_frames,
+            nx,
+            ny,
+            n_channels=2,
+            filter_count=2 * int(n_orientations),
+            output_channels=int(n_orientations),
+            device=device,
+            kernel_shape=kernel_shape,
+            output_buffer_count=2,
+        )
     if filter_group_size is None:
-        # Two phase chunks coexist briefly, so halve the conservative default.
-        filter_group_size = max(1, _conv_filter_group_size(
-            frame_chunk_size, nx, ny, n_orientations, device
-        ) // 2)
+        # The group planner accounts for both real/imaginary response channels
+        # and the fused power/transfer buffers.
+        filter_group_size = _conv_filter_group_size(
+            frame_chunk_size,
+            nx,
+            ny,
+            n_orientations,
+            device,
+            filter_channels=2 * int(n_orientations),
+            output_channels=int(n_orientations),
+            output_buffer_count=2,
+        )
     filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
+    if frame_chunk_was_auto and filter_group_size > 1:
+        # Re-evaluate once with all requested sigma groups represented in the
+        # response and power buffers.  This covers sigma/frequency-like bank
+        # expansion as well as a high orientation count.
+        frame_chunk_size = _conv_frame_chunk_size(
+            num_frames,
+            nx,
+            ny,
+            n_channels=2,
+            filter_count=2 * int(n_orientations) * filter_group_size,
+            output_channels=int(n_orientations) * filter_group_size,
+            device=device,
+            kernel_shape=kernel_shape,
+            output_buffer_count=2,
+        )
     if zarr_chunks is None:
         zarr_chunks = _coarse_power_zarr_layout(
             final_shape, frame_chunk_size, filter_group_size,
@@ -1804,20 +2134,25 @@ def waveletPowerDecompositionConv(
         zarr, save_path, final_shape, zarr_chunks,
         compressor, progress,
     )
-    # An interrupted run can be restarted when free VRAM differs.  In that
-    # case autotuning may select a new frame size, but writing it into an
-    # existing Zarr time chunk causes expensive read/modify/recompress cycles.
-    # Continue with the persisted layout instead.  Its matching progress tiles
-    # then remain directly reusable and every resumed write is chunk aligned.
+    # An interrupted run can be restarted when free VRAM differs. Keep an old
+    # *smaller* time tile to retain write alignment, but never restore an old
+    # larger tile that the current parameter-aware planner has declared unsafe.
+    # The latter would recreate the same OOM on every resume.
     persisted_chunks = tuple(int(value) for value in getattr(power, "chunks", ()) or ())
     if progress.reusable and len(persisted_chunks) == len(final_shape):
         persisted_time_chunk = max(1, persisted_chunks[0])
-        if persisted_time_chunk != int(frame_chunk_size):
+        if persisted_time_chunk < int(frame_chunk_size):
             print(
                 "Resume: retaining interrupted cache time chunk "
                 f"{persisted_time_chunk} instead of newly tuned {frame_chunk_size}."
             )
             frame_chunk_size = persisted_time_chunk
+        elif persisted_time_chunk > int(frame_chunk_size):
+            print(
+                "Resume: using newly safe time chunk "
+                f"{frame_chunk_size} instead of interrupted {persisted_time_chunk}; "
+                "some existing Zarr chunks will be updated in smaller slices."
+            )
         # Keep a smaller-or-equal old sigma tile for resumability.  Never grow
         # a resumed group above the current safe VRAM-derived estimate.
         persisted_sigma_chunk = max(1, persisted_chunks[-1])
@@ -1866,19 +2201,30 @@ def waveletPowerDecompositionConv(
         key = tile_key(start, end, group_start)
         def write_power(values, t0=start, t1=end, s0=group_start, s1=group_end):
             power[t0:t1, :, :, :, s0:s1] = values
+        def mark_completed(tile_key_value=key, byte_count=payload.nbytes):
+            progress.mark(tile_key_value)
+            capacity_guard.record_completed_write(byte_count)
         if writer is not None:
-            writer.submit(write_power, payload, payload.nbytes, on_complete=lambda: progress.mark(key))
+            writer.submit(write_power, payload, payload.nbytes, on_complete=mark_completed)
         else:
             write_start = time.perf_counter()
             write_power(payload)
             telemetry.add("output", time.perf_counter() - write_start, payload.nbytes)
-            progress.mark(key)
+            mark_completed()
 
     try:
+        # Respect a genuinely usable multi-GPU configuration, but do not infer
+        # that from the setting alone. ``compute_devices`` filters unsuitable
+        # adapters (for example a much slower display GPU), so a rejected
+        # multi-GPU attempt still keeps the time-major one-read schedule.
+        usable_multi_gpu = (
+            str(device).startswith("cuda")
+            and len(compute_devices(allow_multi_gpu=True)) > 1
+        )
         use_time_major = (
             len(group_records) > 1
             and enabled_feature("TIME_MAJOR_CONV", default=True)
-            and not enabled_feature("MULTI_GPU", default=False)
+            and not usable_multi_gpu
         )
         if use_time_major:
             try:
@@ -1924,11 +2270,18 @@ def waveletPowerDecompositionConv(
                     telemetry.maybe_report()
                 print(progress_message("Direct coarse RF power", group_number, total_groups, start_time, unit="groups"))
     finally:
-        if writer is not None:
-            writer.close()
-        progress.flush()
-    if device == "cuda":
-        torch.cuda.empty_cache()
+        writer_error = None
+        try:
+            if writer is not None:
+                writer.close()
+        except Exception as exc:
+            writer_error = exc
+        finally:
+            progress.flush()
+            if device == "cuda":
+                _release_cuda_working_set()
+        if writer_error is not None:
+            raise writer_error
     del power
     progress.discard()
     print(f"Success! Saved direct coarse RF power Zarr array to {save_path}")
@@ -1990,12 +2343,40 @@ def waveletDecompositionFullConv(
     save_path = os.path.join(folder_path, f"dwt_videodata2{phase_suffix}{save_ext}")
     required_bytes = _array_bytes(final_shape, np.float32)
     combo_count = len(sigmas) * len(frequencies)
-    if frame_chunk_size is None:
-        frame_chunk_size = _conv_frame_chunk_size(num_frames, nx, ny)
+    frame_chunk_was_auto = frame_chunk_size is None
+    if frame_chunk_was_auto:
+        frame_chunk_size = _conv_frame_chunk_size(
+            num_frames,
+            nx,
+            ny,
+            filter_count=int(n_orientations),
+            output_channels=int(n_orientations),
+            device=device,
+            kernel_shape=tuple(kernel_cache.shape[-2:]) if kernel_cache is not None else None,
+            output_buffer_count=2,
+        )
     if filter_group_size is None:
-        filter_group_size = _conv_filter_group_size(frame_chunk_size, nx, ny, n_orientations, device)
+        filter_group_size = _conv_filter_group_size(
+            frame_chunk_size, nx, ny, n_orientations, device,
+            output_buffer_count=2,
+        )
     filter_group_size = max(1, min(int(filter_group_size), combo_count))
+    if frame_chunk_was_auto and filter_group_size > 1:
+        # A full-model group is a Cartesian sigma/frequency group.  Its response
+        # bank scales with both parameters, so choose the frame chunk from all
+        # simultaneous combinations rather than the first orientation alone.
+        frame_chunk_size = _conv_frame_chunk_size(
+            num_frames,
+            nx,
+            ny,
+            filter_count=int(n_orientations) * filter_group_size,
+            output_channels=int(n_orientations) * filter_group_size,
+            device=device,
+            kernel_shape=tuple(kernel_cache.shape[-2:]) if kernel_cache is not None else None,
+            output_buffer_count=2,
+        )
     progress = None
+    capacity_guard = None
 
     if output_format == "zarr":
         try:
@@ -2008,14 +2389,19 @@ def waveletDecompositionFullConv(
             ) from exc
         os.makedirs(folder_path, exist_ok=True)
         compressor = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
+        capacity_guard = _prepare_compressed_cache_capacity(
+            folder_path, required_bytes, f"convolution full-model phase {phase}"
+        )
         if zarr_chunks is None:
-            zarr_chunks = (min(num_frames, 1800), 1, 1, int(n_orientations), len(sigmas), len(frequencies))
+            zarr_chunks = _full_convolution_zarr_layout(
+                final_shape, frame_chunk_size, filter_group_size,
+            )
         zarr_chunks = tuple(
             min(int(dim), int(max(1, chunk)))
             for dim, chunk in zip(final_shape, zarr_chunks)
         )
         progress_kind = json.dumps(
-            {"product": "full_phase", "phase": int(phase), "sigmas": sigmas.tolist(),
+            {"product": "full_phase_v2", "phase": int(phase), "sigmas": sigmas.tolist(),
              "frequencies": frequencies.tolist(), "orientations": int(n_orientations),
              "phase_offsets": list(phase_offsets) if phase_offsets is not None else []},
             sort_keys=True,
@@ -2086,18 +2472,21 @@ def waveletDecompositionFullConv(
             def write_response(values, t0=start, t1=end, pairs=tuple(combo_group)):
                 for local_idx, (s_idx, f_idx) in enumerate(pairs):
                     wt_final[t0:t1, :, :, :, s_idx, f_idx] = values[..., local_idx]
+            def mark_completed(key=tile_key(start, end, group_start), byte_count=response.nbytes):
+                if progress is not None:
+                    progress.mark(key)
+                if capacity_guard is not None:
+                    capacity_guard.record_completed_write(byte_count)
             if writer is not None:
                 writer.submit(
                     write_response, response, response.nbytes,
-                    on_complete=(lambda key=tile_key(start, end, group_start): progress.mark(key))
-                    if progress is not None else None,
+                    on_complete=mark_completed,
                 )
             else:
                 write_start = time.perf_counter()
                 write_response(response)
                 telemetry.add("output", time.perf_counter() - write_start, response.nbytes)
-                if progress is not None:
-                    progress.mark(tile_key(start, end, group_start))
+                mark_completed()
             print(
                 progress_message(
                     f"Convolution full-model phase {phase}",
@@ -2112,13 +2501,19 @@ def waveletDecompositionFullConv(
         print(progress_message(f"Convolution full-model phase {phase}", completed_steps, total_steps, start_time, unit="groups"))
         gc.collect()
     finally:
-        if writer is not None:
-            writer.close()
-        if progress is not None:
-            progress.flush()
-
-    if device == "cuda":
-        torch.cuda.empty_cache()
+        writer_error = None
+        try:
+            if writer is not None:
+                writer.close()
+        except Exception as exc:
+            writer_error = exc
+        finally:
+            if progress is not None:
+                progress.flush()
+            if device == "cuda":
+                _release_cuda_working_set()
+        if writer_error is not None:
+            raise writer_error
     if output_format == "zarr":
         progress.discard()
         print(f"Success! Saved convolution full-model Zarr array to {save_path}", end="\n\n")

@@ -3625,7 +3625,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 # versioned fingerprint makes an older 16 x 16/zstd cache
                 # regenerate once instead of silently retaining the old I/O
                 # bottleneck after this performance upgrade.
-                "storage_layout": "time-sigma-aligned-lz4-v2",
+                "storage_layout": "parameter-aware-compressed-lz4-v3",
             }
         )
 
@@ -4402,14 +4402,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             rf_nf = 1
             rf_frequencies = frequencies[:1]
 
+        rf_feature_count = int(coarse_nx) * int(coarse_ny) * int(n_orientations) * int(ns) * int(rf_nf)
+        rf_result_bytes = int(spks.shape[2]) * rf_feature_count * np.dtype(np.float32).itemsize
+        # Large RF banks are still needed by the individual-neuron plots, but
+        # they do not need to occupy resident RAM.  The correlation primitive
+        # writes a normal NPY memmap that retains fast slice reads for the GUI.
+        rf_output_path = None
+        if rf_result_bytes > 512 * 1024**2:
+            rf_output_path = os.path.join(parent_dir, "coarse_rf_correlations.npy")
+            print(
+                "Large Coarse RF correlation tensor will stay disk-backed: "
+                f"{rf_result_bytes / 1024**3:.2f} GiB."
+            )
+
         # Pass the disk-backed wavelet tensor directly.  PearsonCorrelationPinkNoise
         # streams spatial-feature blocks; flattening this Zarr selection here would
         # allocate the entire coarse cache (several GiB for long recordings).
         rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled,
                                                 np.mean(spks[:, :n_frames], axis=0),
-                                                neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
-                                                n_orientations=n_orientations,
-                                                plotting=False)
+                                                 neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
+                                                 n_orientations=n_orientations,
+                                                 plotting=False,
+                                                 rf_output_path=rf_output_path)
         update_progress(75, "Coarse receptive-field analysis", "Precomputing orientation tuning curves")
         # Both curve types select the same preferred Gabor features.  Compute
         # them in one chunk-batched traversal so this stage reads each Zarr
@@ -4544,6 +4558,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             correlation_orientation_exports=correlation_orientation_exports,
             nb_frames=nb_frames,
             wavelet_dir=parent_dir,
+            rf_correlation_path=rf_output_path,
         )
 
         def render_gui_plots():
