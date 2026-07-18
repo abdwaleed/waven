@@ -161,12 +161,14 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     global coarseWavelet, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
     global build_convolution_kernel_cache, convolution_kernel_cache_path
     global waveletDecompositionConv, waveletPowerDecompositionConv, waveletDecompositionFullConv
+    global coarse_rf_zarr_layout
     global video_downsample_chunk_size, convert_npy_to_zarr
     if _WAVELET_IMPORTS_READY:
         return
     from ..stimulus import coarseWavelet as _coarseWavelet
     from ..wavelets.decomposition import (
         build_convolution_kernel_cache as _build_convolution_kernel_cache,
+        coarse_rf_zarr_layout as _coarse_rf_zarr_layout,
         convolution_kernel_cache_path as _convolution_kernel_cache_path,
         downsample_video_binary as _downsample_video_binary,
         waveletDecomposition as _waveletDecomposition,
@@ -187,6 +189,7 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     waveletPowerDecompositionConv = _waveletPowerDecompositionConv
     waveletDecompositionFull = _waveletDecompositionFull
     waveletDecompositionFullConv = _waveletDecompositionFullConv
+    coarse_rf_zarr_layout = _coarse_rf_zarr_layout
     video_downsample_chunk_size = _video_downsample_chunk_size
     convert_npy_to_zarr = _convert_npy_to_zarr
     _WAVELET_IMPORTS_READY = True
@@ -3635,6 +3638,24 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             len(sigmas),
         )
         coarse_power_shape = coarse_phase_shape
+        # Coarse RF correlation's useful spatial tile size depends on the
+        # population dimension as well as the filter bank.  Reading this small
+        # cache header lets the wavelet writer choose a GPU-aware Zarr layout
+        # without materializing neural data during cache preparation.
+        rf_neuron_count = None
+        if product == "coarse_rf":
+            try:
+                from ..storage.array_store import load_array
+
+                planned_neural_dir = Path(
+                    _folder_from_entry(param_entries, "Spks Path", _project_layout().neural_cache_dir)
+                )
+                planned_cache_pair = find_neural_cache_pair(planned_neural_dir)
+                if planned_cache_pair is not None:
+                    rf_neuron_count = int(load_array(planned_cache_pair[0], mmap_mode="r").shape[-1])
+                    print(f"Coarse RF Zarr planning for {rf_neuron_count} neural units.")
+            except Exception as exc:
+                print(f"Coarse RF Zarr planner will use its safe default neuron count: {exc}")
         coarse_phase_fingerprint = _cache_fingerprint(
             {
                 "artifact": "coarse_wavelet_phase",
@@ -3654,6 +3675,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 # versioned fingerprint makes an older 16 x 16/zstd cache
                 # regenerate once instead of silently retaining the old I/O
                 # bottleneck after this performance upgrade.
+                # Keep the established cache fingerprint: the runtime GPU
+                # planner already improves existing v3 caches, while the new
+                # writer planner is applied the next time parameters genuinely
+                # require a coarse-power rebuild.  Avoiding a needless
+                # multi-hundred-GB regeneration is itself a performance win.
                 "storage_layout": "parameter-aware-compressed-lz4-v3",
             }
         )
@@ -3673,7 +3699,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "Coarse phase dimensions do not match the movie-derived analysis grid: "
                     f"expected {coarse_phase_shape}, got {real.shape} and {imag.shape}."
                 )
-            chunks = (min(expected_frames, 128), min(coarse_nx, 16), min(coarse_ny, 16), n_thetas, len(sigmas))
+            chunks = coarse_rf_zarr_layout(
+                coarse_power_shape,
+                min(expected_frames, 128),
+                len(sigmas),
+                rf_neuron_count=rf_neuron_count,
+            )
             if os.path.exists(power_path):
                 shutil.rmtree(power_path)
             zarr_kwargs = dict(
@@ -3759,6 +3790,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         output_stem=os.path.splitext(os.path.basename(coarse_power_path))[0],
                         cancel_event=_current_cancel_event(),
                         progress_signature=coarse_power_fingerprint,
+                        rf_neuron_count=rf_neuron_count,
                     )
                     _raise_if_cancelled()
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
@@ -4471,7 +4503,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         # them in one chunk-batched traversal so this stage reads each Zarr
         # feature tile once rather than once per curve type.
         orientation_tunings = orientation_tuning_bundle(
-            spks[:, :n_frames, :], w_c_downsampled, rfs_gabor,
+            spks[:, :n_frames, :],
+            w_c_downsampled,
+            rfs_gabor,
+            tuning_cache_path=os.path.join(parent_dir, "coarse_rf_orientation_features.zarr"),
         )
         orientation_selectivity = orientation_tunings["firing_rate"]
         correlation_selectivity = orientation_tunings["correlation"]

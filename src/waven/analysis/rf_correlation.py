@@ -139,6 +139,32 @@ def _gpu_cross_feature_batch_size(
     return max(1, min(tile_features, budget // max(1, bytes_per_feature)))
 
 
+def _gpu_full_cross_peak_bytes(tile_features: int, n_neurons: int, time_chunk: int) -> int:
+    """Estimate the live float64 GPU set for one persistent RF tile.
+
+    The persistent accumulator, the GEMM output, and the current input tile
+    must coexist.  This is materially smaller than treating three full
+    accumulator-sized tensors as permanently live, which previously rejected
+    useful GPU tiles even when they could run safely.
+    """
+    tile_features = max(1, int(tile_features))
+    n_neurons = max(1, int(n_neurons))
+    time_chunk = max(1, int(time_chunk))
+    return np.dtype(np.float64).itemsize * tile_features * (n_neurons * 2 + time_chunk)
+
+
+def _gpu_full_cross_fits(
+    tile_features: int,
+    n_neurons: int,
+    time_chunk: int,
+    free_vram_bytes: int,
+) -> bool:
+    """Whether a whole RF spatial tile has safe room for persistent GPU sums."""
+    return _gpu_full_cross_peak_bytes(tile_features, n_neurons, time_chunk) <= int(
+        max(0, int(free_vram_bytes)) * 0.60
+    )
+
+
 def _add_gpu_cross_subtiles(
     cross: np.ndarray,
     centered_block: np.ndarray,
@@ -157,8 +183,30 @@ def _add_gpu_cross_subtiles(
     product; later time blocks retry with a smaller GPU subtile.
     """
     response_tensor = None
-    block_tensor = None
+    pending = None
     completed = 0
+
+    def _pinned_from_numpy(values):
+        contiguous = np.ascontiguousarray(values, dtype=np.float64)
+        source = torch.from_numpy(contiguous)
+        try:
+            destination = torch.empty(
+                source.shape,
+                dtype=torch.float64,
+                device="cpu",
+                pin_memory=True,
+            )
+            destination.copy_(source)
+            return destination
+        except RuntimeError:
+            return source
+
+    def _drain_pending(item):
+        start, end, _host_input, host_output, done_event = item
+        done_event.synchronize()
+        cross[start:end] += host_output.numpy()
+        return end
+
     try:
         response_tensor = (
             response_gpu[time_start:time_end]
@@ -166,23 +214,54 @@ def _add_gpu_cross_subtiles(
             if response_gpu is not None
             else torch.as_tensor(centered_response, dtype=torch.float64, device="cuda:0")
         )
+        stream = torch.cuda.Stream(device="cuda:0")
+        response_ready = torch.cuda.Event()
+        response_ready.record(torch.cuda.current_stream(device="cuda:0"))
         for start in range(0, centered_block.shape[1], feature_batch):
             end = min(centered_block.shape[1], start + feature_batch)
-            block_tensor = torch.as_tensor(
-                centered_block[:, start:end], dtype=torch.float64, device="cuda:0"
-            )
-            cross[start:end] += (block_tensor.T @ response_tensor).cpu().numpy()
-            del block_tensor
-            block_tensor = None
-            completed = end
+            host_input = _pinned_from_numpy(centered_block[:, start:end])
+            try:
+                host_output = torch.empty(
+                    (end - start, centered_response.shape[1]),
+                    dtype=torch.float64,
+                    device="cpu",
+                    pin_memory=True,
+                )
+            except RuntimeError:
+                host_output = torch.empty(
+                    (end - start, centered_response.shape[1]), dtype=torch.float64, device="cpu"
+                )
+            done_event = torch.cuda.Event()
+            with torch.cuda.stream(stream):
+                stream.wait_event(response_ready)
+                block_tensor = host_input.to("cuda:0", non_blocking=host_input.is_pinned())
+                product_tensor = block_tensor.T @ response_tensor
+                host_output.copy_(product_tensor, non_blocking=host_output.is_pinned())
+                done_event.record(stream)
+            # The allocator tracks the stream use of these tensors.  Releasing
+            # Python references here permits the next subtile to reuse VRAM
+            # while its output copy completes asynchronously.
+            del block_tensor, product_tensor
+            if pending is not None:
+                completed = _drain_pending(pending)
+            pending = (start, end, host_input, host_output, done_event)
+        if pending is not None:
+            completed = _drain_pending(pending)
+            pending = None
         return True, None
     except RuntimeError as exc:
+        if pending is not None:
+            try:
+                completed = _drain_pending(pending)
+            except RuntimeError:
+                pass
+            pending = None
         if completed < centered_block.shape[1]:
             cross[completed:] += centered_block[:, completed:].T @ centered_response
         return False, exc
     finally:
-        if block_tensor is not None:
-            del block_tensor
+        if pending is not None:
+            del pending
         if response_tensor is not None:
             del response_tensor
 
@@ -336,12 +415,24 @@ def _chunk_aligned_structured_correlation(
                 gpu_feature_batch = 0
                 if use_gpu:
                     free_vram_bytes = gpu_available_vram_bytes()
-                    required = tile_features * n_neurons * np.dtype(np.float64).itemsize * 3
-                    if required < free_vram_bytes * 0.35:
+                    required = _gpu_full_cross_peak_bytes(tile_features, n_neurons, time_chunk)
+                    if _gpu_full_cross_fits(
+                        tile_features,
+                        n_neurons,
+                        time_chunk,
+                        free_vram_bytes,
+                    ):
                         try:
                             cross_tensor = torch.zeros(
                                 (tile_features, n_neurons), dtype=torch.float64, device="cuda:0"
                             )
+                            if tile_number == 0:
+                                print(
+                                    "RF GPU planner: retaining a persistent full-tile accumulator "
+                                    f"({tile_features:,} features; estimated peak "
+                                    f"{required / 1024**3:.2f} GiB of "
+                                    f"{free_vram_bytes / 1024**3:.2f} GiB free VRAM)."
+                                )
                         except RuntimeError:
                             cross_tensor = None
                     if cross_tensor is None:
@@ -360,7 +451,8 @@ def _chunk_aligned_structured_correlation(
                                 "RF GPU tile downshift: retaining the Zarr read tile but "
                                 f"processing {tile_features:,} features as "
                                 f"{math.ceil(tile_features / gpu_feature_batch):,} GPU subtiles "
-                                f"of up to {gpu_feature_batch:,} features."
+                                f"of up to {gpu_feature_batch:,} features "
+                                f"(full-tile estimate {required / 1024**3:.2f} GiB)."
                             )
 
                 def read_block(schedule_item):

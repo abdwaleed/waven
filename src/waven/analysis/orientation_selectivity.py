@@ -1,10 +1,205 @@
 """Orientation selectivity metrics for tuning curves."""
 from __future__ import annotations
 
+import hashlib
 import math
+import os
+import shutil
 import time
 
 import numpy as np
+
+
+def _selected_feature_cache_signature(wavelets, maxes, n_frames, n_neurons, n_orientations):
+    """Return a stable identity for the compact preferred-feature cache.
+
+    The cache is valid only for one source wavelet store and one set of RF
+    maxima.  Including the store's timestamp makes a regenerated RF-power
+    cache invalidate the derived orientation cache even when its dimensions
+    happen to be unchanged.
+    """
+    digest = hashlib.sha256()
+    digest.update(np.ascontiguousarray(maxes[:5, :n_neurons], dtype=np.int64).tobytes())
+    digest.update(
+        repr(
+            (
+                tuple(int(value) for value in getattr(wavelets, "shape", ())),
+                tuple(int(value) for value in (getattr(wavelets, "chunks", None) or ())),
+                int(n_frames),
+                int(n_neurons),
+                int(n_orientations),
+            )
+        ).encode("utf-8")
+    )
+    store_path = os.fspath(getattr(getattr(wavelets, "store", None), "path", "") or "")
+    if store_path:
+        digest.update(store_path.encode("utf-8", errors="surrogatepass"))
+        try:
+            digest.update(str(os.stat(store_path).st_mtime_ns).encode("ascii"))
+        except OSError:
+            pass
+    return digest.hexdigest()
+
+
+def _open_selected_feature_cache(
+    cache_path,
+    *,
+    signature,
+    n_frames,
+    n_neurons,
+    n_orientations,
+    time_chunk,
+):
+    """Open a valid preferred-feature cache or create a bounded new one.
+
+    Each write contains one complete ``(time, neuron, orientation)`` Zarr
+    chunk.  That makes populating the cache during the source traversal cheap,
+    while subsequent orientation tuning reads only the selected Gabor feature
+    for every unit rather than spatial tiles containing mostly unused values.
+    """
+    if not cache_path:
+        return None, False
+    try:
+        import zarr
+        from numcodecs import Blosc
+    except ImportError:
+        print("[ORIENTATION] Selected-feature cache unavailable (zarr/numcodecs not installed).")
+        return None, False
+
+    cache_path = os.fspath(cache_path)
+    expected_shape = (int(n_frames), int(n_neurons), int(n_orientations))
+    if os.path.isdir(cache_path):
+        try:
+            existing = zarr.open(cache_path, mode="r")
+            attrs = existing.attrs
+            if (
+                tuple(int(value) for value in existing.shape) == expected_shape
+                and attrs.get("selection_signature") == signature
+                and bool(attrs.get("complete", False))
+            ):
+                print(
+                    "[ORIENTATION] Reusing selected-feature tuning cache: "
+                    f"{cache_path} ({np.prod(expected_shape, dtype=np.int64) * 4 / 1024**3:.2f} GiB raw)."
+                )
+                return existing, True
+        except Exception as exc:
+            print(f"[ORIENTATION] Ignoring unreadable selected-feature cache: {exc}")
+        try:
+            shutil.rmtree(cache_path)
+        except OSError as exc:
+            print(f"[ORIENTATION] Cannot replace stale selected-feature cache: {exc}")
+            return None, False
+    elif os.path.exists(cache_path):
+        print(f"[ORIENTATION] Cache path is not a Zarr directory, skipping: {cache_path}")
+        return None, False
+
+    try:
+        cache_folder = os.path.dirname(cache_path) or "."
+        os.makedirs(cache_folder, exist_ok=True)
+        required_bytes = int(np.prod(expected_shape, dtype=np.int64) * np.dtype(np.float32).itemsize)
+        if shutil.disk_usage(cache_folder).free < int(required_bytes * 1.10):
+            print(
+                "[ORIENTATION] Selected-feature cache skipped: insufficient free disk space for "
+                f"its {required_bytes / 1024**3:.2f} GiB raw upper bound."
+            )
+            return None, False
+        chunks = (max(1, int(time_chunk)), 1, int(n_orientations))
+        kwargs = {
+            "mode": "w",
+            "shape": expected_shape,
+            "chunks": chunks,
+            "dtype": np.float32,
+            "compressor": Blosc(cname="lz4", clevel=1, shuffle=Blosc.BITSHUFFLE),
+        }
+        try:
+            created = zarr.open(cache_path, **kwargs)
+        except TypeError:
+            kwargs["compressors"] = [kwargs.pop("compressor")]
+            created = zarr.open(cache_path, **kwargs)
+        created.attrs.update(
+            {
+                "selection_signature": signature,
+                "complete": False,
+                "layout": "time-neuron-orientation-selected-v1",
+            }
+        )
+        print(
+            "[ORIENTATION] Building selected-feature tuning cache alongside this pass: "
+            f"{cache_path}; chunks={chunks}."
+        )
+        return created, False
+    except Exception as exc:
+        print(f"[ORIENTATION] Selected-feature cache disabled for this pass: {exc}")
+        return None, False
+
+
+def _accumulate_shared_orientation_statistics(
+    raw_features,
+    neuron_ids,
+    *,
+    time_start,
+    time_end,
+    rate_mean_responses,
+    rate_trial_responses,
+    correlation_responses,
+    weighted_sum,
+    weight_sum,
+    trial_weighted_sum,
+    sum_x,
+    sum_x2,
+    sum_y,
+    sum_y2,
+    sum_xy,
+):
+    """Accumulate both orientation-curve definitions for selected features.
+
+    ``raw_features`` has the compact ``(time, neuron, orientation)`` layout
+    regardless of whether it came directly from RF-power Zarr tiles or the
+    derived selected-feature cache.  Keeping the arithmetic in one helper
+    prevents a cache hit from changing scientific results.
+    """
+    correlation_features = np.nan_to_num(raw_features, nan=0.0, posinf=0.0, neginf=0.0)
+    rate_weights = np.asarray(correlation_features, dtype=np.float64)
+    np.maximum(rate_weights, 0.0, out=rate_weights)
+
+    mean_rates = np.take(rate_mean_responses[time_start:time_end], neuron_ids, axis=1)
+    weighted_sum[neuron_ids] += np.sum(
+        rate_weights * mean_rates[:, :, None], axis=0, dtype=np.float64
+    )
+    weight_sum[neuron_ids] += rate_weights.sum(axis=0, dtype=np.float64)
+    if trial_weighted_sum is not None:
+        rate_trials = np.clip(
+            np.nan_to_num(
+                np.take(
+                    rate_trial_responses[:, time_start:time_end, :], neuron_ids, axis=2
+                ),
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            ),
+            0.0,
+            None,
+        )
+        trial_weighted_sum[:, neuron_ids] += np.sum(
+            rate_weights[None, :, :, :] * rate_trials[:, :, :, None],
+            axis=1,
+            dtype=np.float64,
+        )
+
+    correlation_trials = np.take(
+        correlation_responses[:, time_start:time_end, :], neuron_ids, axis=2
+    )
+    sum_x[neuron_ids] += np.sum(correlation_features, axis=0, dtype=np.float64)
+    sum_x2[neuron_ids] += np.sum(
+        correlation_features * correlation_features, axis=0, dtype=np.float64
+    )
+    sum_y[:, neuron_ids] += np.sum(correlation_trials, axis=1, dtype=np.float64)
+    sum_y2[:, neuron_ids] += np.sum(
+        correlation_trials * correlation_trials, axis=1, dtype=np.float64
+    )
+    sum_xy[:, neuron_ids] += np.einsum(
+        "tgo,ntg->ngo", correlation_features, correlation_trials, optimize=True, dtype=np.float64
+    )
 
 
 def _clean_rates(rates):
@@ -514,7 +709,13 @@ def correlation_orientation_tuning(spikes, wavelets_complex, rfs, angles_deg=Non
     return result
 
 
-def orientation_tuning_bundle(spikes, wavelets_complex, rfs, angles_deg=None):
+def orientation_tuning_bundle(
+    spikes,
+    wavelets_complex,
+    rfs,
+    angles_deg=None,
+    tuning_cache_path=None,
+):
     """Precompute firing-rate and correlation tuning in one wavelet pass.
 
     Coarse-RF analysis needs two curves for every unit.  Both curves read the
@@ -528,7 +729,10 @@ def orientation_tuning_bundle(spikes, wavelets_complex, rfs, angles_deg=None):
     :func:`firing_rate_orientation_tuning` and
     :func:`correlation_orientation_tuning`, respectively.  In particular, the
     correlation mean is still the established RF-correlation value rather than
-    a newly calculated value.
+    a newly calculated value.  When ``tuning_cache_path`` is supplied, the
+    first source pass also stores only the selected per-neuron Gabor features
+    in a compact Zarr layout.  Later runs reuse that layout without traversing
+    the large spatial RF-power cache again.
     """
     raw_responses = np.asarray(spikes, dtype=float)
     rate_trial_responses = raw_responses if raw_responses.ndim == 3 else None
@@ -617,101 +821,131 @@ def orientation_tuning_bundle(spikes, wavelets_complex, rfs, angles_deg=None):
     started = time.perf_counter()
     read_seconds = 0.0
     compute_seconds = 0.0
+    selection_signature = _selected_feature_cache_signature(
+        wavelets,
+        maxes,
+        n_frames,
+        n_neurons,
+        n_orientations,
+    )
+    selected_feature_cache, cache_reused = _open_selected_feature_cache(
+        tuning_cache_path,
+        signature=selection_signature,
+        n_frames=n_frames,
+        n_neurons=n_neurons,
+        n_orientations=n_orientations,
+        time_chunk=time_chunk,
+    )
     print(
         f"[ORIENTATION] Starting shared chunk-batched tuning | "
         f"neurons={valid_neuron_ids.size}/{n_neurons} | feature chunks={total_groups} | "
         f"time chunk={time_chunk}"
+        + (" | source=selected-feature cache" if cache_reused else "")
     )
-    for group_number, ((x_group, y_group, sigma_group, frequency_group), neuron_ids) in enumerate(
-        chunk_groups.items(), start=1
-    ):
-        neuron_ids = np.asarray(neuron_ids, dtype=int)
-        feature_indices = maxes[:5, neuron_ids]
-        x0, y0 = x_group * x_chunk, y_group * y_chunk
-        sigma0 = sigma_group * sigma_chunk
-        frequency0 = frequency_group * frequency_chunk
-        x1 = min(wavelet_shape[1], x0 + x_chunk)
-        y1 = min(wavelet_shape[2], y0 + y_chunk)
-        sigma1 = min(wavelet_shape[4], sigma0 + sigma_chunk)
-        frequency1 = (
-            min(wavelet_shape[5], frequency0 + frequency_chunk)
-            if len(wavelet_shape) == 6
-            else 1
-        )
-        local_x = feature_indices[0] - x0
-        local_y = feature_indices[1] - y0
-        local_sigma = feature_indices[3] - sigma0
-        local_frequency = feature_indices[4] - frequency0
+    if cache_reused:
         for time_start in range(0, n_frames, time_chunk):
             time_end = min(n_frames, time_start + time_chunk)
             read_started = time.perf_counter()
-            if len(wavelet_shape) == 5:
-                block = np.asarray(wavelets[time_start:time_end, x0:x1, y0:y1, :, sigma0:sigma1])
-                raw_features = np.moveaxis(block[:, local_x, local_y, :, local_sigma], 0, 1)
-            else:
-                block = np.asarray(
-                    wavelets[
-                        time_start:time_end, x0:x1, y0:y1, :, sigma0:sigma1, frequency0:frequency1
-                    ]
-                )
-                raw_features = np.moveaxis(
-                    block[:, local_x, local_y, :, local_sigma, local_frequency], 0, 1
-                )
+            raw_features = np.asarray(selected_feature_cache[time_start:time_end, :, :])
             read_seconds += time.perf_counter() - read_started
             compute_started = time.perf_counter()
-            # Preserve the correlation calculation's source dtype, then make a
-            # float64/non-negative copy for the weighted firing-rate sums.
-            correlation_features = np.nan_to_num(
-                raw_features, nan=0.0, posinf=0.0, neginf=0.0
-            )
-            rate_weights = np.asarray(correlation_features, dtype=np.float64)
-            np.maximum(rate_weights, 0.0, out=rate_weights)
-
-            mean_rates = np.take(rate_mean_responses[time_start:time_end], neuron_ids, axis=1)
-            weighted_sum[neuron_ids] += np.sum(
-                rate_weights * mean_rates[:, :, None], axis=0, dtype=np.float64
-            )
-            weight_sum[neuron_ids] += rate_weights.sum(axis=0, dtype=np.float64)
-            if trial_weighted_sum is not None:
-                rate_trials = np.clip(
-                    np.nan_to_num(
-                        np.take(
-                            rate_trial_responses[:, time_start:time_end, :], neuron_ids, axis=2
-                        ),
-                        nan=0.0,
-                        posinf=0.0,
-                        neginf=0.0,
-                    ),
-                    0.0,
-                    None,
+            if valid_neuron_ids.size:
+                _accumulate_shared_orientation_statistics(
+                    raw_features[:, valid_neuron_ids, :],
+                    valid_neuron_ids,
+                    time_start=time_start,
+                    time_end=time_end,
+                    rate_mean_responses=rate_mean_responses,
+                    rate_trial_responses=rate_trial_responses,
+                    correlation_responses=correlation_responses,
+                    weighted_sum=weighted_sum,
+                    weight_sum=weight_sum,
+                    trial_weighted_sum=trial_weighted_sum,
+                    sum_x=sum_x,
+                    sum_x2=sum_x2,
+                    sum_y=sum_y,
+                    sum_y2=sum_y2,
+                    sum_xy=sum_xy,
                 )
-                trial_weighted_sum[:, neuron_ids] += np.sum(
-                    rate_weights[None, :, :, :] * rate_trials[:, :, :, None],
-                    axis=1,
-                    dtype=np.float64,
-                )
-
-            correlation_trials = np.take(
-                correlation_responses[:, time_start:time_end, :], neuron_ids, axis=2
-            )
-            sum_x[neuron_ids] += np.sum(correlation_features, axis=0, dtype=np.float64)
-            sum_x2[neuron_ids] += np.sum(
-                correlation_features * correlation_features, axis=0, dtype=np.float64
-            )
-            sum_y[:, neuron_ids] += np.sum(correlation_trials, axis=1, dtype=np.float64)
-            sum_y2[:, neuron_ids] += np.sum(
-                correlation_trials * correlation_trials, axis=1, dtype=np.float64
-            )
-            sum_xy[:, neuron_ids] += np.einsum(
-                "tgo,ntg->ngo", correlation_features, correlation_trials, optimize=True, dtype=np.float64
-            )
             compute_seconds += time.perf_counter() - compute_started
-        if group_number % report_every == 0 or group_number == total_groups:
-            print(
-                f"[ORIENTATION] Feature chunks {group_number}/{total_groups} | "
-                f"neurons in chunk={neuron_ids.size} | read={read_seconds:.1f}s | "
-                f"compute={compute_seconds:.1f}s"
+    else:
+        for group_number, ((x_group, y_group, sigma_group, frequency_group), neuron_ids) in enumerate(
+            chunk_groups.items(), start=1
+        ):
+            neuron_ids = np.asarray(neuron_ids, dtype=int)
+            feature_indices = maxes[:5, neuron_ids]
+            x0, y0 = x_group * x_chunk, y_group * y_chunk
+            sigma0 = sigma_group * sigma_chunk
+            frequency0 = frequency_group * frequency_chunk
+            x1 = min(wavelet_shape[1], x0 + x_chunk)
+            y1 = min(wavelet_shape[2], y0 + y_chunk)
+            sigma1 = min(wavelet_shape[4], sigma0 + sigma_chunk)
+            frequency1 = (
+                min(wavelet_shape[5], frequency0 + frequency_chunk)
+                if len(wavelet_shape) == 6
+                else 1
             )
+            local_x = feature_indices[0] - x0
+            local_y = feature_indices[1] - y0
+            local_sigma = feature_indices[3] - sigma0
+            local_frequency = feature_indices[4] - frequency0
+            for time_start in range(0, n_frames, time_chunk):
+                time_end = min(n_frames, time_start + time_chunk)
+                read_started = time.perf_counter()
+                if len(wavelet_shape) == 5:
+                    block = np.asarray(wavelets[time_start:time_end, x0:x1, y0:y1, :, sigma0:sigma1])
+                    raw_features = np.moveaxis(block[:, local_x, local_y, :, local_sigma], 0, 1)
+                else:
+                    block = np.asarray(
+                        wavelets[
+                            time_start:time_end, x0:x1, y0:y1, :, sigma0:sigma1, frequency0:frequency1
+                        ]
+                    )
+                    raw_features = np.moveaxis(
+                        block[:, local_x, local_y, :, local_sigma, local_frequency], 0, 1
+                    )
+                read_seconds += time.perf_counter() - read_started
+                if selected_feature_cache is not None:
+                    try:
+                        cached_values = np.asarray(raw_features, dtype=np.float32)
+                        for local_neuron, neuron_id in enumerate(neuron_ids):
+                            selected_feature_cache[time_start:time_end, int(neuron_id), :] = cached_values[
+                                :, local_neuron, :
+                            ]
+                    except Exception as exc:
+                        print(f"[ORIENTATION] Selected-feature cache write failed; continuing without it: {exc}")
+                        selected_feature_cache = None
+                compute_started = time.perf_counter()
+                _accumulate_shared_orientation_statistics(
+                    raw_features,
+                    neuron_ids,
+                    time_start=time_start,
+                    time_end=time_end,
+                    rate_mean_responses=rate_mean_responses,
+                    rate_trial_responses=rate_trial_responses,
+                    correlation_responses=correlation_responses,
+                    weighted_sum=weighted_sum,
+                    weight_sum=weight_sum,
+                    trial_weighted_sum=trial_weighted_sum,
+                    sum_x=sum_x,
+                    sum_x2=sum_x2,
+                    sum_y=sum_y,
+                    sum_y2=sum_y2,
+                    sum_xy=sum_xy,
+                )
+                compute_seconds += time.perf_counter() - compute_started
+            if group_number % report_every == 0 or group_number == total_groups:
+                print(
+                    f"[ORIENTATION] Feature chunks {group_number}/{total_groups} | "
+                    f"neurons in chunk={neuron_ids.size} | read={read_seconds:.1f}s | "
+                    f"compute={compute_seconds:.1f}s"
+                )
+        if selected_feature_cache is not None:
+            try:
+                selected_feature_cache.attrs["complete"] = True
+                print("[ORIENTATION] Selected-feature tuning cache is ready for later Coarse RF runs.")
+            except Exception as exc:
+                print(f"[ORIENTATION] Could not finalize selected-feature cache: {exc}")
 
     firing_tuning = np.full((n_neurons, n_orientations), np.nan, dtype=float)
     firing_osi = np.full(n_neurons, np.nan, dtype=float)

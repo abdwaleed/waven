@@ -1,6 +1,7 @@
 """Tests for orientation-axis display and selectivity invariants."""
 
 import numpy as np
+import pytest
 
 from waven.analysis.orientation_selectivity import (
     close_orientation_curve,
@@ -199,3 +200,47 @@ def test_shared_orientation_bundle_matches_separate_curves_with_one_set_of_reads
         np.testing.assert_allclose(
             result["correlation"][key], expected_correlation[key], rtol=1e-12, atol=1e-12, equal_nan=True
         )
+
+
+def test_shared_orientation_bundle_reuses_compact_selected_feature_cache(tmp_path):
+    """A later run must avoid the large spatial wavelet source without changing curves."""
+    pytest.importorskip("zarr")
+    pytest.importorskip("numcodecs")
+    generator = np.random.default_rng(81)
+    spikes = generator.normal(size=(2, 8, 3))
+    wavelets = generator.random(size=(8, 4, 4, 5, 2)).astype(np.float32)
+    indices = np.array(
+        [
+            [0, 1, 3],
+            [1, 2, 0],
+            [0, 0, 0],
+            [0, 1, 1],
+            [0, 0, 0],
+        ]
+    )
+    rf_values = generator.normal(size=(3, 4, 4, 5, 2, 1))
+    cache_path = tmp_path / "selected_orientation_features.zarr"
+
+    first = orientation_tuning_bundle(
+        spikes,
+        wavelets,
+        (rf_values, indices),
+        tuning_cache_path=cache_path,
+    )
+    second = orientation_tuning_bundle(
+        spikes,
+        wavelets,
+        (rf_values, indices),
+        tuning_cache_path=cache_path,
+    )
+
+    assert cache_path.is_dir()
+    for curve_kind in ("firing_rate", "correlation"):
+        for key in ("orientation_tuning", "trial_orientation_tuning"):
+            np.testing.assert_allclose(
+                second[curve_kind][key],
+                first[curve_kind][key],
+                rtol=0.0,
+                atol=0.0,
+                equal_nan=True,
+            )

@@ -138,7 +138,13 @@ def _resource_aware_frame_chunk_size(
     return max(1, min(frames, max(1, budget // max(1, bytes_per_frame))))
 
 
-def _coarse_power_zarr_layout(final_shape, frame_chunk_size, filter_group_size, target_bytes=96 * 1024**2):
+def _coarse_power_zarr_layout(
+    final_shape,
+    frame_chunk_size,
+    filter_group_size,
+    target_bytes=96 * 1024**2,
+    rf_neuron_count=None,
+):
     """Choose write-oriented, RF-read-aligned chunks for coarse power.
 
     Each direct-convolution result covers one time range and one sigma group.
@@ -146,7 +152,12 @@ def _coarse_power_zarr_layout(final_shape, frame_chunk_size, filter_group_size, 
     chunks target roughly 96 MiB of raw data (with a small alignment allowance)
     so Zarr performs substantially fewer codec/store operations than the former
     fixed 16 x 16 layout, while remaining comfortably bounded for a writer.
-    Coarse-RF correlation consumes the same spatial chunks as tiles.
+    Coarse-RF correlation consumes the same spatial chunks as tiles.  The
+    spatial target also accounts for current free VRAM, the complete Gabor
+    feature bank, and the neural population.  It only shrinks a storage tile
+    when it would otherwise require more than three GPU subtiles: smaller
+    chunks can reduce GPU transfer cost, but too many extra Zarr chunks would
+    make the I/O-bound correlation stage slower.
     """
     num_frames, nx, ny, n_orientations, n_sigmas = (int(value) for value in final_shape)
     time_chunk = min(num_frames, max(1, int(frame_chunk_size)))
@@ -155,7 +166,33 @@ def _coarse_power_zarr_layout(final_shape, frame_chunk_size, filter_group_size, 
         1,
         time_chunk * n_orientations * sigma_chunk * np.dtype(np.float32).itemsize,
     )
-    pixel_budget = max(1, int(target_bytes) // bytes_per_pixel)
+    storage_pixel_budget = max(1, int(target_bytes) // bytes_per_pixel)
+    pixel_budget = storage_pixel_budget
+    gpu_pixel_budget = None
+    allowed_gpu_subtiles = 1
+    free_vram_bytes = gpu_available_vram_bytes() if torch.cuda.is_available() else 0
+    # A nearly exhausted GPU cannot provide a useful stable cache-layout
+    # signal.  Preserve the I/O-efficient storage layout and let the runtime
+    # RF path safely downshift or use CPU for that exceptional session.
+    if free_vram_bytes >= 2 * 1024**3:
+        # RF correlation holds a persistent feature-by-neuron accumulator, the
+        # current GEMM result, and one time-by-feature block in float64.  Use
+        # the same 60% free-VRAM ceiling as the runtime RF planner so cache
+        # preparation and analysis agree about what a useful tile looks like.
+        n_neurons = max(1, int(rf_neuron_count or 256))
+        full_feature_bytes_per_pixel = np.dtype(np.float64).itemsize * int(n_orientations) * int(n_sigmas) * (
+            n_neurons * 2 + time_chunk
+        )
+        gpu_pixel_budget = max(
+            1,
+            int(free_vram_bytes * 0.60) // max(1, full_feature_bytes_per_pixel),
+        )
+        # A one-tile GPU path is worthwhile when it does not nearly double the
+        # number of spatial Zarr chunks.  Otherwise retain up to three bounded
+        # GPU subtiles, preserving sequential compressed-cache throughput.
+        if gpu_pixel_budget < storage_pixel_budget * 0.60:
+            allowed_gpu_subtiles = 3
+        pixel_budget = min(storage_pixel_budget, gpu_pixel_budget * allowed_gpu_subtiles)
 
     def spatial_candidates(limit):
         values = {1, int(limit)}
@@ -174,7 +211,27 @@ def _coarse_power_zarr_layout(final_shape, frame_chunk_size, filter_group_size, 
         x_chunk, y_chunk = 1, 1
     else:
         _tile_count, _negative_pixels, x_chunk, y_chunk = min(candidates)
+    if gpu_pixel_budget is not None:
+        planned_features = x_chunk * y_chunk * n_orientations * n_sigmas
+        estimated_subtiles = math.ceil((x_chunk * y_chunk) / max(1, gpu_pixel_budget))
+        print(
+            "Coarse RF Zarr tile planner | "
+            f"free VRAM={free_vram_bytes / 1024**3:.2f} GiB, "
+            f"neurons={rf_neuron_count or 256}, filters={n_orientations}x{n_sigmas}, "
+            f"tile={x_chunk}x{y_chunk} ({planned_features:,} features), "
+            f"estimated GPU subtiles={estimated_subtiles} (limit={allowed_gpu_subtiles})."
+        )
     return time_chunk, x_chunk, y_chunk, n_orientations, sigma_chunk
+
+
+def coarse_rf_zarr_layout(final_shape, frame_chunk_size, filter_group_size, rf_neuron_count=None):
+    """Public coarse-RF cache layout planner shared by both backends."""
+    return _coarse_power_zarr_layout(
+        final_shape,
+        frame_chunk_size,
+        filter_group_size,
+        rf_neuron_count=rf_neuron_count,
+    )
 
 
 def _full_convolution_zarr_layout(
@@ -2137,7 +2194,7 @@ def waveletPowerDecompositionConv(
     videodata, sigmas, folder_path, n_orientations, phase_offsets=None,
     kernel_cache_path=None, frame_chunk_size=None, filter_group_size=None,
     output_stem="coarse_rf_power", zarr_chunks=None, cancel_event=None,
-    progress_signature=None,
+    progress_signature=None, rf_neuron_count=None,
 ):
     """Write coarse wavelet power directly, without temporary phase caches.
 
@@ -2210,7 +2267,10 @@ def waveletPowerDecompositionConv(
         )
     if zarr_chunks is None:
         zarr_chunks = _coarse_power_zarr_layout(
-            final_shape, frame_chunk_size, filter_group_size,
+            final_shape,
+            frame_chunk_size,
+            filter_group_size,
+            rf_neuron_count=rf_neuron_count,
         )
     zarr_chunks = tuple(min(int(dim), max(1, int(chunk))) for dim, chunk in zip(final_shape, zarr_chunks))
     save_path = os.path.join(folder_path, f"{output_stem}.zarr")

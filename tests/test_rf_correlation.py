@@ -7,6 +7,8 @@ import pytest
 
 from waven.analysis.rf_correlation import (
     _gpu_cross_feature_batch_size,
+    _gpu_full_cross_fits,
+    _gpu_full_cross_peak_bytes,
     streaming_cross_correlation,
 )
 
@@ -24,6 +26,18 @@ def test_gpu_rf_subtile_planner_downshifts_an_oversized_tile():
     # The planner's accounting must include the time-by-feature transfer as
     # well as the float64 cross-product/workspace reserve.
     assert batch * 8 * (230 * 3 + 1_024) <= int(4 * 1024**3 * 0.28)
+
+
+def test_gpu_rf_full_tile_estimate_uses_live_accumulator_and_current_input_only():
+    """A useful full tile should not be rejected by a triple-accumulator guess."""
+    peak = _gpu_full_cross_peak_bytes(
+        tile_features=691_200,
+        n_neurons=230,
+        time_chunk=170,
+    )
+    assert peak == 691_200 * 8 * (230 * 2 + 170)
+    assert _gpu_full_cross_fits(691_200, 230, 170, 7 * 1024**3)
+    assert not _gpu_full_cross_fits(691_200, 230, 170, 4 * 1024**3)
 
 
 def test_structured_correlation_matches_reference_with_large_power_baseline(monkeypatch):
