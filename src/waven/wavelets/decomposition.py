@@ -159,12 +159,23 @@ def _coarse_power_zarr_layout(
     chunks can reduce GPU transfer cost, but too many extra Zarr chunks would
     make the I/O-bound correlation stage slower.
     """
-    num_frames, nx, ny, n_orientations, n_sigmas = (int(value) for value in final_shape)
+    if len(final_shape) == 5:
+        num_frames, nx, ny, n_orientations, n_sigmas = (int(value) for value in final_shape)
+        n_frequencies = 1
+    elif len(final_shape) == 6:
+        num_frames, nx, ny, n_orientations, n_sigmas, n_frequencies = (
+            int(value) for value in final_shape
+        )
+    else:
+        raise ValueError(
+            "Coarse RF power layout expects (time, x, y, orientation, sigma) "
+            "or (time, x, y, orientation, sigma, frequency)."
+        )
     time_chunk = min(num_frames, max(1, int(frame_chunk_size)))
     sigma_chunk = min(n_sigmas, max(1, int(filter_group_size)))
     bytes_per_pixel = max(
         1,
-        time_chunk * n_orientations * sigma_chunk * np.dtype(np.float32).itemsize,
+        time_chunk * n_orientations * sigma_chunk * n_frequencies * np.dtype(np.float32).itemsize,
     )
     storage_pixel_budget = max(1, int(target_bytes) // bytes_per_pixel)
     pixel_budget = storage_pixel_budget
@@ -180,7 +191,7 @@ def _coarse_power_zarr_layout(
         # the same 60% free-VRAM ceiling as the runtime RF planner so cache
         # preparation and analysis agree about what a useful tile looks like.
         n_neurons = max(1, int(rf_neuron_count or 256))
-        full_feature_bytes_per_pixel = np.dtype(np.float64).itemsize * int(n_orientations) * int(n_sigmas) * (
+        full_feature_bytes_per_pixel = np.dtype(np.float64).itemsize * int(n_orientations) * int(n_sigmas) * int(n_frequencies) * (
             n_neurons * 2 + time_chunk
         )
         gpu_pixel_budget = max(
@@ -212,16 +223,17 @@ def _coarse_power_zarr_layout(
     else:
         _tile_count, _negative_pixels, x_chunk, y_chunk = min(candidates)
     if gpu_pixel_budget is not None:
-        planned_features = x_chunk * y_chunk * n_orientations * n_sigmas
+        planned_features = x_chunk * y_chunk * n_orientations * n_sigmas * n_frequencies
         estimated_subtiles = math.ceil((x_chunk * y_chunk) / max(1, gpu_pixel_budget))
         print(
             "Coarse RF Zarr tile planner | "
             f"free VRAM={free_vram_bytes / 1024**3:.2f} GiB, "
-            f"neurons={rf_neuron_count or 256}, filters={n_orientations}x{n_sigmas}, "
+            f"neurons={rf_neuron_count or 256}, filters={n_orientations}x{n_sigmas}x{n_frequencies}, "
             f"tile={x_chunk}x{y_chunk} ({planned_features:,} features), "
             f"estimated GPU subtiles={estimated_subtiles} (limit={allowed_gpu_subtiles})."
         )
-    return time_chunk, x_chunk, y_chunk, n_orientations, sigma_chunk
+    layout = (time_chunk, x_chunk, y_chunk, n_orientations, sigma_chunk)
+    return layout if len(final_shape) == 5 else layout + (n_frequencies,)
 
 
 def coarse_rf_zarr_layout(final_shape, frame_chunk_size, filter_group_size, rf_neuron_count=None):
@@ -1230,8 +1242,9 @@ def build_convolution_kernel_cache(
     """Build or reuse the compact Gabor-kernel cache used by convolution wavelets.
 
     The cache stores center-padded spatial kernels, not flattened image-sized
-    filter libraries.  Coarse caches use the legacy sigma-coupled frequency;
-    fine caches include the independent frequency axis used by the full model.
+    filter libraries.  A coarse cache with no frequencies uses the legacy
+    sigma-coupled frequency; passing frequencies creates an independent coarse
+    frequency axis, just as the full-model cache does.
     """
     kind = str(kind).lower()
     if kind not in {"coarse", "fine"}:
@@ -1241,10 +1254,8 @@ def build_convolution_kernel_cache(
     sigmas = np.asarray(sigmas, dtype=float)
     phase_offsets = np.asarray(phase_offsets if phase_offsets is not None else (0.0, np.pi / 2), dtype=float)
     frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
-    if kind == "coarse":
-        frequencies_for_cache = np.asarray([], dtype=float)
-    else:
-        frequencies_for_cache = frequencies if frequencies.size else np.asarray([0.0], dtype=float)
+    frequencies_for_cache = frequencies if frequencies.size else np.asarray([], dtype=float)
+    kernel_frequencies = frequencies_for_cache if frequencies_for_cache.size else np.asarray([0.0], dtype=float)
 
     cache_path = convolution_kernel_cache_path(folder_path, kind)
     if not force and _kernel_cache_matches(
@@ -1262,10 +1273,10 @@ def build_convolution_kernel_cache(
     kernels = []
     for phase_offset in phase_offsets:
         for sigma in sigmas:
-            freq_iter = frequencies_for_cache if kind == "fine" else np.asarray([0.0], dtype=float)
+            freq_iter = kernel_frequencies
             for frequency in freq_iter:
                 check_cancelled(cancel_event)
-                if kind == "coarse":
+                if kind == "coarse" and not frequencies_for_cache.size:
                     orientation_kernels = [
                         _gabor_kernel_for_conv(theta, sigma, phase_offset, coupled_frequency=True)
                         for theta in thetas
@@ -1281,7 +1292,7 @@ def build_convolution_kernel_cache(
     kernel_shape = (
         len(phase_offsets),
         len(sigmas),
-        max(1, len(frequencies_for_cache)),
+        len(kernel_frequencies),
         int(n_orientations),
         padded.shape[-2],
         padded.shape[-1],
@@ -2194,7 +2205,7 @@ def waveletPowerDecompositionConv(
     videodata, sigmas, folder_path, n_orientations, phase_offsets=None,
     kernel_cache_path=None, frame_chunk_size=None, filter_group_size=None,
     output_stem="coarse_rf_power", zarr_chunks=None, cancel_event=None,
-    progress_signature=None, rf_neuron_count=None,
+    progress_signature=None, rf_neuron_count=None, frequencies=None,
 ):
     """Write coarse wavelet power directly, without temporary phase caches.
 
@@ -2211,11 +2222,17 @@ def waveletPowerDecompositionConv(
     codec_threads = configure_zarr_codec_threads()
     num_frames, ny, nx = videodata.shape
     sigmas = np.asarray(sigmas, dtype=float)
+    frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
+    independent_frequencies = bool(frequencies.size)
+    kernel_frequencies = frequencies if independent_frequencies else np.asarray([0.0], dtype=float)
+    n_frequencies = len(kernel_frequencies)
     thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
     kernel_cache = _load_convolution_kernel_cache(
-        kernel_cache_path, "coarse", sigmas, [], n_orientations, phase_offsets,
+        kernel_cache_path, "coarse", sigmas, frequencies, n_orientations, phase_offsets,
     ) if kernel_cache_path else None
     final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
+    if independent_frequencies:
+        final_shape += (n_frequencies,)
     logical_cache_bytes = _array_bytes(final_shape, np.float32)
     # A Zarr cache is compressed on disk.  Monitor its measured footprint rather
     # than reserving an additional uncompressed 400+ GiB array up front.
@@ -2230,8 +2247,8 @@ def waveletPowerDecompositionConv(
             nx,
             ny,
             n_channels=2,
-            filter_count=2 * int(n_orientations),
-            output_channels=int(n_orientations),
+            filter_count=2 * int(n_orientations) * n_frequencies,
+            output_channels=int(n_orientations) * n_frequencies,
             device=device,
             kernel_shape=kernel_shape,
             output_buffer_count=2,
@@ -2245,8 +2262,8 @@ def waveletPowerDecompositionConv(
             ny,
             n_orientations,
             device,
-            filter_channels=2 * int(n_orientations),
-            output_channels=int(n_orientations),
+            filter_channels=2 * int(n_orientations) * n_frequencies,
+            output_channels=int(n_orientations) * n_frequencies,
             output_buffer_count=2,
         )
     filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
@@ -2259,8 +2276,8 @@ def waveletPowerDecompositionConv(
             nx,
             ny,
             n_channels=2,
-            filter_count=2 * int(n_orientations) * filter_group_size,
-            output_channels=int(n_orientations) * filter_group_size,
+            filter_count=2 * int(n_orientations) * filter_group_size * n_frequencies,
+            output_channels=int(n_orientations) * filter_group_size * n_frequencies,
             device=device,
             kernel_shape=kernel_shape,
             output_buffer_count=2,
@@ -2280,7 +2297,7 @@ def waveletPowerDecompositionConv(
     # reused after its stimulus/crop parameters changed.
     progress_kind = json.dumps(
         {"product": "coarse_rf_power", "sigmas": sigmas.tolist(),
-         "orientations": int(n_orientations),
+         "orientations": int(n_orientations), "frequencies": frequencies.tolist(),
          "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
          "resume_signature": progress_signature},
         sort_keys=True,
@@ -2312,11 +2329,15 @@ def waveletPowerDecompositionConv(
             )
         # Keep a smaller-or-equal old sigma tile for resumability.  Never grow
         # a resumed group above the current safe VRAM-derived estimate.
-        persisted_sigma_chunk = max(1, persisted_chunks[-1])
+        persisted_sigma_chunk = max(1, persisted_chunks[-2 if independent_frequencies else -1])
         if persisted_sigma_chunk <= int(filter_group_size):
             filter_group_size = persisted_sigma_chunk
         zarr_chunks = persisted_chunks
-    print(f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, sigma group={filter_group_size}")
+    frequency_mode = "frequency list" if independent_frequencies else "sigma-coupled"
+    print(
+        f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, "
+        f"sigma group={filter_group_size}, frequency mode={frequency_mode}"
+    )
     print(
         f"Direct coarse RF power cache layout | chunks={zarr_chunks}; "
         f"compressor={compressor_description}"
@@ -2330,22 +2351,37 @@ def waveletPowerDecompositionConv(
     for group_number, group_start in enumerate(range(0, len(sigmas), filter_group_size), start=1):
         group_end = min(group_start + filter_group_size, len(sigmas))
         if kernel_cache is not None:
-            real_kernels = kernel_cache[0, group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
-            imag_kernels = kernel_cache[1, group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
+            real_kernels = kernel_cache[0, group_start:group_end].reshape(-1, *kernel_cache.shape[-2:])
+            imag_kernels = kernel_cache[1, group_start:group_end].reshape(-1, *kernel_cache.shape[-2:])
         else:
             real_phase = _phase_offset_from_index(0, phase_offsets)
             imag_phase = _phase_offset_from_index(1, phase_offsets)
-            real_kernels = [_gabor_kernel_for_conv(theta, sigma, real_phase, coupled_frequency=True)
-                            for sigma in sigmas[group_start:group_end] for theta in thetas]
-            imag_kernels = [_gabor_kernel_for_conv(theta, sigma, imag_phase, coupled_frequency=True)
-                            for sigma in sigmas[group_start:group_end] for theta in thetas]
+            real_kernels = [
+                _gabor_kernel_for_conv(
+                    theta, sigma, real_phase, frequency=frequency,
+                    coupled_frequency=not independent_frequencies,
+                )
+                for sigma in sigmas[group_start:group_end]
+                for frequency in kernel_frequencies for theta in thetas
+            ]
+            imag_kernels = [
+                _gabor_kernel_for_conv(
+                    theta, sigma, imag_phase, frequency=frequency,
+                    coupled_frequency=not independent_frequencies,
+                )
+                for sigma in sigmas[group_start:group_end]
+                for frequency in kernel_frequencies for theta in thetas
+            ]
 
         def fused_power_response(values, group_size=group_end - group_start):
             """Square/sum real and imaginary responses before crossing PCIe."""
             shaped = values.reshape(
-                values.shape[0], 2, group_size, int(n_orientations), values.shape[2], values.shape[3]
+                values.shape[0], 2, group_size, n_frequencies, int(n_orientations), values.shape[2], values.shape[3]
             )
-            return (shaped[:, 0].square() + shaped[:, 1].square()).permute(0, 4, 3, 2, 1).contiguous()
+            power_response = shaped[:, 0].square() + shaped[:, 1].square()
+            if independent_frequencies:
+                return power_response.permute(0, 5, 4, 3, 1, 2).contiguous()
+            return power_response[:, :, 0].permute(0, 4, 3, 2, 1).contiguous()
 
         group_records.append(
             ((group_number, group_start, group_end), list(real_kernels) + list(imag_kernels), fused_power_response)
@@ -2356,8 +2392,8 @@ def waveletPowerDecompositionConv(
         ConvolutionWorkload(
             frame_count=frame_chunk_size,
             spatial_pixels=int(nx) * int(ny),
-            filter_channels=2 * int(n_orientations) * largest_group,
-            output_channels=int(n_orientations) * largest_group,
+            filter_channels=2 * int(n_orientations) * largest_group * n_frequencies,
+            output_channels=int(n_orientations) * largest_group * n_frequencies,
             kernel_height=kernel_shape[0] if kernel_shape is not None else 1,
             kernel_width=kernel_shape[1] if kernel_shape is not None else 1,
             activation_dtype_bytes=2 if str(device).startswith("cuda") and amp_enabled() else 4,
@@ -2378,7 +2414,10 @@ def waveletPowerDecompositionConv(
     def store_power(start, end, group_start, group_end, payload):
         key = tile_key(start, end, group_start)
         def write_power(values, t0=start, t1=end, s0=group_start, s1=group_end):
-            power[t0:t1, :, :, :, s0:s1] = values
+            if independent_frequencies:
+                power[t0:t1, :, :, :, s0:s1, :] = values
+            else:
+                power[t0:t1, :, :, :, s0:s1] = values
         def mark_completed(tile_key_value=key, byte_count=payload.nbytes):
             progress.mark(tile_key_value)
             capacity_guard.record_completed_write(byte_count)
@@ -2433,7 +2472,7 @@ def waveletPowerDecompositionConv(
                     cancel_event=cancel_event,
                     telemetry=telemetry,
                     postprocess=fused_power_response,
-                    output_channels=int(n_orientations) * (group_end - group_start),
+                    output_channels=int(n_orientations) * (group_end - group_start) * n_frequencies,
                     execution_plan=coarse_execution_plan,
                 ), start=1):
                     store_power(start, end, group_start, group_end, power_response)

@@ -1425,6 +1425,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         fields = {
             "workflow": workflow,
             "wavelet_backend": _selected_wavelet_backend(),
+            "coarse_rf_frequency_mode": _selected_coarse_rf_frequency_mode(),
             "gabor_format": _safe_var_value("gabor_format_var", "npy"),
             "neural_cache_format": _selected_neural_cache_format(),
             "downsample_percent": _selected_downsample_percent(),
@@ -3204,7 +3205,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
             cache_frequencies = frequencies
         elif kind == "coarse":
-            cache_frequencies = []
+            cache_frequencies = (
+                frequencies if _selected_coarse_rf_frequency_mode() == "frequency_list" else []
+            )
         else:
             raise ValueError(f"Unknown convolution kernel cache kind: {kind}")
 
@@ -3232,6 +3235,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             return "legacy"
         return value if value in {"legacy", "convolution"} else "legacy"
+
+    def _selected_coarse_rf_frequency_mode():
+        """Return how coarse RF assigns spatial frequencies to its Gabor bank."""
+        try:
+            value = coarse_rf_frequency_mode_var.get()
+        except NameError:
+            return "coupled"
+        return "frequency_list" if value in {"frequency_list", "Use frequency list"} else "coupled"
 
     def _selected_wavelet_format():
         """Return the selected durable format for wavelet/RF cache products."""
@@ -3622,6 +3633,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             raise ValueError(f"Unknown wavelet product: {product}")
         scale = "full" if product == "full_model" else "coarse"
         backend = _selected_wavelet_backend()
+        coarse_frequency_mode = _selected_coarse_rf_frequency_mode()
         if scale not in {"coarse", "full"}:
             raise ValueError(f"Unknown wavelet decomposition scale: {scale}")
         if backend not in {"legacy", "convolution"}:
@@ -3644,6 +3656,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        if product == "coarse_rf" and coarse_frequency_mode == "frequency_list" and backend != "convolution":
+            raise ValueError(
+                "Coarse RF 'Use frequency list' requires the Convolution backend. "
+                "Select it in Advanced Session Config, then prepare the Coarse RF Power Cache."
+            )
         phase_offsets = _gabor_phase_offsets_radians()
         fine_library_sigmas = _ordered_float_union(
             sigmas,
@@ -3759,6 +3776,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             len(sigmas),
         )
         coarse_power_shape = coarse_phase_shape
+        if product == "coarse_rf" and coarse_frequency_mode == "frequency_list":
+            if not frequencies:
+                raise ValueError("Coarse RF frequency-list mode requires at least one value in Frequencies.")
+            coarse_power_shape += (len(frequencies),)
         # Coarse RF correlation's useful spatial tile size depends on the
         # population dimension as well as the filter bank.  Reading this small
         # cache header lets the wavelet writer choose a GPU-aware Zarr layout
@@ -3791,6 +3812,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "backend": backend,
                 "shape": coarse_power_shape,
                 "phase": coarse_phase_fingerprint,
+                "frequency_mode": coarse_frequency_mode,
+                "frequencies": frequencies if coarse_frequency_mode == "frequency_list" else [],
                 # Chunking and codec determine both direct-write throughput and
                 # the spatial read plan used by Coarse RF correlation.  A
                 # versioned fingerprint makes an older 16 x 16/zstd cache
@@ -3912,6 +3935,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         cancel_event=_current_cancel_event(),
                         progress_signature=coarse_power_fingerprint,
                         rf_neuron_count=rf_neuron_count,
+                        frequencies=frequencies if coarse_frequency_mode == "frequency_list" else None,
                     )
                     _raise_if_cancelled()
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
@@ -5986,6 +6010,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "workflow": workflow,
             "gui": {
                 "wavelet_backend": _selected_wavelet_backend(),
+                "coarse_rf_frequency_mode": _selected_coarse_rf_frequency_mode(),
                 "downsample_percent": _selected_downsample_percent(),
                 "gabor_format": gabor_format_var.get(),
                 "wavelet_format": wavelet_format_var.get(),
@@ -6041,6 +6066,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if loaded_backend in {"legacy", "convolution"}:
                 wavelet_backend_var.set(loaded_backend)
                 set_wavelet_backend_from_panel(loaded_backend)
+            loaded_coarse_frequency_mode = gui_state.get("coarse_rf_frequency_mode")
+            if loaded_coarse_frequency_mode in {"coupled", "frequency_list"}:
+                coarse_rf_frequency_mode_var.set(
+                    "Use frequency list" if loaded_coarse_frequency_mode == "frequency_list" else "Couple sigma/f"
+                )
             loaded_percent = gui_state.get("downsample_percent", state.get("downsample_percent"))
             if loaded_percent is not None:
                 downsample_percent_var.set(float(loaded_percent))
@@ -6306,14 +6336,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             full_nx, full_ny = _analysis_grid_dimensions(nx, ny, "full")
             bytes_per_float = np.dtype(np.float32).itemsize
             coarse_phase_bytes = n_frames * coarse_nx * coarse_ny * n_thetas * n_sigmas * bytes_per_float
-            coarse_rf_bytes = coarse_phase_bytes
+            coarse_frequency_count = n_frequencies if _selected_coarse_rf_frequency_mode() == "frequency_list" else 1
+            coarse_rf_bytes = coarse_phase_bytes * coarse_frequency_count
             coarse_model_bytes = 2 * coarse_phase_bytes
             full_model_raw_bytes = 2 * n_frames * full_nx * full_ny * n_thetas * n_sigmas_full * n_frequencies * bytes_per_float
             backend = "convolution" if _selected_wavelet_backend() == "convolution" else "legacy"
             wavelet_size_label.configure(
                 text=(
                     f"{backend.title()} internal Zarr products (uncompressed equivalents): "
-                    f"Coarse RF power {_format_bytes(coarse_rf_bytes)}; "
+                    f"Coarse RF power {_format_bytes(coarse_rf_bytes)} "
+                    f"({_selected_coarse_rf_frequency_mode().replace('_', ' ')}); "
                     f"Run Model real + imaginary {_format_bytes(coarse_model_bytes)}; "
                     f"Run Full Model real + imaginary {_format_bytes(full_model_raw_bytes)}. "
                     "Zarr compression is data-dependent."
@@ -6825,6 +6857,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     initial_backend = gui_options.get("wavelet_backend", "legacy")
     initial_neural_source = gui_options.get("neural_source", "data_dir")
     wavelet_backend_var = tk.StringVar(value=initial_backend if initial_backend in {"legacy", "convolution"} else "legacy")
+    initial_coarse_frequency_mode = gui_options.get("coarse_rf_frequency_mode", "coupled")
+    coarse_rf_frequency_mode_var = tk.StringVar(
+        value="Use frequency list" if initial_coarse_frequency_mode == "frequency_list" else "Couple sigma/f"
+    )
     initial_downsample_format = gui_options.get("downsample_format", "npy")
     downsample_format_var = tk.StringVar(value=initial_downsample_format if initial_downsample_format in {"npy", "zarr"} else "npy")
     downsample_percent_var = tk.DoubleVar(value=float(gui_options.get("downsample_percent", 20.0)))
@@ -7677,6 +7713,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
     force_2d_graphs_var = tk.BooleanVar(value=False)
+
+    def _on_coarse_rf_frequency_mode_changed(value):
+        """Require matching kernels and power data after the coarse RF mode changes."""
+        mode = "frequency_list" if value == "Use frequency list" else "coupled"
+        _invalidate_completed_actions("gabor", "wavelet", "rf")
+        refresh_size_estimates()
+        mode_description = "the configured Frequencies list" if mode == "frequency_list" else "sigma-coupled frequencies"
+        print(
+            "Coarse RF frequency mode changed to " + mode_description + ". "
+            "Rebuild the coarse Gabor kernels and Coarse RF power cache before analysis."
+        )
+
     coarse_rf_controls = ctk.CTkFrame(frame_analysis, fg_color="transparent")
     coarse_rf_controls.pack(fill=tk.X, pady=(0, 10))
     btn_submit_plot = ctk.CTkButton(
@@ -7689,6 +7737,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         command=run_in_thread(plot_data, "Coarse receptive-field analysis"),
     )
     btn_submit_plot.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    ctk.CTkSegmentedButton(
+        coarse_rf_controls,
+        values=["Couple sigma/f", "Use frequency list"],
+        variable=coarse_rf_frequency_mode_var,
+        command=_on_coarse_rf_frequency_mode_changed,
+        width=230,
+        height=30,
+        selected_color="#2563EB",
+        selected_hover_color="#1D4ED8",
+        unselected_color="#4B5563",
+        unselected_hover_color="#374151",
+        font=ctk.CTkFont(size=11),
+        text_color=text_color,
+        dynamic_resizing=False,
+    ).pack(side=tk.RIGHT, padx=(12, 0))
     ctk.CTkCheckBox(
         coarse_rf_controls,
         text="Force 3D graphs to 2D",
@@ -8001,6 +8064,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             n_orientations = int(gabor_entries["N_thetas"].get())
             n_sigmas = len(parse_literal(gabor_entries["Sigmas"].get(), "Sigmas"))
             coarse_shape = (frames, nx, ny, n_orientations, n_sigmas)
+            if _selected_coarse_rf_frequency_mode() == "frequency_list":
+                coarse_shape += (len(parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")),)
             wavelet_dir = _wavelet_folder("coarse")
             crop_params = _downsample_cache_crop_params(
                 parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage"),

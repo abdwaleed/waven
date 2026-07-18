@@ -2,6 +2,7 @@
   "workflow": "ephys",
   "gui": {
     "wavelet_backend": "convolution",
+    "coarse_rf_frequency_mode": "coupled",
     "neural_source": "data_dir",
     "downsample_percent": 11,
     "downsample_format": "zarr",
