@@ -3,10 +3,10 @@
   "gui": {
     "wavelet_backend": "convolution",
     "neural_source": "data_dir",
-    "downsample_percent": 10.7,
-    "downsample_format": "npy",
-    "neural_cache_format": "npy",
-    "gabor_format": "npy",
+    "downsample_percent": 11,
+    "downsample_format": "zarr",
+    "neural_cache_format": "zarr",
+    "gabor_format": "zarr",
     "wavelet_format": "zarr",
     "suite2p_subject_dirs": "",
     "performance": {
@@ -19,8 +19,8 @@
   },
   "gabor_param": {
     "N_thetas": "18",
-    "Sigmas": "[2, 4, 8, 12]",
-    "Frequencies": "[0.02, 0.06, 0.1]",
+    "Sigmas": "[2, 3, 4, 5, 6, 8, 10, 12, 14, 16]",
+    "Frequencies": "[0.02, 0.04, 0.06, 0.08, 0.1]",
     "Phases": "[0, 90]",
     "Coarse Library Path": "{PROJECT_ROOT}/your_experiment/cache/gabor/coarse",
     "Fine Library Path": "{PROJECT_ROOT}/your_experiment/cache/gabor/full"
@@ -33,8 +33,8 @@
     "Test Trial Indices": "auto",
     "Use Last Minute Holdout": "False",
     "Visual Coverage": "[-69, 69, 56, -56]",
-    "Analysis Coverage": "[-35, 35, 35, -35]",
-    "Sigmas Full Model": "[2, 4, 8, 12]",
+    "Analysis Coverage": "[-69, 69, 56, -56]",
+    "Sigmas Full Model": "[2, 3, 4, 5, 6, 8, 10, 12, 14, 16]",
     "Dir": "{PROJECT_ROOT}/your_experiment/input/raw_data",
     "Movie Path": "{PROJECT_ROOT}/your_experiment/input/stimulus_movie",
     "Spks Path": "{PROJECT_ROOT}/your_experiment/input/neural_cache",
