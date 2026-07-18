@@ -1067,6 +1067,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     figure_export_records = []
     active_recovery_dir = {"path": None}
 
+    def _clear_ram_acceleration_cache(reason):
+        """Release optional later-analysis RAM copies before their source changes."""
+        try:
+            from ..storage.array_store import clear_ram_acceleration_cache
+
+            released = clear_ram_acceleration_cache()
+            if released["entries"]:
+                gc.collect()
+                print(
+                    f"[RAM cache] Released {released['entries']} cached analysis array(s) "
+                    f"({released['bytes'] / 1024**3:.2f} GiB) before {reason}."
+                )
+        except Exception as exc:
+            # The option is an acceleration only.  Never let releasing an
+            # optional copy interrupt an ordinary disk-backed workflow.
+            print(f"[RAM cache] Could not release cached analysis arrays ({exc}).")
+
     def _field_value(entries, key, default=""):
         """Function for field value.
 
@@ -3092,6 +3109,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return "legacy"
         return value if value in {"legacy", "convolution"} else "legacy"
 
+    def _selected_wavelet_format():
+        """Return the selected durable format for wavelet/RF cache products."""
+        try:
+            value = wavelet_format_var.get()
+        except NameError:
+            return "zarr"
+        return value if value in {"npy", "zarr"} else "zarr"
+
     def _selected_neural_cache_format():
         """Return the selected aligned neural-cache output format."""
         try:
@@ -3415,6 +3440,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             update_progress(100, "Stimulus downsample", f"Existing {reusable_format.upper()} cache ready")
             return True
 
+        # The old stimulus may be retained for PSTH/STA.  It must not survive
+        # a rebuild at the same path, where it would otherwise become stale.
+        _clear_ram_acceleration_cache("rebuilding the stimulus cache")
+
         downsample_fingerprint = _cache_fingerprint(
             {
                 "artifact": "downsampled_video",
@@ -3694,6 +3723,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 print(f"Resume: found completed {product} wavelet product, reusing {requested_path}")
                 _write_recovery_step("coarse_product_reused", path=requested_path, shape=requested_shape)
             else:
+                _clear_ram_acceleration_cache("rebuilding coarse wavelet data")
                 update_progress(8, "Coarse wavelet decomposition", "Preparing coarse stimulus movie")
                 print("Step 1/4: Preparing coarse stimulus movie...")
                 if not os.path.exists(coarse_downsample_path):
@@ -3851,6 +3881,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return True
 
         if scale == "full":
+            _clear_ram_acceleration_cache("rebuilding full-model wavelet data")
             update_progress(5, "Full wavelet decomposition", "Preparing full-model outputs")
 
         full_output_target = _wavelet_folder("full")
@@ -4364,7 +4395,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         try:
             # Coarse RF owns only its magnitude/power product.  It stays
             # disk-backed and correlation reads bounded feature blocks.
-            from ..storage.array_store import load_array
+            from ..storage.array_store import load_array, load_array_with_ram_acceleration
             power_path = os.path.join(parent_dir, "coarse_rf_power.zarr")
             w_c_downsampled = load_array(power_path, mmap_mode="r")
             if not _artifact_has_params(
@@ -4388,7 +4419,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
             if downsample_path is None:
                 raise FileNotFoundError("No compatible prepared coarse stimulus cache was found.")
-            psth_sta_movie = load_array(downsample_path, mmap_mode="r")
+            # Unlike the multi-hundred-GB RF-power tensor above, the
+            # downsampled binary movie is repeatedly reused by PSTH/STA and is
+            # an appropriate candidate for the optional later-analysis cache.
+            psth_sta_movie = load_array_with_ram_acceleration(
+                downsample_path,
+                mmap_mode="r",
+                cache_label="Coarse RF PSTH/STA stimulus",
+            )
         except Exception as exc:
             print(f"Coarse RF PSTH STA stimulus loading failed: {exc}")
             return False
@@ -4405,14 +4443,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         rf_feature_count = int(coarse_nx) * int(coarse_ny) * int(n_orientations) * int(ns) * int(rf_nf)
         rf_result_bytes = int(spks.shape[2]) * rf_feature_count * np.dtype(np.float32).itemsize
         # Large RF banks are still needed by the individual-neuron plots, but
-        # they do not need to occupy resident RAM.  The correlation primitive
-        # writes a normal NPY memmap that retains fast slice reads for the GUI.
+        # they do not need to occupy resident RAM.  Honor the user's durable
+        # cache selection rather than unconditionally creating an NPY file.
         rf_output_path = None
         if rf_result_bytes > 512 * 1024**2:
-            rf_output_path = os.path.join(parent_dir, "coarse_rf_correlations.npy")
+            rf_storage_format = _selected_wavelet_format()
+            rf_output_path = os.path.join(
+                parent_dir,
+                f"coarse_rf_correlations.{rf_storage_format}",
+            )
             print(
-                "Large Coarse RF correlation tensor will stay disk-backed: "
-                f"{rf_result_bytes / 1024**3:.2f} GiB."
+                "Large Coarse RF correlation tensor will stay disk-backed "
+                f"as {rf_storage_format.upper()}: {rf_result_bytes / 1024**3:.2f} GiB."
             )
 
         # Pass the disk-backed wavelet tensor directly.  PearsonCorrelationPinkNoise
@@ -5505,9 +5547,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
             return
         wavelet_dir = state["wavelet_dir"]
-        from ..storage.array_store import load_array
-        w_r = load_array(os.path.join(wavelet_dir, "coarse_model_real.zarr"), mmap_mode="r")
-        w_i = load_array(os.path.join(wavelet_dir, "coarse_model_imag.zarr"), mmap_mode="r")
+        from ..storage.array_store import load_array_with_ram_acceleration
+        w_r = load_array_with_ram_acceleration(
+            os.path.join(wavelet_dir, "coarse_model_real.zarr"),
+            mmap_mode="r",
+            cache_label="Run Model real phase",
+        )
+        w_i = load_array_with_ram_acceleration(
+            os.path.join(wavelet_dir, "coarse_model_imag.zarr"),
+            mmap_mode="r",
+            cache_label="Run Model imaginary phase",
+        )
         expected_coarse_features = (
             int(state["coarse_nx"]),
             int(state["coarse_ny"]),
@@ -6646,6 +6696,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "Overlaps one bounded movie/Zarr read with the current compute chunk.",
         ),
         (
+            "ram_acceleration_cache", "WAVEN_RAM_ACCELERATION_CACHE", False,
+            "RAM acceleration cache (later analysis)",
+            "Keeps only safely sized, reused model-phase and PSTH/STA inputs in RAM. "
+            "Preparation remains disk-backed; oversized arrays automatically stay on disk.",
+        ),
+        (
             "async_writer", "WAVEN_ASYNC_WRITER", True, "Asynchronous cache writing",
             "Uses one bounded writer so completed wavelet chunks can be saved while the next chunk computes.",
         ),
@@ -6659,7 +6715,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ),
         (
             "rf_gpu", "WAVEN_RF_GPU", True, "GPU Coarse RF statistics",
-            "Uses GPU feature-response cross-products when the current tile fits; automatically falls back to CPU.",
+            "Uses GPU feature-response cross-products and subdivides oversized tiles to retain GPU work; CPU is only the safe fallback.",
         ),
         (
             "multi_gpu", "WAVEN_MULTI_GPU", False, "Use compatible GPUs",
@@ -6724,6 +6780,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Apply GUI performance choices to this process before the next action starts."""
         for runtime_key, environment_key, _default, _label, _description in runtime_control_specs:
             os.environ[environment_key] = "1" if runtime_control_vars[runtime_key].get() else "0"
+        if not runtime_control_vars["ram_acceleration_cache"].get():
+            _clear_ram_acceleration_cache("disabling RAM acceleration")
         try:
             runtime_hardware_label.configure(text=_runtime_hardware_text())
         except NameError:
@@ -6889,6 +6947,32 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             wraplength=285,
             justify="left",
         ).pack(anchor="w", padx=(34, 0), pady=(0, 2))
+    def _release_ram_cache_from_panel():
+        """Release retained later-analysis arrays without changing the switch."""
+        try:
+            from ..storage.array_store import clear_ram_acceleration_cache
+
+            released = clear_ram_acceleration_cache()
+            gc.collect()
+            if released["entries"]:
+                print(
+                    f"[RAM cache] Released {released['entries']} cached analysis array(s) "
+                    f"({released['bytes'] / 1024**3:.2f} GiB) on request."
+                )
+            else:
+                print("[RAM cache] No cached analysis arrays are currently retained.")
+        except Exception as exc:
+            print(f"[RAM cache] Could not release cached analysis arrays ({exc}).")
+
+    ctk.CTkButton(
+        runtime_frame,
+        text="Release RAM acceleration cache",
+        command=_release_ram_cache_from_panel,
+        height=26,
+        fg_color="#E2E8F0",
+        hover_color="#CBD5E1",
+        text_color="#334155",
+    ).pack(fill=tk.X, padx=10, pady=(4, 2))
     runtime_hardware_label = ctk.CTkLabel(
         runtime_frame,
         text="",
@@ -7084,7 +7168,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             val: Input value for this operation.
         """
         wavelet_format_var.set(val)
-        completed_actions.discard("wavelet:full")
+        # The durable correlation result created by Coarse RF follows this
+        # choice too, so a prior RF run cannot be treated as current.
+        _invalidate_completed_actions("rf")
         try:
             refresh_size_estimates()
         except NameError:

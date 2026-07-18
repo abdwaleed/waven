@@ -9,6 +9,7 @@ from .nonlinear_models import *
 from .trial_stats import *
 from .rf_correlation import streaming_cross_correlation
 from ..runtime.performance import cpu_inner_thread_count
+from ..storage.array_store import load_array_with_ram_acceleration
 from joblib import parallel_config
 
 SECONDS_PER_MINUTE = 60
@@ -495,15 +496,17 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     interpolators = []
 
     if memmapping:
-        print(f"[INFO] Run Full Model: loading disk-backed full wavelets from {wavelet_path}")
+        print(f"[INFO] Run Full Model: loading full wavelets from {wavelet_path}")
         try:
-            wavelets_i = load_array(
+            wavelets_i = load_array_with_ram_acceleration(
                 os.path.join(wavelet_path, 'dwt_videodata2_i.zarr'),
                 mmap_mode='r',
+                cache_label="Run Full Model imaginary phase",
             )
-            wavelets_r = load_array(
+            wavelets_r = load_array_with_ram_acceleration(
                 os.path.join(wavelet_path, 'dwt_videodata2_r.zarr'),
                 mmap_mode='r',
+                cache_label="Run Full Model real phase",
             )
         except Exception:
             print("[INFO] Run Full Model: Zarr phase cache unavailable; using NPY memory maps.")

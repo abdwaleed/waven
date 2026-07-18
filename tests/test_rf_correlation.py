@@ -3,8 +3,27 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from waven.analysis.rf_correlation import streaming_cross_correlation
+from waven.analysis.rf_correlation import (
+    _gpu_cross_feature_batch_size,
+    streaming_cross_correlation,
+)
+
+
+def test_gpu_rf_subtile_planner_downshifts_an_oversized_tile():
+    """An oversized RF tile should retain GPU work as bounded feature subtiles."""
+    batch = _gpu_cross_feature_batch_size(
+        tile_features=1_000_000,
+        n_neurons=230,
+        time_chunk=1_024,
+        free_vram_bytes=4 * 1024**3,
+    )
+
+    assert 0 < batch < 1_000_000
+    # The planner's accounting must include the time-by-feature transfer as
+    # well as the float64 cross-product/workspace reserve.
+    assert batch * 8 * (230 * 3 + 1_024) <= int(4 * 1024**3 * 0.28)
 
 
 def test_structured_correlation_matches_reference_with_large_power_baseline(monkeypatch):
@@ -57,3 +76,32 @@ def test_structured_correlation_can_write_a_disk_backed_result(tmp_path, monkeyp
     assert output_path.exists()
     assert isinstance(actual, np.memmap)
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=0.0)
+
+
+def test_structured_correlation_can_write_selected_zarr_layout(tmp_path, monkeypatch):
+    """Zarr RF output remains disk-backed in its x/y/feature layout."""
+    pytest.importorskip("zarr")
+    pytest.importorskip("numcodecs")
+    monkeypatch.setenv("WAVEN_RF_GPU", "0")
+    generator = np.random.default_rng(47)
+    stimulus = generator.normal(size=(64, 2, 3, 2, 1)).astype(np.float32)
+    response = generator.normal(size=(64, 3)).astype(np.float32)
+    output_path = tmp_path / "coarse_rf_correlations.zarr"
+
+    expected = streaming_cross_correlation(stimulus, response)
+    actual = streaming_cross_correlation(
+        stimulus,
+        response,
+        output_path=output_path,
+        structured_output=True,
+        output_feature_shape=(2, 3, 2, 1, 1),
+    )
+
+    assert output_path.is_dir()
+    assert tuple(actual.shape) == (3, 2, 3, 2, 1, 1)
+    np.testing.assert_allclose(
+        np.asarray(actual).reshape(expected.shape),
+        expected,
+        rtol=0.0,
+        atol=0.0,
+    )

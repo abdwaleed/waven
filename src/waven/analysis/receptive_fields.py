@@ -179,8 +179,8 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
         absolute: Select preferred features by absolute correlation after output.
         plotting: Enable legacy Matplotlib diagnostic figures.
         n_time: Optional shared frame limit; avoids loading beyond aligned data.
-        rf_output_path: Optional NPY path for disk-backed correlation output.
-            Large parameter banks remain sliceable for plotting without
+        rf_output_path: Optional NPY or Zarr path for disk-backed correlation
+            output. The selected format remains sliceable for plotting without
             allocating the complete neuron-by-feature tensor in RAM.
 
     Returns:
@@ -191,32 +191,45 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
     # Keep Zarr/memmap inputs structured.  Flattening a disk-backed wavelet
     # tensor forces a full in-memory allocation before correlation starts.
     rfs = _safe_chunked_cross_corr(
-        stim, resp, n_time=n_time, output_path=rf_output_path
+        stim,
+        resp,
+        n_time=n_time,
+        output_path=rf_output_path,
+        # A Zarr RF result must be created in its final feature layout.  Zarr
+        # has no inexpensive reshape view, whereas NPY memmaps retain their
+        # established flattened write layout and are reshaped below.
+        structured_output=True,
+        output_feature_shape=(nx, ny, n_orientations, ns, nf),
     )
-    n_features = int(np.prod(stim.shape[1:], dtype=np.int64))
+    expected_shape = (rfs.shape[0], nx, ny, n_orientations, ns, nf)
+    is_structured_output = tuple(rfs.shape) == tuple(expected_shape)
 
-    if absolute:
-        # Keep large RF results disk-backed. ``np.abs(rfs)`` would materialize
-        # a second complete array for a memmap; the in-place form preserves the
-        # output file and its memory bound.
-        np.abs(rfs, out=rfs)
+    # Process one neuron at a time. This preserves the disk-bound contract for
+    # both NPY memmaps and Zarr arrays: NumPy ufuncs/iteration on a Zarr object
+    # could otherwise materialize or modify a detached full result array.
+    flat_max_idx = np.empty(rfs.shape[0], dtype=np.int64)
+    maxes = np.empty(rfs.shape[0], dtype=np.float32)
+    output_chunks = getattr(rfs, "chunks", None)
+    neuron_block = int(output_chunks[0]) if output_chunks else 1
+    for start in range(0, rfs.shape[0], max(1, neuron_block)):
+        stop = min(rfs.shape[0], start + max(1, neuron_block))
+        rows = np.asarray(rfs[start:stop])
+        if absolute:
+            np.abs(rows, out=rows)
+        rows[rows >= 0.99] -= 1.0
+        np.nan_to_num(rows, copy=False)
+        # Assign explicitly so a Zarr slice is durably updated; for NPY/RAM it
+        # remains an inexpensive in-place-compatible write.
+        rfs[start:stop] = rows
+        for local_neuron, row in enumerate(rows):
+            flat_row = row.reshape(-1)
+            local_idx = int(np.argmax(np.abs(flat_row)))
+            neuron_idx = start + local_neuron
+            flat_max_idx[neuron_idx] = local_idx
+            maxes[neuron_idx] = abs(flat_row[local_idx])
 
-    for row in rfs:
-        row[row >= 0.99] -= 1.0
-    np.nan_to_num(rfs, copy=False)
-
-    # 1. Update reshape for the 6th dimension (nf)
-    rfs = rfs.reshape(rfs.shape[0], nx, ny, n_orientations, ns, nf)
-
-    # Avoid a second full-size absolute-value tensor: RF arrays can already be
-    # around a gigabyte at practical grid sizes.
-    flat_rfs = rfs.reshape(rfs.shape[0], -1)
-    flat_max_idx = np.empty(flat_rfs.shape[0], dtype=np.int64)
-    maxes = np.empty(flat_rfs.shape[0], dtype=np.float32)
-    for neuron_idx, row in enumerate(flat_rfs):
-        local_idx = int(np.argmax(np.abs(row)))
-        flat_max_idx[neuron_idx] = local_idx
-        maxes[neuron_idx] = abs(row[local_idx])
+    if not is_structured_output:
+        rfs = rfs.reshape(expected_shape)
     
     # 2. Unpack 5 dimensions
     xmax, ymax, omax, smax, fmax = np.unravel_index(flat_max_idx, (nx, ny, n_orientations, ns, nf))
