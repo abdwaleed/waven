@@ -7,10 +7,12 @@ call repeatedly (results are cached where profiling would be expensive).
 """
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
 from contextlib import nullcontext
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, Iterable, Literal, Optional, Tuple
 
@@ -24,6 +26,62 @@ except ImportError:  # pragma: no cover - optional protection for legacy install
 
 ComputeDevice = Literal["cuda", "cpu"]
 _reported_multi_gpu_decisions: set[Tuple[int, ...]] = set()
+
+
+@dataclass(frozen=True)
+class ConvolutionWorkload:
+    """Live memory requirements for one convolution frame batch.
+
+    ``filter_channels`` is the actual convolution-bank width, while
+    ``output_channels`` describes the postprocessed result.  Keeping both is
+    essential for fused real/imaginary Gabor power, where the convolution bank
+    is twice as wide as the final orientation result.
+    """
+
+    frame_count: int
+    spatial_pixels: int
+    filter_channels: int
+    output_channels: int
+    kernel_height: int = 1
+    kernel_width: int = 1
+    activation_dtype_bytes: int = 4
+    output_buffer_count: int = 2
+
+    def working_set_bytes(self, frames: Optional[int] = None) -> int:
+        """Conservative device-resident bytes for ``frames`` of this workload."""
+        frames = max(1, int(self.frame_count if frames is None else frames))
+        pixels = max(1, int(self.spatial_pixels))
+        filters = max(1, int(self.filter_channels))
+        outputs = max(1, int(self.output_channels))
+        output_buffers = max(1, int(self.output_buffer_count))
+        dtype_bytes = max(1, int(self.activation_dtype_bytes))
+        # Input is float32. The kernel copy/workspace reserve reflects the
+        # module and cuDNN bookkeeping; activations include response, fused
+        # output, and transfer staging.
+        kernel_bytes = filters * max(1, int(self.kernel_height)) * max(1, int(self.kernel_width)) * 4 * 2
+        activation_bytes = frames * pixels * (4 + dtype_bytes * (filters + outputs * output_buffers))
+        return int(kernel_bytes + activation_bytes)
+
+    def output_bytes(self, frames: Optional[int] = None) -> int:
+        """Bytes of the postprocessed host-transfer result for ``frames``."""
+        frames = max(1, int(self.frame_count if frames is None else frames))
+        return int(
+            frames
+            * max(1, int(self.spatial_pixels))
+            * max(1, int(self.output_channels))
+            * max(1, int(self.activation_dtype_bytes))
+        )
+
+
+@dataclass(frozen=True)
+class ConvolutionExecutionPlan:
+    """Chosen execution mode for a concrete Gabor convolution workload."""
+
+    strategy: Literal["single", "frame_parallel"]
+    devices: Tuple[str, ...]
+    frames_per_device: int
+    estimated_device_bytes: int
+    reason: str
 
 
 class OperationTelemetry:
@@ -118,6 +176,7 @@ def _gpu_descriptor(device_id: int) -> Dict[str, object]:
         "name": str(properties.name),
         "capability": (int(properties.major), int(properties.minor)),
         "vram_bytes": int(properties.total_memory),
+        "free_vram_bytes": int(gpu_available_vram_bytes(int(device_id))),
         # SM count and core clock are a stable, inexpensive proxy for relative
         # convolution throughput.  Exact core counts vary by architecture, so
         # they intentionally are not inferred from marketing names.
@@ -140,10 +199,22 @@ def select_compatible_multi_gpu_ids(
     available = sorted((dict(item) for item in descriptors), key=lambda item: int(item["id"]))
     if not available:
         return (), ()
-    primary = available[0]
+    # Prefer the card with the greatest currently useful capacity.  This is
+    # still deterministic when descriptors omit live-free-memory information,
+    # which keeps the helper convenient for tests and non-CUDA callers.
+    primary = max(
+        available,
+        key=lambda item: (
+            int(item.get("free_vram_bytes", item["vram_bytes"])) * float(item["throughput_score"]),
+            int(item["vram_bytes"]),
+            -int(item["id"]),
+        ),
+    )
     accepted = [int(primary["id"])]
     rejected = []
-    for candidate in available[1:]:
+    for candidate in available:
+        if int(candidate["id"]) == int(primary["id"]):
+            continue
         device_id = int(candidate["id"])
         reasons = []
         if tuple(candidate["capability"]) != tuple(primary["capability"]):
@@ -167,6 +238,85 @@ def select_compatible_multi_gpu_ids(
     return tuple(accepted), tuple(rejected)
 
 
+def plan_convolution_execution(
+    workload: ConvolutionWorkload,
+    allow_multi_gpu: bool = False,
+    descriptors: Optional[Iterable[Dict[str, object]]] = None,
+    minimum_frames_per_device: int = 8,
+) -> ConvolutionExecutionPlan:
+    """Choose single-GPU or gather-free frame sharding for a Gabor workload.
+
+    PyTorch ``DataParallel`` gathers the full convolution response back onto a
+    primary GPU.  That is counterproductive for a high-orientation filter bank:
+    its largest tensor is recreated on the very card that was already under
+    pressure.  The ``frame_parallel`` plan instead runs disjoint frame slices
+    on compatible GPUs and transfers each completed slice directly to host.
+
+    The choice combines current free VRAM, hardware compatibility, actual
+    batch/filter/output dimensions, and a minimum useful slice size so small
+    jobs avoid multi-GPU scatter/gather overhead.
+    """
+    total_frames = max(1, int(workload.frame_count))
+    single_bytes = workload.working_set_bytes(total_frames)
+    if descriptors is None:
+        if not torch.cuda.is_available():
+            return ConvolutionExecutionPlan("single", ("cpu",), total_frames, single_bytes, "CUDA unavailable")
+        descriptors = tuple(
+            _gpu_descriptor(index)
+            for index in range(torch.cuda.device_count())
+            if gpu_available_vram_bytes(index) > 0
+        )
+    else:
+        descriptors = tuple(dict(item) for item in descriptors)
+
+    if not descriptors:
+        return ConvolutionExecutionPlan("single", ("cpu",), total_frames, single_bytes, "no CUDA device has free VRAM")
+
+    compatible_ids, _rejected = select_compatible_multi_gpu_ids(descriptors)
+    descriptor_by_id = {int(item["id"]): item for item in descriptors}
+    primary_id = int(compatible_ids[0]) if compatible_ids else int(descriptors[0]["id"])
+    primary_name = f"cuda:{primary_id}"
+    if not allow_multi_gpu or len(compatible_ids) < 2:
+        reason = "multi-GPU disabled" if not allow_multi_gpu else "no compatible peer GPU"
+        return ConvolutionExecutionPlan("single", (primary_name,), total_frames, single_bytes, reason)
+
+    frames_per_device = math.ceil(total_frames / len(compatible_ids))
+    estimated_device_bytes = workload.working_set_bytes(frames_per_device)
+    if frames_per_device < max(1, int(minimum_frames_per_device)):
+        return ConvolutionExecutionPlan(
+            "single", (primary_name,), total_frames, single_bytes,
+            f"only {frames_per_device} frames per GPU would not amortize sharding",
+        )
+
+    viable_ids = []
+    for device_id in compatible_ids:
+        descriptor = descriptor_by_id[int(device_id)]
+        free_bytes = int(descriptor.get("free_vram_bytes", descriptor["vram_bytes"]))
+        # Retain 35% of currently free VRAM for cuDNN growth, the display
+        # driver, and asynchronous transfer buffers.
+        if estimated_device_bytes <= int(free_bytes * 0.65):
+            viable_ids.append(int(device_id))
+    if len(viable_ids) < 2:
+        return ConvolutionExecutionPlan(
+            "single", (primary_name,), total_frames, single_bytes,
+            "a compatible peer lacks free VRAM for its planned frame slice",
+        )
+
+    output_bytes = workload.output_bytes(total_frames)
+    intense = single_bytes >= 128 * 1024**2 or output_bytes >= 64 * 1024**2
+    if not intense:
+        return ConvolutionExecutionPlan(
+            "single", (primary_name,), total_frames, single_bytes,
+            "single-GPU execution is faster for this small convolution workload",
+        )
+    devices = tuple(f"cuda:{device_id}" for device_id in viable_ids)
+    frames_per_device = math.ceil(total_frames / len(devices))
+    return ConvolutionExecutionPlan(
+        "frame_parallel", devices, frames_per_device, workload.working_set_bytes(frames_per_device),
+        "compatible GPUs have VRAM for gather-free frame sharding",
+    )
+
+
 def compute_devices(allow_multi_gpu: bool = False):
     """Return safe compute devices, rejecting imbalanced DataParallel groups."""
     if not torch.cuda.is_available():
@@ -185,8 +335,9 @@ def compute_devices(allow_multi_gpu: bool = False):
                 detail = " | ".join(rejected) or "no compatible peer GPU was available"
                 print(
                     "Multi-GPU requested, but synchronous DataParallel would be bottlenecked; "
-                    f"using cuda:0 only. {detail}"
+                    f"using cuda:{accepted_ids[0]} only. {detail}"
                 )
+            return [f"cuda:{accepted_ids[0]}"]
     return ["cuda:0"]
 
 

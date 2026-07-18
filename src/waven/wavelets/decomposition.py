@@ -33,6 +33,7 @@ from skimage.filters import gabor_kernel
 from tqdm import tqdm
 
 from ..runtime.performance import (
+    ConvolutionWorkload,
     OperationTelemetry,
     amp_enabled,
     available_ram_bytes,
@@ -40,11 +41,11 @@ from ..runtime.performance import (
     configure_torch_cpu_threads,
     convolution_precision_scope,
     autotuned_frame_chunk_size,
-    compute_devices,
     cpu_worker_count,
     enabled_feature,
     gpu_available_vram_bytes,
     gpu_vram_bytes,
+    plan_convolution_execution,
     resolve_compute_device,
     torch_compile_enabled,
     video_downsample_chunk_size,
@@ -65,16 +66,29 @@ def _is_cuda_oom(exc):
     return str(exc).lower().find("out of memory") >= 0
 
 
-def _release_cuda_working_set():
-    """Release failed-workspace allocations before a smaller retry."""
+def _release_cuda_working_set(devices=None):
+    """Release failed-workspace allocations before a smaller retry.
+
+    Workload-aware frame sharding can have tensors on more than one CUDA
+    device.  Empty every participating cache rather than only the default GPU,
+    otherwise a retry can fail on a peer that still retains its failed batch.
+    """
     if not torch.cuda.is_available():
         return
-    try:
-        torch.cuda.synchronize()
-    except Exception:
-        pass
     gc.collect()
-    torch.cuda.empty_cache()
+    if devices is None:
+        devices = tuple(range(torch.cuda.device_count()))
+    elif isinstance(devices, (str, int)):
+        devices = (devices,)
+    for device in devices:
+        try:
+            with torch.cuda.device(device):
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+        except Exception:
+            # A device can disappear during teardown on some desktop CUDA
+            # stacks; cache cleanup should never mask the original failure.
+            pass
 
 
 def _resource_aware_frame_chunk_size(
@@ -787,29 +801,76 @@ def _maybe_compile_convolution(runner):
 
 @torch.no_grad()
 def _conv2d_wavelet_bank(
-    videodata, kernels, device, frame_chunk_size, cancel_event=None, telemetry=None, postprocess=None,
+    videodata,
+    kernels,
+    device,
+    frame_chunk_size,
+    cancel_event=None,
+    telemetry=None,
+    postprocess=None,
+    output_channels=None,
+    execution_plan=None,
 ):
     """Yield ``conv2d`` responses as ``(start, end, chunk, x, y, theta)`` chunks."""
     kernel_array = _center_pad_kernels(kernels)
     pad_y = int(kernel_array.shape[1] // 2)
     pad_x = int(kernel_array.shape[2] // 2)
-    kernel_tensor = torch.as_tensor(kernel_array[:, None, :, :], dtype=torch.float32, device=device)
-    runner = _maybe_compile_convolution(_ConvolutionRunner(kernel_tensor, (pad_y, pad_x)))
-    multi_gpu_model = None
-    if str(device).startswith("cuda"):
-        devices = compute_devices(allow_multi_gpu=True)
-        if len(devices) > 1:
-            try:
-                device_ids = [int(name.split(":", 1)[1]) for name in devices]
-
-                multi_gpu_model = torch.nn.DataParallel(
-                    runner, device_ids=device_ids, output_device=device_ids[0]
-                )
-                print(f"Convolution using {len(device_ids)} GPUs: {devices}")
-            except Exception as exc:
-                print(f"Multi-GPU convolution setup failed; using one GPU: {exc}")
-                multi_gpu_model = None
     num_frames = int(videodata.shape[0])
+    output_channels = int(output_channels or len(kernels))
+    if execution_plan is None:
+        workload = ConvolutionWorkload(
+            frame_count=min(num_frames, max(1, int(frame_chunk_size))),
+            spatial_pixels=int(videodata.shape[1]) * int(videodata.shape[2]),
+            filter_channels=len(kernels),
+            output_channels=output_channels,
+            kernel_height=kernel_array.shape[1],
+            kernel_width=kernel_array.shape[2],
+            activation_dtype_bytes=2 if str(device).startswith("cuda") and amp_enabled() else 4,
+            output_buffer_count=2,
+        )
+        execution_plan = plan_convolution_execution(
+            workload,
+            allow_multi_gpu=(
+                str(device).startswith("cuda") and enabled_feature("MULTI_GPU", default=False)
+            ),
+        )
+    use_frame_parallel = (
+        str(device).startswith("cuda")
+        and execution_plan.strategy == "frame_parallel"
+        and len(execution_plan.devices) > 1
+    )
+    active_device = (
+        execution_plan.devices[0]
+        if (
+            str(device).startswith("cuda")
+            and execution_plan.devices
+            and str(execution_plan.devices[0]).startswith("cuda")
+        )
+        else device
+    )
+
+    def build_runner(target_device):
+        kernel_tensor = torch.as_tensor(
+            kernel_array[:, None, :, :], dtype=torch.float32, device=target_device,
+        )
+        runner = _maybe_compile_convolution(
+            _ConvolutionRunner(kernel_tensor, (pad_y, pad_x))
+        )
+        return kernel_tensor, runner
+
+    if use_frame_parallel:
+        frame_parallel_runners = [
+            (target_device, *build_runner(target_device))
+            for target_device in execution_plan.devices
+        ]
+        print(
+            "Convolution using workload-aware gather-free frame sharding across "
+            f"{len(frame_parallel_runners)} GPUs: {execution_plan.devices}; "
+            f"about {execution_plan.frames_per_device} frames/GPU."
+        )
+    else:
+        kernel_tensor, runner = build_runner(active_device)
+        frame_parallel_runners = ()
 
     def read_frames(start, end):
         read_start = time.perf_counter()
@@ -825,23 +886,54 @@ def _conv2d_wavelet_bank(
     max_frame_chunk = max(1, int(frame_chunk_size))
     active_frame_chunk = max_frame_chunk
     prefetch = enabled_feature("PREFETCH", default=True) and num_frames > active_frame_chunk
-    executor = ThreadPoolExecutor(max_workers=1) if prefetch else None
+    reader_executor = ThreadPoolExecutor(max_workers=1) if prefetch else None
+    gpu_executor = (
+        ThreadPoolExecutor(max_workers=len(frame_parallel_runners))
+        if frame_parallel_runners
+        else None
+    )
     future = None
     future_end = None
 
-    def convolve_frames(frame_values):
+    def convolve_frames_on_device(frame_values, target_device, target_runner):
         """Run one resident frame block and return host output plus elapsed time."""
         frame_tensor = response = output_tensor = None
         compute_start = time.perf_counter()
         try:
-            frame_tensor = torch.as_tensor(frame_values[:, None, :, :], dtype=torch.float32, device=device)
-            with convolution_precision_scope(device):
-                response = multi_gpu_model(frame_tensor) if multi_gpu_model is not None else runner(frame_tensor)
-                output_tensor = response.permute(0, 3, 2, 1) if postprocess is None else postprocess(response)
+            # ``torch.no_grad`` is thread-local. Frame-parallel workers need
+            # their own scope rather than relying on the decorator on the
+            # caller thread.
+            with torch.no_grad():
+                frame_tensor = torch.as_tensor(
+                    frame_values[:, None, :, :], dtype=torch.float32, device=target_device,
+                )
+                with convolution_precision_scope(target_device):
+                    response = target_runner(frame_tensor)
+                    output_tensor = response.permute(0, 3, 2, 1) if postprocess is None else postprocess(response)
             output = output_tensor.cpu().numpy()
             return output, time.perf_counter() - compute_start
         finally:
             del frame_tensor, response, output_tensor
+
+    def convolve_frames(frame_values):
+        """Run one planned batch, optionally sharded without GPU result gather."""
+        if not frame_parallel_runners:
+            return convolve_frames_on_device(frame_values, active_device, runner)
+        frame_slices = [
+            block for block in np.array_split(frame_values, len(frame_parallel_runners), axis=0)
+            if len(block)
+        ]
+        futures = [
+            gpu_executor.submit(convolve_frames_on_device, block, target_device, target_runner)
+            for block, (target_device, _kernel_tensor, target_runner) in zip(
+                frame_slices, frame_parallel_runners,
+            )
+        ]
+        outputs_and_seconds = [future.result() for future in futures]
+        return (
+            np.concatenate([output for output, _seconds in outputs_and_seconds], axis=0),
+            max(seconds for _output, seconds in outputs_and_seconds),
+        )
 
     def convolve_with_backoff(frame_values, absolute_start):
         """Yield successful subchunks, repeatedly shrinking after CUDA OOM.
@@ -887,10 +979,10 @@ def _conv2d_wavelet_bank(
         start = 0
         while start < num_frames:
             check_cancelled(cancel_event)
-            if executor is not None:
+            if reader_executor is not None:
                 if future is None:
                     future_end = min(start + active_frame_chunk, num_frames)
-                    future = executor.submit(read_frames, start, future_end)
+                    future = reader_executor.submit(read_frames, start, future_end)
                 frames, read_seconds = future.result()
                 end = int(future_end)
                 if end < num_frames:
@@ -898,7 +990,7 @@ def _conv2d_wavelet_bank(
                     # timing-based adjustment below applies to the following
                     # chunk, so decoding still overlaps current GPU work.
                     future_end = min(end + active_frame_chunk, num_frames)
-                    future = executor.submit(read_frames, end, future_end)
+                    future = reader_executor.submit(read_frames, end, future_end)
                 else:
                     future = None
                     future_end = None
@@ -913,11 +1005,16 @@ def _conv2d_wavelet_bank(
                 yield output_start, output_end, output
             start = end
     finally:
-        if executor is not None:
-            executor.shutdown(wait=True)
-        del multi_gpu_model, runner, kernel_tensor
+        if reader_executor is not None:
+            reader_executor.shutdown(wait=True)
+        if gpu_executor is not None:
+            gpu_executor.shutdown(wait=True)
+        if frame_parallel_runners:
+            del frame_parallel_runners
+        else:
+            del runner, kernel_tensor
         if str(device).startswith("cuda"):
-            _release_cuda_working_set()
+            _release_cuda_working_set(execution_plan.devices)
 
 
 @torch.no_grad()
@@ -2194,6 +2291,27 @@ def waveletPowerDecompositionConv(
             ((group_number, group_start, group_end), list(real_kernels) + list(imag_kernels), fused_power_response)
         )
 
+    largest_group = max(1, max(metadata[2] - metadata[1] for metadata, _kernels, _postprocess in group_records))
+    coarse_execution_plan = plan_convolution_execution(
+        ConvolutionWorkload(
+            frame_count=frame_chunk_size,
+            spatial_pixels=int(nx) * int(ny),
+            filter_channels=2 * int(n_orientations) * largest_group,
+            output_channels=int(n_orientations) * largest_group,
+            kernel_height=kernel_shape[0] if kernel_shape is not None else 1,
+            kernel_width=kernel_shape[1] if kernel_shape is not None else 1,
+            activation_dtype_bytes=2 if str(device).startswith("cuda") and amp_enabled() else 4,
+            output_buffer_count=2,
+        ),
+        allow_multi_gpu=(
+            str(device).startswith("cuda") and enabled_feature("MULTI_GPU", default=False)
+        ),
+    )
+    print(
+        "Direct coarse RF execution policy | "
+        f"{coarse_execution_plan.strategy}; {coarse_execution_plan.reason}."
+    )
+
     def tile_key(start, end, group_start):
         return f"g{int(group_start)}:t{int(start)}-{int(end)}"
 
@@ -2213,18 +2331,10 @@ def waveletPowerDecompositionConv(
             mark_completed()
 
     try:
-        # Respect a genuinely usable multi-GPU configuration, but do not infer
-        # that from the setting alone. ``compute_devices`` filters unsuitable
-        # adapters (for example a much slower display GPU), so a rejected
-        # multi-GPU attempt still keeps the time-major one-read schedule.
-        usable_multi_gpu = (
-            str(device).startswith("cuda")
-            and len(compute_devices(allow_multi_gpu=True)) > 1
-        )
         use_time_major = (
             len(group_records) > 1
             and enabled_feature("TIME_MAJOR_CONV", default=True)
-            and not usable_multi_gpu
+            and coarse_execution_plan.strategy == "single"
         )
         if use_time_major:
             try:
@@ -2260,7 +2370,11 @@ def waveletPowerDecompositionConv(
                     continue
                 for chunk_index, (start, end, power_response) in enumerate(_conv2d_wavelet_bank(
                     videodata, fused_kernels, device, frame_chunk_size,
-                    cancel_event=cancel_event, telemetry=telemetry, postprocess=fused_power_response,
+                    cancel_event=cancel_event,
+                    telemetry=telemetry,
+                    postprocess=fused_power_response,
+                    output_channels=int(n_orientations) * (group_end - group_start),
+                    execution_plan=coarse_execution_plan,
                 ), start=1):
                     store_power(start, end, group_start, group_end, power_response)
                     if chunk_index % 8 == 0 or end == num_frames:
