@@ -8,7 +8,8 @@ must not accidentally turn a disk-backed operation into a full-memory copy.
 
 | Area | Primary modules | Responsibility |
 | --- | --- | --- |
-| GUI | `app/gui.py` | Widget construction, user-visible progress, and sequencing actions. It should delegate scientific work rather than implement it. |
+| GUI composition | `app/gui.py` | Widget construction, user-visible progress, and sequencing actions. It should delegate scientific work rather than implement it. |
+| GUI services | `app/launcher.py`, `app/constants.py`, `app/dependencies.py`, `app/telemetry.py` | Startup parsing, static UI vocabulary, optional dependency bundles, and task telemetry. These modules must not implement scientific calculations. |
 | Pipeline | `pipeline.py` | Scriptable high-level workflow with typed result containers. |
 | Stimulus | `stimulus/metadata.py` | Authoritative video metadata, derived grid geometry, and coverage ratios. |
 | Wavelets | `wavelets/decomposition.py` | Legacy and convolution wavelet generation, chunking, and cache writing. |
@@ -48,8 +49,8 @@ GUI code. Storage modules must not import analysis or GUI code.
 
 ## Safe editing rules
 
-1. Keep user-facing behavior in `app/gui.py`; place reusable non-widget logic
-   in the owning domain module.
+1. Keep user-facing widget composition in `app/gui.py`; place reusable
+   non-widget logic in `app/` services or the owning scientific domain module.
 2. Preserve compatibility imports when moving a public legacy function. The
    old module can delegate to the new focused module.
 3. Treat array shape as part of an artifact contract. Validate time, x, y,
@@ -76,6 +77,9 @@ that gives elapsed time, ETA, and throughput without importing Tkinter.
 ## Current refactoring boundary
 
 The GUI remains the orchestration entry point for backwards compatibility. New
-work should not add more numerical algorithms or file-format handling there.
-Instead, add focused functions to `stimulus`, `storage`, `wavelets`, or
-`analysis`, then call them from the relevant GUI action.
+work should not add numerical algorithms, file-format handling, static labels,
+or task-monitoring primitives there. Instead, add focused functions to
+`stimulus`, `storage`, `wavelets`, `analysis`, or the corresponding `app/`
+service, then call them from the relevant GUI action. See
+[Trace one analysis from click to result](code-tracing.md) for the intended
+file-by-file reading order.

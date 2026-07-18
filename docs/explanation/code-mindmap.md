@@ -49,7 +49,8 @@ wavelet energy only as a frame weight to form firing-rate orientation tuning.
 ## Dimension ownership
 
 The movie owns width, height, frame count, FPS, and duration. The user owns one
-downsampling percentage. The grid is derived as `round(width * percentage /
-100)` by `round(height * percentage / 100)`. Consequently, no GUI input can
-silently give a library, stimulus cache, RF tensor, or model product a different
-spatial meaning.
+downsampling percentage and the visual/analysis coverage. The percentage sets
+the horizontal analysis resolution; the vertical resolution is derived from the
+requested visual-field aspect ratio so horizontal and vertical pixels represent
+the same visual angle. Consequently, no GUI input can silently give a library,
+stimulus cache, RF tensor, or model product a different spatial meaning.

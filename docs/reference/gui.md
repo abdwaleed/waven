@@ -24,8 +24,9 @@ trial boundaries and the movie frame count to construct the firing-rate cache.
 
 Stimulus downsampling is explicit and percentage-driven. The selected movie is
 the source of truth for width, height, frame count, FPS, and duration; users do
-not enter `NX`, `NY`, or stimulus frame rate. The displayed analysis grid is
-the movie width and height multiplied by the selected percentage. Wavelet
+not enter `NX`, `NY`, or stimulus frame rate. The percentage sets the horizontal
+analysis resolution, then the vertical resolution is derived from the selected
+visual coverage so both axes have the same degrees per pixel. Wavelet
 decomposition requires its cache and does not silently repeat downsampling.
 
 The Stage 2 NPY/Zarr selector controls the user-visible downsampled movie

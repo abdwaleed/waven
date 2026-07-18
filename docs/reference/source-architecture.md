@@ -9,6 +9,8 @@ behaviour.
 
 ```mermaid
 flowchart LR
+    Launcher["ui.py → app/launcher.py\nstartup and config routing"] --> App["app/gui.py\nGUI orchestration"]
+    App --> AppServices["app/constants.py, dependencies.py, telemetry.py\nUI vocabulary and services"]
     App["app/gui.py\nGUI orchestration"] --> Pipeline["pipeline.py\nscriptable workflow"]
     App --> Runtime["runtime/\ncancellation, performance"]
     Pipeline --> Stimulus["stimulus/\nmetadata and cache loading"]
@@ -31,7 +33,9 @@ reimplementing scientific calculations.
 | `config.py` | typed configuration and parsing | `PipelineConfig`, `AnalysisConfig`, `GaborConfig` | mappings, text fields, paths, numeric lists | validated immutable-style configuration objects and derived grid settings |
 | `project_layout.py` | project-folder contract and artifact discovery | `WavenProjectLayout`, `find_stimulus_movie`, `conventional_*_path` | project root and folders | deterministic input/cache/output paths |
 | `pipeline.py` | supported scriptable workflow | `run_pipeline`, `run_rf_analysis`, `prepare_*`, `run_*_model` | typed configs, disk-backed arrays, aligned neural data | result dataclasses and persisted cache paths |
+| `app/launcher.py` | configuration-file startup boundary | `load_launch_settings`, `launch_from_project` | project root and optional `pipeline_config.json` | normalized GUI defaults without importing Tk |
 | `app/gui.py` | GUI entry point and task orchestration | `run` | optional GUI defaults/configuration | CustomTkinter application; plots and export actions |
+| `app/constants.py`, `app/dependencies.py`, `app/telemetry.py` | presentation vocabulary, lazy optional imports, terminal/resource services | static maps, `load_*`, `RedirectText`, `TaskResourceMonitor` | GUI action requirements and task lifecycle | reusable app infrastructure with no scientific calculations |
 | `stimulus/` | movie metadata and wavelet-cache loading | `read_movie_metadata`, `downsampled_grid_dimensions`, `load_wavelets` | movie path, coverage, cache folders | authoritative metadata, crop bounds, disk-backed wavelet arrays |
 | `wavelets/` | Gabor filter construction and chunked decomposition | `makeFilterLibrary*`, `downsample_video_binary`, `waveletDecomposition*` | movie/cache, Gabor axes, backend choice | boolean movie cache, kernel cache, phase/power Zarr arrays |
 | `analysis/` | scientific calculations | `streaming_cross_correlation`, selectivity, tuning, STA, model runs | aligned responses plus wavelet features | RF tensors, tuning curves, selectivity, model fits, STA maps |

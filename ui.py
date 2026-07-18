@@ -1,6 +1,5 @@
 """Ui module."""
 from pathlib import Path
-import json
 import sys
 import traceback
 
@@ -49,40 +48,9 @@ def show_missing_dependency_error(exc):
 
 try:
     import waven
-    import waven.zebraGUI as zebra_gui
+    from waven.app.launcher import launch_from_project
 
-    config_path = PROJECT_ROOT / "pipeline_config.json"
-    param_defaults = {}
-    gabor_defaults = {}
-    workflow = None
-    gui_options = {}
-    if config_path.exists():
-        raw_text = config_path.read_text(encoding="utf-8")
-        resolved_text = raw_text.replace("{PROJECT_ROOT}", str(PROJECT_ROOT).replace("\\", "/"))
-        payload = json.loads(resolved_text) if resolved_text.strip() else {}
-        if not isinstance(payload, dict):
-            raise ValueError("pipeline_config.json must contain a JSON object when provided.")
-        workflow = payload.get("workflow") or None
-        gui_options = dict(payload.get("gui") or {})
-        gabor_defaults = dict(payload.get("gabor") or payload.get("gabor_param") or {})
-        common = dict(payload.get("common") or {})
-        legacy = dict(payload.get("analysis") or payload.get("param_defaults") or {})
-        if workflow == "ephys":
-            workflow_values = dict(payload.get("ephys") or {})
-        else:
-            workflow_values = dict(
-                payload.get("two_photon")
-                or payload.get("2p")
-                or payload.get("two_p")
-                or {}
-            )
-        param_defaults = {**legacy, **common, **workflow_values}
-    zebra_gui.run(
-        param_defaults,
-        gabor_defaults,
-        workflow=workflow,
-        gui_options=gui_options,
-    )
+    launch_from_project(PROJECT_ROOT)
 except SystemExit:
     raise
 except ModuleNotFoundError as exc:

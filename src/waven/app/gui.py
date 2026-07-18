@@ -22,7 +22,6 @@ import sys
 import gc
 import traceback
 import customtkinter as ctk
-import psutil
 
 # --- DPI Awareness ---
 try:
@@ -74,7 +73,6 @@ from ..runtime.task_control import (
     task_summary_message,
     task_start_message,
 )
-from ..runtime.performance import gpu_runtime_snapshot
 from ..project_layout import (
     WavenProjectLayout,
     conventional_downsample_path,
@@ -91,45 +89,37 @@ from ..storage.neural_cache import (
     load_unit_ids,
 )
 from ..stimulus.metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
-_ANALYSIS_IMPORTS_READY = False
-_GABOR_IMPORTS_READY = False
-_WAVELET_IMPORTS_READY = False
-_RF_IMPORTS_READY = False
-_MODEL_IMPORTS_READY = False
-_PLOT_IMPORTS_READY = False
+
+from .constants import (
+    ANALYSIS_FIELD_LABELS,
+    BROWSE_ICONS as DEFAULT_BROWSE_ICONS,
+    BROWSE_KIND_BY_FIELD,
+    GABOR_FIELD_LABELS,
+    INPUT_HINTS as DEFAULT_INPUT_HINTS,
+    ORIENTATION_EXPORT_COMPARISON_NOTE,
+    workflow_display_name,
+)
+from .dependencies import (
+    load_gabor_builders,
+    load_model_operations,
+    load_plot_backend,
+    load_rf_operations,
+    load_wavelet_operations,
+)
+from .telemetry import RedirectText, TaskResourceMonitor
+
 plt = None
 FigureCanvasTkAgg = None
 NavigationToolbar2Tk = None
 
-ORIENTATION_EXPORT_COMPARISON_NOTE = """WAVEN ORIENTATION-TUNING EXPORT NOTE
-
-These curves are derived from the Coarse RF Gabor-wavelet analysis, not from
-traditional discrete orientation-stimulus trials.  The firing-rate curve is a
-wavelet-energy-weighted firing-rate response at the neuron's preferred RF
-feature.  The correlation curve is the Pearson correlation between the
-frame-aligned neural response and each orientation's Gabor-wavelet feature.
-
-`trial_values` contains one frame-aligned trial estimate per orientation bin.
-It should therefore not be interpreted as a conventional repeated-static-
-orientation stimulus trial unless the stimulus design independently supports
-that interpretation.  Preferred orientation is the discrete orientation bin
-with the largest mean value; no interpolation or curve fitting is applied.
-"""
-
 
 def _ensure_plot_imports():
     """Lazily import Tk-compatible Matplotlib objects used by the GUI."""
-    global _PLOT_IMPORTS_READY, plt, FigureCanvasTkAgg, NavigationToolbar2Tk
-    if _PLOT_IMPORTS_READY:
-        return
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as _FigureCanvasTkAgg
-    from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk as _NavigationToolbar2Tk
-    import matplotlib.pyplot as _plt
-
-    FigureCanvasTkAgg = _FigureCanvasTkAgg
-    NavigationToolbar2Tk = _NavigationToolbar2Tk
-    plt = _plt
-    _PLOT_IMPORTS_READY = True
+    global plt, FigureCanvasTkAgg, NavigationToolbar2Tk
+    dependencies = load_plot_backend()
+    plt = dependencies.pyplot
+    FigureCanvasTkAgg = dependencies.figure_canvas
+    NavigationToolbar2Tk = dependencies.navigation_toolbar
 
 
 def _ensure_gabor_imports(label="Gabor library construction"):
@@ -138,20 +128,11 @@ def _ensure_gabor_imports(label="Gabor library construction"):
     Args:
         label: Human-readable caller description retained for future diagnostics.
     """
-    global _GABOR_IMPORTS_READY
     global makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
-    if _GABOR_IMPORTS_READY:
-        return
-    from ..wavelets.filters import (
-        makeFilterLibrary as _makeFilterLibrary,
-        makeFilterLibrary2 as _makeFilterLibrary2,
-        makeGaborFilter as _makeGaborFilter,
-    )
-
-    makeFilterLibrary = _makeFilterLibrary
-    makeFilterLibrary2 = _makeFilterLibrary2
-    makeGaborFilter = _makeGaborFilter
-    _GABOR_IMPORTS_READY = True
+    dependencies = load_gabor_builders()
+    makeFilterLibrary = dependencies.make_filter_library
+    makeFilterLibrary2 = dependencies.make_filter_library2
+    makeGaborFilter = dependencies.make_gabor_filter
 
 
 def _ensure_wavelet_imports(label="stimulus wavelet generation"):
@@ -160,42 +141,24 @@ def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     Args:
         label: Human-readable caller description retained for future diagnostics.
     """
-    global _WAVELET_IMPORTS_READY
     global coarseWavelet, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
     global build_convolution_kernel_cache, convolution_kernel_cache_path
     global waveletDecompositionConv, waveletPowerDecompositionConv, waveletDecompositionFullConv
     global coarse_rf_zarr_layout
     global video_downsample_chunk_size, convert_npy_to_zarr
-    if _WAVELET_IMPORTS_READY:
-        return
-    from ..stimulus import coarseWavelet as _coarseWavelet
-    from ..wavelets.decomposition import (
-        build_convolution_kernel_cache as _build_convolution_kernel_cache,
-        coarse_rf_zarr_layout as _coarse_rf_zarr_layout,
-        convolution_kernel_cache_path as _convolution_kernel_cache_path,
-        downsample_video_binary as _downsample_video_binary,
-        waveletDecomposition as _waveletDecomposition,
-        waveletDecompositionConv as _waveletDecompositionConv,
-        waveletPowerDecompositionConv as _waveletPowerDecompositionConv,
-        waveletDecompositionFull as _waveletDecompositionFull,
-        waveletDecompositionFullConv as _waveletDecompositionFullConv,
-    )
-    from ..runtime.performance import video_downsample_chunk_size as _video_downsample_chunk_size
-    from ..storage.wavelet_zarr import convert_npy_to_zarr as _convert_npy_to_zarr
-
-    coarseWavelet = _coarseWavelet
-    build_convolution_kernel_cache = _build_convolution_kernel_cache
-    convolution_kernel_cache_path = _convolution_kernel_cache_path
-    downsample_video_binary = _downsample_video_binary
-    waveletDecomposition = _waveletDecomposition
-    waveletDecompositionConv = _waveletDecompositionConv
-    waveletPowerDecompositionConv = _waveletPowerDecompositionConv
-    waveletDecompositionFull = _waveletDecompositionFull
-    waveletDecompositionFullConv = _waveletDecompositionFullConv
-    coarse_rf_zarr_layout = _coarse_rf_zarr_layout
-    video_downsample_chunk_size = _video_downsample_chunk_size
-    convert_npy_to_zarr = _convert_npy_to_zarr
-    _WAVELET_IMPORTS_READY = True
+    dependencies = load_wavelet_operations()
+    coarseWavelet = dependencies.coarse_wavelet
+    build_convolution_kernel_cache = dependencies.build_convolution_kernel_cache
+    convolution_kernel_cache_path = dependencies.convolution_kernel_cache_path
+    downsample_video_binary = dependencies.downsample_video_binary
+    waveletDecomposition = dependencies.wavelet_decomposition
+    waveletDecompositionConv = dependencies.wavelet_decomposition_conv
+    waveletPowerDecompositionConv = dependencies.wavelet_power_decomposition_conv
+    waveletDecompositionFull = dependencies.wavelet_decomposition_full
+    waveletDecompositionFullConv = dependencies.wavelet_decomposition_full_conv
+    coarse_rf_zarr_layout = dependencies.coarse_rf_zarr_layout
+    video_downsample_chunk_size = dependencies.video_downsample_chunk_size
+    convert_npy_to_zarr = dependencies.convert_npy_to_zarr
 
 
 def _ensure_rf_imports(label="coarse RF analysis"):
@@ -204,36 +167,20 @@ def _ensure_rf_imports(label="coarse RF analysis"):
     Args:
         label: Human-readable caller description retained for future diagnostics.
     """
-    global _RF_IMPORTS_READY
     global compute_skewness_neurons, PearsonCorrelationPinkNoise
     global repetability_trial3, correlation_orientation_tuning, firing_rate_orientation_tuning
     global orientation_tuning_bundle
     global close_orientation_curve, orientation_selectivity_from_tuning
-    if _RF_IMPORTS_READY:
-        return
     _ensure_plot_imports()
-    from ..analysis.receptive_fields import (
-        compute_skewness_neurons as _compute_skewness_neurons,
-        PearsonCorrelationPinkNoise as _PearsonCorrelationPinkNoise,
-        repetability_trial3 as _repetability_trial3,
-    )
-    from ..analysis.orientation_selectivity import (
-        close_orientation_curve as _close_orientation_curve,
-        correlation_orientation_tuning as _correlation_orientation_tuning,
-        firing_rate_orientation_tuning as _firing_rate_orientation_tuning,
-        orientation_tuning_bundle as _orientation_tuning_bundle,
-        orientation_selectivity_from_tuning as _orientation_selectivity_from_tuning,
-    )
-
-    compute_skewness_neurons = _compute_skewness_neurons
-    PearsonCorrelationPinkNoise = _PearsonCorrelationPinkNoise
-    repetability_trial3 = _repetability_trial3
-    close_orientation_curve = _close_orientation_curve
-    correlation_orientation_tuning = _correlation_orientation_tuning
-    firing_rate_orientation_tuning = _firing_rate_orientation_tuning
-    orientation_tuning_bundle = _orientation_tuning_bundle
-    orientation_selectivity_from_tuning = _orientation_selectivity_from_tuning
-    _RF_IMPORTS_READY = True
+    dependencies = load_rf_operations()
+    compute_skewness_neurons = dependencies.compute_skewness_neurons
+    PearsonCorrelationPinkNoise = dependencies.pearson_correlation_pink_noise
+    repetability_trial3 = dependencies.repeatability_trial
+    close_orientation_curve = dependencies.close_orientation_curve
+    correlation_orientation_tuning = dependencies.correlation_orientation_tuning
+    firing_rate_orientation_tuning = dependencies.firing_rate_orientation_tuning
+    orientation_tuning_bundle = dependencies.orientation_tuning_bundle
+    orientation_selectivity_from_tuning = dependencies.orientation_selectivity_from_tuning
 
 
 def _ensure_model_imports(label="model plot capture"):
@@ -242,21 +189,12 @@ def _ensure_model_imports(label="model plot capture"):
     Args:
         label: Human-readable caller description retained for future diagnostics.
     """
-    global _MODEL_IMPORTS_READY
     global run_Model, run_Full_Model, smooth_best_positions
-    if _MODEL_IMPORTS_READY:
-        return
     _ensure_plot_imports()
-    from ..analysis.model_runs import (
-        run_Model as _run_Model,
-        run_Full_Model as _run_Full_Model,
-    )
-    from ..pipeline import smooth_best_positions as _smooth_best_positions
-
-    run_Model = _run_Model
-    run_Full_Model = _run_Full_Model
-    smooth_best_positions = _smooth_best_positions
-    _MODEL_IMPORTS_READY = True
+    dependencies = load_model_operations()
+    run_Model = dependencies.run_model
+    run_Full_Model = dependencies.run_full_model
+    smooth_best_positions = dependencies.smooth_best_positions
 
 
 def _ensure_analysis_imports(label="analysis"):
@@ -265,14 +203,10 @@ def _ensure_analysis_imports(label="analysis"):
     Args:
         label: Input value for this operation.
     """
-    global _ANALYSIS_IMPORTS_READY
-    if _ANALYSIS_IMPORTS_READY:
-        return
     _ensure_gabor_imports(label)
     _ensure_wavelet_imports(label)
     _ensure_rf_imports(label)
     _ensure_model_imports(label)
-    _ANALYSIS_IMPORTS_READY = True
 
 
 
@@ -282,15 +216,11 @@ def select_workflow() -> str:
 
 
 def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
-    """Function for run.
+    """Create and run the staged CustomTkinter Waven application.
 
-    Args:
-        param_defaults: Input value for this operation.
-        gabor_param: Input value for this operation.
-        workflow: Input value for this operation.
-
-    Returns:
-        Result produced by the operation.
+    This is the GUI composition root. It owns widgets, prerequisite state,
+    cancellable task wiring, and rendering; numerical work is delegated to
+    the focused modules loaded through :mod:`waven.app.dependencies`.
     """
     original_stdout, original_stderr = sys.stdout, sys.stderr
     param_defaults = dict(param_defaults or {})
@@ -299,15 +229,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         workflow = WORKFLOW_2P
     gabor_param = _normalise_gabor_params(gabor_param)
 
-    GABOR_LABELS = {
-        "N_thetas": "Orientation Count",
-        "Sigmas": "Filter Sizes (analysis px)",
-        "Frequencies": "Spatial Frequencies (cyc/analysis px)",
-        "Phases": "Phases (degrees)",
-        "Save Path": "Gabor Cache Folder",
-        "Coarse Library Path": "Coarse Gabor Folder",
-        "Fine Library Path": "Fine Gabor Folder",
-    }
+    GABOR_LABELS = GABOR_FIELD_LABELS
 
     ANALYSIS_LABELS = {
         "Project Root": "Project Root Folder",
@@ -338,472 +260,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "Use Last Minute Holdout": "Last-Minute Holdout",
         "Neuron ID": "Neuron Index",
     }
-
-    def workflow_display_name(value):
-        """Function for workflow display name.
-
-        Args:
-            value: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
-        return "Two-Photon" if value == WORKFLOW_2P else "Electrophysiology"
+    ANALYSIS_LABELS = ANALYSIS_FIELD_LABELS
 
     def workflow_defaults(value):
-        """Function for workflow defaults.
-
-        Args:
-            value: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
+        """Return configured field values applicable to one workflow."""
         keys = AnalysisConfig.gui_param_keys(value)
         return keys, {key: param_defaults.get(key, "") for key in keys}
 
     FIELD_LABELS = {**GABOR_LABELS, **ANALYSIS_LABELS}
 
-    BROWSE_KIND = {
-        "Project Root": "dir",
-        "Save Path": "dir",
-        "Movie Path": "dir",
-        "Library Path": "dir",
-        "Coarse Library Path": "dir",
-        "Fine Library Path": "dir",
-        "Spks Path": "dir",
-        "Path Directory": "dir",
-        "Dir": "dir",
-        "Full Model Wavelet Path": "dir",
-        "Full Model Save Path": "dir",
-        "Plot Cache Path": "dir",
-        "Recovery Cache Directory": "dir",
-    }
-
-    INPUT_HINTS = {
-        "Experiment Info": "Tuple: ('subject', 'YYYY-MM-DD', experiment_number)",
-        "Number of Planes": "Integer, e.g. 1",
-        "Sampling Rate (samples / sec)": "Number in Hz, e.g. 30000",
-        "Train Trial Indices": "'auto' or zero-based list, e.g. [0, 2]",
-        "Test Trial Indices": "'auto' or zero-based list, e.g. [1]",
-        "Use Last Minute Holdout": "Boolean: True or False",
-        "Block End": "Integer acquisition block index, e.g. 0",
-        "Resolution": "Micrometers per pixel, e.g. 1.3671",
-        "Visual Coverage": "[left, right, top, bottom] in degrees",
-        "Analysis Coverage": "[left, right, top, bottom] in degrees",
-        "N_thetas": "Integer orientation bins, e.g. 18",
-        "Sigmas": "Numeric list in square-degree analysis pixels, e.g. [2, 4, 8]",
-        "Sigmas Full Model": "Numeric list in square-degree analysis pixels, e.g. [2, 4, 8, 12]",
-        "Frequencies": "Numeric list in cycles/analysis pixel; displayed/exported values are converted to cpd",
-        "Phases": "Numeric list in degrees, e.g. [0, 90]",
-        "Neuron ID": "Zero-based neuron index, e.g. 1173",
-    }
-
-    BROWSE_ICONS = {"file": "📄", "savefile": "📄", "dir": "📁"}
-
-    class RedirectText:
-        """Container for RedirectText."""
-        def __init__(self, widget, max_lines=5000, flush_ms=50):
-            """Function for init.
-
-            Args:
-                widget: Input value for this operation.
-                max_lines: Input value for this operation.
-                flush_ms: Input value for this operation.
-            """
-            self.widget = widget
-            self.max_lines = max_lines
-            self.flush_ms = flush_ms
-            self._buffer = []
-            self._lock = threading.Lock()
-            self._flush_pending = False
-            self._closed = False
-            self._after_id = None
-            self._schedule_poll()
-
-        def _schedule_poll(self):
-            """Schedule one poll while the Tk text widget still exists."""
-            if not self._closed:
-                self._after_id = self.widget.after(self.flush_ms, self._poll_flush)
-
-        def close(self):
-            """Stop polling before the application tears down its Tcl commands."""
-            self._closed = True
-            if self._after_id is not None:
-                try:
-                    self.widget.after_cancel(self._after_id)
-                except tk.TclError:
-                    pass
-                self._after_id = None
-
-        def write(self, string):
-            """Function for write.
-
-            Args:
-                string: Input value for this operation.
-            """
-            if self._closed or not string:
-                return
-            with self._lock:
-                self._buffer.append(string)
-                self._flush_pending = True
-
-        def _poll_flush(self):
-            """Flush buffered worker output from Tk's main thread."""
-            self._after_id = None
-            if self._closed:
-                return
-            try:
-                self._flush()
-            finally:
-                if not self._closed:
-                    try:
-                        self._schedule_poll()
-                    except tk.TclError:
-                        self._closed = True
-
-        def _flush(self):
-            """Function for flush."""
-            with self._lock:
-                chunk = "".join(self._buffer)
-                self._buffer.clear()
-                self._flush_pending = False
-            if not chunk:
-                return
-            try:
-                at_bottom = self.widget.yview()[1] >= 0.98
-                self.widget.mark_set(tk.INSERT, tk.END)
-                self._insert_terminal_chunk(chunk)
-                line_count = int(float(self.widget.index("end-1c").split(".")[0]))
-                if line_count > self.max_lines:
-                    self.widget.delete("1.0", f"{line_count - self.max_lines}.0")
-                if at_bottom:
-                    self.widget.see(tk.END)
-            except Exception:
-                pass
-
-        def _insert_terminal_chunk(self, chunk):
-            """Function for insert terminal chunk.
-
-            Args:
-                chunk: Input value for this operation.
-            """
-            for part in chunk.splitlines(keepends=True):
-                if "\r" in part:
-                    before, _, after = part.rpartition("\r")
-                    if before:
-                        self.widget.insert(tk.END, before.replace("\r", ""))
-                    self.widget.delete("end-1c linestart", "end-1c lineend")
-                    if after:
-                        self.widget.insert(tk.END, after.replace("\r", ""))
-                else:
-                    self.widget.insert(tk.END, part)
-
-        def flush(self):
-            """Function for flush."""
-            if threading.current_thread() is threading.main_thread():
-                self._flush()
-
-        def isatty(self):
-            """Function for isatty.
-
-            Returns:
-                Result produced by the operation.
-            """
-            return True
-
-        def writable(self):
-            """Function for writable.
-
-            Returns:
-                Result produced by the operation.
-            """
-            return True
-
-        @property
-        def encoding(self):
-            """Function for encoding.
-
-            Returns:
-                Result produced by the operation.
-            """
-            return "utf-8"
-
-    class TaskResourceMonitor:
-        """Container for TaskResourceMonitor."""
-        def __init__(self, label):
-            """Function for init.
-
-            Args:
-                label: Input value for this operation.
-            """
-            self.label = label
-            self.process = psutil.Process(os.getpid())
-            self.start_time = None
-            self.start_perf = None
-            self.start_cpu = None
-            self.start_io = None
-            self.start_net = None
-            self.peak_rss = 0
-            self.peak_cuda_allocated = 0
-            self.peak_cuda_reserved = 0
-            self.cpu_sample_count = 0
-            self.cpu_percent_total = 0.0
-            self.cpu_percent_peak = 0.0
-            self.active_core_total = 0.0
-            self.active_core_peak = 0
-            self.gpu_samples = {}
-            self._stop_event = threading.Event()
-            self._thread = None
-
-        def start(self):
-            """Function for start."""
-            self.start_time = time.time()
-            self.start_perf = time.perf_counter()
-            self.start_cpu = self.process.cpu_times()
-            self.start_io = self._io_counters()
-            self.start_net = self._net_counters()
-            self.peak_rss = self._rss()
-            self._reset_cuda_peaks()
-            # Prime psutil's non-blocking counters before the sampler starts.
-            try:
-                self.process.cpu_percent(None)
-                psutil.cpu_percent(None, percpu=True)
-            except Exception:
-                pass
-            self._thread = threading.Thread(target=self._sample_loop, daemon=True)
-            self._thread.start()
-
-        def stop(self):
-            """Function for stop.
-
-            Returns:
-                Result produced by the operation.
-            """
-            self._stop_event.set()
-            if self._thread is not None:
-                self._thread.join(timeout=1)
-            return self.summary()
-
-        def _sample_loop(self):
-            """Function for sample loop."""
-            while not self._stop_event.wait(2.0):
-                self.peak_rss = max(self.peak_rss, self._rss())
-                cuda_allocated, cuda_reserved = self._cuda_peaks()
-                self.peak_cuda_allocated = max(self.peak_cuda_allocated, cuda_allocated)
-                self.peak_cuda_reserved = max(self.peak_cuda_reserved, cuda_reserved)
-                self._sample_parallel_metrics()
-
-        def _sample_parallel_metrics(self):
-            """Sample CPU-core and optional per-GPU utilization off the UI thread."""
-            try:
-                process_cpu = max(0.0, float(self.process.cpu_percent(None)))
-                core_usage = psutil.cpu_percent(None, percpu=True)
-                active_cores = sum(1 for value in core_usage if value >= 20.0)
-                self.cpu_sample_count += 1
-                self.cpu_percent_total += process_cpu
-                self.cpu_percent_peak = max(self.cpu_percent_peak, process_cpu)
-                self.active_core_total += active_cores
-                self.active_core_peak = max(self.active_core_peak, active_cores)
-            except Exception:
-                pass
-            try:
-                for sample in gpu_runtime_snapshot():
-                    device_id = int(sample["index"])
-                    record = self.gpu_samples.setdefault(
-                        device_id,
-                        {
-                            "name": str(sample.get("name", f"GPU {device_id}")),
-                            "util_total": 0.0,
-                            "util_count": 0,
-                            "util_peak": 0.0,
-                            "memory_util_total": 0.0,
-                            "memory_util_count": 0,
-                            "pcie_tx_total": 0,
-                            "pcie_tx_count": 0,
-                            "pcie_rx_total": 0,
-                            "pcie_rx_count": 0,
-                            "free_min": int(sample.get("free_bytes", 0)),
-                            "total_bytes": int(sample.get("total_bytes", 0)),
-                        },
-                    )
-                    record["free_min"] = min(record["free_min"], int(sample.get("free_bytes", 0)))
-                    record["total_bytes"] = max(record["total_bytes"], int(sample.get("total_bytes", 0)))
-                    for key, total_key, count_key, peak_key in (
-                        ("compute_utilization", "util_total", "util_count", "util_peak"),
-                        ("memory_utilization", "memory_util_total", "memory_util_count", None),
-                    ):
-                        value = sample.get(key)
-                        if value is not None:
-                            record[total_key] += float(value)
-                            record[count_key] += 1
-                            if peak_key is not None:
-                                record[peak_key] = max(record[peak_key], float(value))
-                    for key, total_key, count_key in (
-                        ("pcie_tx_bytes_per_second", "pcie_tx_total", "pcie_tx_count"),
-                        ("pcie_rx_bytes_per_second", "pcie_rx_total", "pcie_rx_count"),
-                    ):
-                        value = sample.get(key)
-                        if value is not None:
-                            record[total_key] += int(value)
-                            record[count_key] += 1
-            except Exception:
-                # NVML telemetry is optional and must never affect an analysis.
-                pass
-
-        def _rss(self):
-            """Function for rss.
-
-            Returns:
-                Result produced by the operation.
-            """
-            try:
-                return int(self.process.memory_info().rss)
-            except Exception:
-                return 0
-
-        def _io_counters(self):
-            """Function for io counters.
-
-            Returns:
-                Result produced by the operation.
-            """
-            try:
-                return self.process.io_counters()
-            except Exception:
-                return None
-
-        def _net_counters(self):
-            """Function for net counters.
-
-            Returns:
-                Result produced by the operation.
-            """
-            try:
-                return psutil.net_io_counters()
-            except Exception:
-                return None
-
-        def _reset_cuda_peaks(self):
-            """Function for reset cuda peaks."""
-            try:
-                import torch
-
-                if torch.cuda.is_available():
-                    for idx in range(torch.cuda.device_count()):
-                        torch.cuda.reset_peak_memory_stats(idx)
-            except Exception:
-                pass
-
-        def _cuda_peaks(self):
-            """Function for cuda peaks.
-
-            Returns:
-                Result produced by the operation.
-            """
-            allocated = 0
-            reserved = 0
-            try:
-                import torch
-
-                if torch.cuda.is_available():
-                    for idx in range(torch.cuda.device_count()):
-                        allocated += int(torch.cuda.max_memory_allocated(idx))
-                        reserved += int(torch.cuda.max_memory_reserved(idx))
-            except Exception:
-                pass
-            return allocated, reserved
-
-        def summary(self):
-            """Function for summary.
-
-            Returns:
-                Result produced by the operation.
-            """
-            elapsed = max(time.perf_counter() - self.start_perf, 1e-6) if self.start_perf else 0
-            end_time = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime())
-            cpu_pct = 0.0
-            try:
-                cpu_now = self.process.cpu_times()
-                cpu_start = self.start_cpu
-                cpu_seconds = (
-                    (cpu_now.user - cpu_start.user)
-                    + (cpu_now.system - cpu_start.system)
-                )
-                cpu_pct = 100 * cpu_seconds / max(elapsed, 1e-6)
-            except Exception:
-                cpu_seconds = 0.0
-            io_now = self._io_counters()
-            read_bytes = write_bytes = 0
-            if io_now is not None and self.start_io is not None:
-                read_bytes = max(0, int(io_now.read_bytes - self.start_io.read_bytes))
-                write_bytes = max(0, int(io_now.write_bytes - self.start_io.write_bytes))
-            net_now = self._net_counters()
-            net_sent = net_recv = 0
-            if net_now is not None and self.start_net is not None:
-                net_sent = max(0, int(net_now.bytes_sent - self.start_net.bytes_sent))
-                net_recv = max(0, int(net_now.bytes_recv - self.start_net.bytes_recv))
-            cuda_allocated, cuda_reserved = self._cuda_peaks()
-            self.peak_cuda_allocated = max(self.peak_cuda_allocated, cuda_allocated)
-            self.peak_cuda_reserved = max(self.peak_cuda_reserved, cuda_reserved)
-            self.peak_rss = max(self.peak_rss, self._rss())
-            sample_count = max(1, self.cpu_sample_count)
-            sampled_cpu_percent = self.cpu_percent_total / sample_count if self.cpu_sample_count else cpu_pct
-            logical_cores = max(1, int(psutil.cpu_count(logical=True) or 1))
-            gpu_devices = []
-            for device_id, record in sorted(self.gpu_samples.items()):
-                util_count = max(1, int(record["util_count"]))
-                memory_count = max(1, int(record["memory_util_count"]))
-                tx_count = max(1, int(record["pcie_tx_count"]))
-                rx_count = max(1, int(record["pcie_rx_count"]))
-                gpu_devices.append(
-                    {
-                        "index": device_id,
-                        "name": record["name"],
-                        "compute_utilization_avg": (
-                            record["util_total"] / util_count if record["util_count"] else None
-                        ),
-                        "compute_utilization_peak": (
-                            record["util_peak"] if record["util_count"] else None
-                        ),
-                        "memory_utilization_avg": (
-                            record["memory_util_total"] / memory_count
-                            if record["memory_util_count"]
-                            else None
-                        ),
-                        "pcie_tx_bytes_per_second": (
-                            record["pcie_tx_total"] / tx_count if record["pcie_tx_count"] else None
-                        ),
-                        "pcie_rx_bytes_per_second": (
-                            record["pcie_rx_total"] / rx_count if record["pcie_rx_count"] else None
-                        ),
-                        "free_vram_min": record["free_min"],
-                        "total_vram": record["total_bytes"],
-                    }
-                )
-            return {
-                "completed_at": end_time,
-                "elapsed": elapsed,
-                "cpu_seconds": cpu_seconds,
-                "cpu_percent": cpu_pct,
-                "peak_ram": self.peak_rss,
-                "disk_read": read_bytes,
-                "disk_write": write_bytes,
-                "gpu_allocated": self.peak_cuda_allocated,
-                "gpu_reserved": self.peak_cuda_reserved,
-                "net_sent": net_sent,
-                "net_recv": net_recv,
-                "cpu_percent_sampled": sampled_cpu_percent,
-                "cpu_percent_peak": self.cpu_percent_peak,
-                "effective_cores_avg": sampled_cpu_percent / 100.0,
-                "effective_cores_peak": self.cpu_percent_peak / 100.0,
-                "logical_cores": logical_cores,
-                "active_cores_avg": self.active_core_total / sample_count if self.cpu_sample_count else None,
-                "active_cores_peak": self.active_core_peak if self.cpu_sample_count else None,
-                "disk_read_rate": read_bytes / max(elapsed, 1e-6),
-                "disk_write_rate": write_bytes / max(elapsed, 1e-6),
-                "gpu_devices": gpu_devices,
-            }
+    BROWSE_KIND = BROWSE_KIND_BY_FIELD
+    INPUT_HINTS = DEFAULT_INPUT_HINTS
+    BROWSE_ICONS = DEFAULT_BROWSE_ICONS
 
     task_state = {
         "name": None,
