@@ -70,8 +70,11 @@ from ..runtime.task_control import (
     check_cancelled,
     format_duration,
     task_finish_message,
+    task_progress_message,
+    task_summary_message,
     task_start_message,
 )
+from ..runtime.performance import gpu_runtime_snapshot
 from ..project_layout import (
     WavenProjectLayout,
     conventional_downsample_path,
@@ -544,6 +547,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             self.peak_rss = 0
             self.peak_cuda_allocated = 0
             self.peak_cuda_reserved = 0
+            self.cpu_sample_count = 0
+            self.cpu_percent_total = 0.0
+            self.cpu_percent_peak = 0.0
+            self.active_core_total = 0.0
+            self.active_core_peak = 0
+            self.gpu_samples = {}
             self._stop_event = threading.Event()
             self._thread = None
 
@@ -556,6 +565,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             self.start_net = self._net_counters()
             self.peak_rss = self._rss()
             self._reset_cuda_peaks()
+            # Prime psutil's non-blocking counters before the sampler starts.
+            try:
+                self.process.cpu_percent(None)
+                psutil.cpu_percent(None, percpu=True)
+            except Exception:
+                pass
             self._thread = threading.Thread(target=self._sample_loop, daemon=True)
             self._thread.start()
 
@@ -572,11 +587,69 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         def _sample_loop(self):
             """Function for sample loop."""
-            while not self._stop_event.wait(1.0):
+            while not self._stop_event.wait(2.0):
                 self.peak_rss = max(self.peak_rss, self._rss())
                 cuda_allocated, cuda_reserved = self._cuda_peaks()
                 self.peak_cuda_allocated = max(self.peak_cuda_allocated, cuda_allocated)
                 self.peak_cuda_reserved = max(self.peak_cuda_reserved, cuda_reserved)
+                self._sample_parallel_metrics()
+
+        def _sample_parallel_metrics(self):
+            """Sample CPU-core and optional per-GPU utilization off the UI thread."""
+            try:
+                process_cpu = max(0.0, float(self.process.cpu_percent(None)))
+                core_usage = psutil.cpu_percent(None, percpu=True)
+                active_cores = sum(1 for value in core_usage if value >= 20.0)
+                self.cpu_sample_count += 1
+                self.cpu_percent_total += process_cpu
+                self.cpu_percent_peak = max(self.cpu_percent_peak, process_cpu)
+                self.active_core_total += active_cores
+                self.active_core_peak = max(self.active_core_peak, active_cores)
+            except Exception:
+                pass
+            try:
+                for sample in gpu_runtime_snapshot():
+                    device_id = int(sample["index"])
+                    record = self.gpu_samples.setdefault(
+                        device_id,
+                        {
+                            "name": str(sample.get("name", f"GPU {device_id}")),
+                            "util_total": 0.0,
+                            "util_count": 0,
+                            "util_peak": 0.0,
+                            "memory_util_total": 0.0,
+                            "memory_util_count": 0,
+                            "pcie_tx_total": 0,
+                            "pcie_tx_count": 0,
+                            "pcie_rx_total": 0,
+                            "pcie_rx_count": 0,
+                            "free_min": int(sample.get("free_bytes", 0)),
+                            "total_bytes": int(sample.get("total_bytes", 0)),
+                        },
+                    )
+                    record["free_min"] = min(record["free_min"], int(sample.get("free_bytes", 0)))
+                    record["total_bytes"] = max(record["total_bytes"], int(sample.get("total_bytes", 0)))
+                    for key, total_key, count_key, peak_key in (
+                        ("compute_utilization", "util_total", "util_count", "util_peak"),
+                        ("memory_utilization", "memory_util_total", "memory_util_count", None),
+                    ):
+                        value = sample.get(key)
+                        if value is not None:
+                            record[total_key] += float(value)
+                            record[count_key] += 1
+                            if peak_key is not None:
+                                record[peak_key] = max(record[peak_key], float(value))
+                    for key, total_key, count_key in (
+                        ("pcie_tx_bytes_per_second", "pcie_tx_total", "pcie_tx_count"),
+                        ("pcie_rx_bytes_per_second", "pcie_rx_total", "pcie_rx_count"),
+                    ):
+                        value = sample.get(key)
+                        if value is not None:
+                            record[total_key] += int(value)
+                            record[count_key] += 1
+            except Exception:
+                # NVML telemetry is optional and must never affect an analysis.
+                pass
 
         def _rss(self):
             """Function for rss.
@@ -674,6 +747,40 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             self.peak_cuda_allocated = max(self.peak_cuda_allocated, cuda_allocated)
             self.peak_cuda_reserved = max(self.peak_cuda_reserved, cuda_reserved)
             self.peak_rss = max(self.peak_rss, self._rss())
+            sample_count = max(1, self.cpu_sample_count)
+            sampled_cpu_percent = self.cpu_percent_total / sample_count if self.cpu_sample_count else cpu_pct
+            logical_cores = max(1, int(psutil.cpu_count(logical=True) or 1))
+            gpu_devices = []
+            for device_id, record in sorted(self.gpu_samples.items()):
+                util_count = max(1, int(record["util_count"]))
+                memory_count = max(1, int(record["memory_util_count"]))
+                tx_count = max(1, int(record["pcie_tx_count"]))
+                rx_count = max(1, int(record["pcie_rx_count"]))
+                gpu_devices.append(
+                    {
+                        "index": device_id,
+                        "name": record["name"],
+                        "compute_utilization_avg": (
+                            record["util_total"] / util_count if record["util_count"] else None
+                        ),
+                        "compute_utilization_peak": (
+                            record["util_peak"] if record["util_count"] else None
+                        ),
+                        "memory_utilization_avg": (
+                            record["memory_util_total"] / memory_count
+                            if record["memory_util_count"]
+                            else None
+                        ),
+                        "pcie_tx_bytes_per_second": (
+                            record["pcie_tx_total"] / tx_count if record["pcie_tx_count"] else None
+                        ),
+                        "pcie_rx_bytes_per_second": (
+                            record["pcie_rx_total"] / rx_count if record["pcie_rx_count"] else None
+                        ),
+                        "free_vram_min": record["free_min"],
+                        "total_vram": record["total_bytes"],
+                    }
+                )
             return {
                 "completed_at": end_time,
                 "elapsed": elapsed,
@@ -686,6 +793,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "gpu_reserved": self.peak_cuda_reserved,
                 "net_sent": net_sent,
                 "net_recv": net_recv,
+                "cpu_percent_sampled": sampled_cpu_percent,
+                "cpu_percent_peak": self.cpu_percent_peak,
+                "effective_cores_avg": sampled_cpu_percent / 100.0,
+                "effective_cores_peak": self.cpu_percent_peak / 100.0,
+                "logical_cores": logical_cores,
+                "active_cores_avg": self.active_core_total / sample_count if self.cpu_sample_count else None,
+                "active_cores_peak": self.active_core_peak if self.cpu_sample_count else None,
+                "disk_read_rate": read_bytes / max(elapsed, 1e-6),
+                "disk_write_rate": write_bytes / max(elapsed, 1e-6),
+                "gpu_devices": gpu_devices,
             }
 
     task_state = {
@@ -694,6 +811,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "detail": None,
         "last_ui_update": 0,
         "last_log_progress": -1,
+        "last_log_stage": None,
     }
     completed_actions = set()
 
@@ -774,24 +892,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return removed
 
     def _format_task_summary(metrics, status):
-        """Function for format task summary.
-
-        Args:
-            metrics: Input value for this operation.
-            status: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
+        """Render the shared dashboard summary for every major GUI task."""
         if not metrics:
             return ""
-        return (
-            f"  Status : {status.upper()}\n"
-            f"  Time   : {format_duration(metrics['elapsed'])}\n"
-            f"  CPU/RAM: {metrics['cpu_percent']:.1f}% / {_format_bytes(metrics['peak_ram'])}\n"
-            f"  Disk   : read {_format_bytes(metrics['disk_read'])}, write {_format_bytes(metrics['disk_write'])}\n"
-            f"  GPU    : {_format_bytes(metrics['gpu_allocated'])} allocated\n"
-        )
+        return task_summary_message(task_state.get("name") or "Waven task", status, metrics)
 
     def _refresh_task_heartbeat():
         """Keep elapsed time moving even while a worker emits no explicit progress."""
@@ -887,10 +991,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 terminal_metrics_var.set(metric_text)
             except NameError:
                 pass
-            log_bucket = int(percent // 5)
-            if log_bucket != task_state.get("last_log_progress"):
+            # Terminal updates are intentionally stage-aware and rate-limited.
+            # A new stage is shown immediately; otherwise one concise heartbeat
+            # per ten percent keeps long runs readable.
+            log_bucket = int(percent // 10)
+            stage_key = (message, task_state.get("detail"))
+            if (
+                stage_key != task_state.get("last_log_stage")
+                or log_bucket != task_state.get("last_log_progress")
+            ):
                 task_state["last_log_progress"] = log_bucket
-                print(f"[progress] {message}{suffix}: {metric_text}")
+                task_state["last_log_stage"] = stage_key
+                print(
+                    task_progress_message(
+                        task_state.get("name") or message or "Waven task",
+                        percent,
+                        task_state.get("detail") or message or "working",
+                        task_state["start"],
+                    )
+                )
         elif percent is not None:
             try:
                 terminal_metrics_var.set(f"{percent:.1f}%")
@@ -927,6 +1046,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         task_state["start"] = time.time()
         task_state["detail"] = None
         task_state["last_log_progress"] = -1
+        task_state["last_log_stage"] = None
         active_task["cancel_event"] = cancel_event
         active_task["monitor"] = monitor
         active_task["cancel_requested"] = False
@@ -983,6 +1103,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         task_state["start"] = None
         task_state["detail"] = None
         task_state["last_log_progress"] = -1
+        task_state["last_log_stage"] = None
         status_var.set("Ready")
         active_task["cancel_event"] = None
         active_task["monitor"] = None

@@ -26,6 +26,92 @@ except ImportError:  # pragma: no cover - optional protection for legacy install
 
 ComputeDevice = Literal["cuda", "cpu"]
 _reported_multi_gpu_decisions: set[Tuple[int, ...]] = set()
+_nvml_lock = threading.Lock()
+_nvml_module = None
+_nvml_initialized = False
+_nvml_unavailable = False
+
+
+def _nvml():
+    """Return an initialized optional NVML module without adding a dependency."""
+    global _nvml_module, _nvml_initialized, _nvml_unavailable
+    if _nvml_unavailable:
+        return None
+    with _nvml_lock:
+        if _nvml_unavailable:
+            return None
+        try:
+            if _nvml_module is None:
+                import pynvml
+
+                _nvml_module = pynvml
+            if not _nvml_initialized:
+                _nvml_module.nvmlInit()
+                _nvml_initialized = True
+            return _nvml_module
+        except Exception:
+            # GPU telemetry is diagnostic only.  PyTorch VRAM metrics remain
+            # available when the driver exposes no NVML interface or the
+            # optional package is not installed.
+            _nvml_unavailable = True
+            return None
+
+
+def gpu_runtime_snapshot() -> list[Dict[str, object]]:
+    """Return lightweight live per-GPU telemetry with safe NVML fallback.
+
+    Values are sampled only by the GUI task monitor (every few seconds), not
+    in hot numerical loops.  ``compute_utilization`` and PCIe rates are ``None``
+    when NVML is unavailable rather than guessed from allocation size.
+    """
+    if not torch.cuda.is_available():
+        return []
+    nvml = _nvml()
+    devices = []
+    for index in range(torch.cuda.device_count()):
+        try:
+            free_bytes, total_bytes = torch.cuda.mem_get_info(index)
+        except Exception:
+            free_bytes = gpu_available_vram_bytes(index)
+            total_bytes = gpu_vram_bytes(index)
+        entry: Dict[str, object] = {
+            "index": index,
+            "name": str(torch.cuda.get_device_properties(index).name),
+            "free_bytes": int(free_bytes),
+            "total_bytes": int(total_bytes),
+            "compute_utilization": None,
+            "memory_utilization": None,
+            "pcie_tx_bytes_per_second": None,
+            "pcie_rx_bytes_per_second": None,
+        }
+        if nvml is not None:
+            try:
+                handle = nvml.nvmlDeviceGetHandleByIndex(index)
+                utilization = nvml.nvmlDeviceGetUtilizationRates(handle)
+                entry["compute_utilization"] = float(utilization.gpu)
+                entry["memory_utilization"] = float(utilization.memory)
+                # NVML PCIe throughput is reported in KiB/s on supported
+                # desktop drivers.  Some consumer cards omit these counters.
+                entry["pcie_tx_bytes_per_second"] = int(
+                    nvml.nvmlDeviceGetPcieThroughput(handle, nvml.NVML_PCIE_UTIL_TX_BYTES)
+                ) * 1024
+                entry["pcie_rx_bytes_per_second"] = int(
+                    nvml.nvmlDeviceGetPcieThroughput(handle, nvml.NVML_PCIE_UTIL_RX_BYTES)
+                ) * 1024
+            except Exception:
+                pass
+        else:
+            # Recent PyTorch builds expose NVML-backed utilization methods even
+            # when the optional Python ``pynvml`` package is absent.
+            try:
+                if hasattr(torch.cuda, "utilization"):
+                    entry["compute_utilization"] = float(torch.cuda.utilization(index))
+                if hasattr(torch.cuda, "memory_usage"):
+                    entry["memory_utilization"] = float(torch.cuda.memory_usage(index))
+            except Exception:
+                pass
+        devices.append(entry)
+    return devices
 
 
 @dataclass(frozen=True)
@@ -92,25 +178,43 @@ class OperationTelemetry:
         self.started = time.perf_counter()
         self.seconds: Dict[str, float] = {}
         self.bytes: Dict[str, int] = {}
+        self.operations: Dict[str, int] = {}
         self._lock = threading.Lock()
         self._last_live_report = self.started
 
-    def add(self, stage: str, seconds: float = 0.0, byte_count: int = 0) -> None:
+    def add(
+        self,
+        stage: str,
+        seconds: float = 0.0,
+        byte_count: int = 0,
+        operation_count: int = 0,
+    ) -> None:
         with self._lock:
             self.seconds[stage] = self.seconds.get(stage, 0.0) + max(0.0, float(seconds))
             self.bytes[stage] = self.bytes.get(stage, 0) + max(0, int(byte_count))
+            self.operations[stage] = self.operations.get(stage, 0) + max(0, int(operation_count))
 
     def _message(self, suffix: str = "") -> str:
         total = max(time.perf_counter() - self.started, 1e-9)
         with self._lock:
             stages = sorted(self.seconds.items())
             byte_counts = dict(self.bytes)
-        pieces = [f"{self.label}{suffix}: {total:.1f}s total"]
+            operation_counts = dict(self.operations)
+        if stages:
+            dominant_stage, dominant_seconds = max(stages, key=lambda item: item[1])
+            dominant_note = f" | largest measured stage: {dominant_stage} ({dominant_seconds / total:.0%})"
+        else:
+            dominant_note = ""
+        pieces = [f"[perf] {self.label}{suffix} | elapsed {total:.1f}s{dominant_note}"]
         for stage, duration in stages:
             rate = byte_counts.get(stage, 0) / max(duration, 1e-9) / 1024**2
             rate_suffix = f", {rate:.1f} MiB/s" if byte_counts.get(stage, 0) else ""
-            pieces.append(f"{stage} {duration:.1f}s{rate_suffix}")
-        return " | ".join(pieces)
+            flop_rate = operation_counts.get(stage, 0) / max(duration, 1e-9) / 1e9
+            flop_suffix = f", {flop_rate:.2f} GFLOP/s" if operation_counts.get(stage, 0) else ""
+            pieces.append(f"{stage} {duration:.1f}s{rate_suffix}{flop_suffix}")
+        if len(pieces) == 1:
+            return f"  {pieces[0]}"
+        return f"  {pieces[0]}\n     -> " + " | ".join(pieces[1:])
 
     def maybe_report(self, interval_seconds: float = 10.0) -> None:
         """Print a rate-limited live throughput snapshot for a long operation."""

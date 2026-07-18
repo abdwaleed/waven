@@ -515,7 +515,12 @@ def _chunk_aligned_structured_correlation(
                                 else torch.as_tensor(centered_response, dtype=torch.float64, device="cuda:0")
                             )
                             cross_tensor += block_tensor.T @ response_tensor
-                            telemetry.add("gpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
+                            telemetry.add(
+                                "gpu_cross_product",
+                                time.perf_counter() - compute_start,
+                                block.nbytes,
+                                operation_count=2 * batch_size * tile_features * n_neurons,
+                            )
                             del block_tensor, response_tensor
                             block_tensor = response_tensor = None
                             gpu_cross_completed = True
@@ -551,7 +556,12 @@ def _chunk_aligned_structured_correlation(
                             time_end=time_end,
                             feature_batch=gpu_feature_batch,
                         )
-                        telemetry.add("gpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
+                        telemetry.add(
+                            "gpu_cross_product",
+                            time.perf_counter() - compute_start,
+                            block.nbytes,
+                            operation_count=2 * batch_size * tile_features * n_neurons,
+                        )
                         if not gpu_success:
                             print(f"RF GPU subtile fell back to CPU for an unfinished suffix: {gpu_error}")
                             torch.cuda.empty_cache()
@@ -559,7 +569,12 @@ def _chunk_aligned_structured_correlation(
                     elif not gpu_cross_completed:
                         compute_start = time.perf_counter()
                         cross += centered_block.T @ centered_response
-                        telemetry.add("cpu_cross_product", time.perf_counter() - compute_start, block.nbytes)
+                        telemetry.add(
+                            "cpu_cross_product",
+                            time.perf_counter() - compute_start,
+                            block.nbytes,
+                            operation_count=2 * batch_size * tile_features * n_neurons,
+                        )
                     feature_m2 += np.einsum("ij,ij->j", centered_block, centered_block, dtype=np.float64)
                     feature_mean += (block_mean - feature_mean) * (batch_size / total)
                     seen = total
