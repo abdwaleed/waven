@@ -158,7 +158,11 @@ def orientation_correction_for_stretches(visual_coverage, nx, ny, omax):
     return corrected_ori
 
 
-def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_coverage, screen_ratio, sigmas, frequencies, n_orientations=8, fil=[0], absolute=False, plotting=False, n_time=None, rf_output_path=None):
+def PearsonCorrelationPinkNoise(
+    stim, resp, neuron_pos, nx, ny, ns, nf, visual_coverage, screen_ratio,
+    sigmas, frequencies, n_orientations=8, fil=[0], absolute=False,
+    plotting=False, n_time=None, rf_output_path=None, paired_frequencies=None,
+):
     """Compute a chunked RF-correlation tensor and preferred feature indices.
 
     Args:
@@ -174,6 +178,10 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
         screen_ratio: Visual degrees per x analysis pixel.
         sigmas: Sigma values converted for visual-degree display.
         frequencies: Frequency values associated with the final feature axis.
+        paired_frequencies: Optional one-frequency-per-sigma values for a
+            coupled coarse bank. These preserve the compact 5-D cache while
+            reporting the scientifically correct frequency for each preferred
+            sigma feature.
         n_orientations: Number of orientation bins over 180 degrees.
         fil: Legacy filtering selector used only by optional plotting.
         absolute: Select preferred features by absolute correlation after output.
@@ -246,7 +254,15 @@ def PearsonCorrelationPinkNoise(stim, resp, neuron_pos, nx, ny, ns, nf, visual_c
     ymax_corr = (abs(ymax - ny) * (abs(yM - ym) / ny)) + ym
     
     smax_corr = sigmas[smax.astype(int)]
-    fmax_corr = frequencies[fmax.astype(int)]
+    paired_frequencies = np.asarray(
+        paired_frequencies if paired_frequencies is not None else [], dtype=float
+    )
+    if paired_frequencies.size:
+        if paired_frequencies.shape != np.asarray(sigmas).shape:
+            raise ValueError("Paired coarse frequencies must contain exactly one value per sigma.")
+        fmax_corr = paired_frequencies[smax.astype(int)]
+    else:
+        fmax_corr = frequencies[fmax.astype(int)]
     
     maxe_corr = [xmax_corr, ymax_corr, omax_corr, smax_corr, fmax_corr]
     

@@ -1,31 +1,52 @@
-"""Wavelet-domain helpers grouped by responsibility.
+"""Wavelet helpers with lazy heavy numerical imports.
 
-``filters`` builds Gabor filters and libraries. ``decomposition`` applies those
-libraries to stimulus videos and stores wavelet coefficient arrays.
+Filter-bank planning is useful in the GUI before PyTorch, Matplotlib, or the
+decomposition stack needs to be initialized.  Existing public wavelet exports
+remain available through ``__getattr__``.
 """
-from .filters import (
-    has_enough_ram,
-    makeFilterLibrary,
-    makeFilterLibrary2,
-    makeFilterLibrary3D,
-    makeGaborFilter,
-    makeGaborFilter3D,
-)
-from .decomposition import (
-    build_convolution_kernel_cache,
-    convolution_kernel_cache_path,
-    downsample_video_binary,
-    downsample_video_uint,
-    getTrueRF,
-    getWTfromNPY,
-    waveletDecomposition,
-    waveletDecompositionConv,
-    waveletPowerDecompositionConv,
-    waveletDecompositionFull,
-    waveletDecompositionFullConv,
-    waveletTransform,
-    waveletTransform3D,
-)
+from __future__ import annotations
+
+from importlib import import_module
+
+from .recommendations import FilterBankRecommendation, recommend_filter_bank
+
+
+_FILTER_EXPORTS = {
+    "has_enough_ram",
+    "makeFilterLibrary",
+    "makeFilterLibrary2",
+    "makeFilterLibrary3D",
+    "makeGaborFilter",
+    "makeGaborFilter3D",
+}
+_DECOMPOSITION_EXPORTS = {
+    "build_convolution_kernel_cache",
+    "convolution_kernel_cache_path",
+    "downsample_video_binary",
+    "downsample_video_uint",
+    "getTrueRF",
+    "getWTfromNPY",
+    "waveletDecomposition",
+    "waveletDecompositionConv",
+    "waveletPowerDecompositionConv",
+    "waveletDecompositionFull",
+    "waveletDecompositionFullConv",
+    "waveletTransform",
+    "waveletTransform3D",
+}
+
+
+def __getattr__(name):
+    """Resolve legacy public helpers without eager numerical imports."""
+    if name in _FILTER_EXPORTS:
+        value = getattr(import_module(".filters", __name__), name)
+    elif name in _DECOMPOSITION_EXPORTS:
+        value = getattr(import_module(".decomposition", __name__), name)
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
+
 
 __all__ = [
     "has_enough_ram",
@@ -47,4 +68,6 @@ __all__ = [
     "waveletDecompositionFull",
     "waveletDecompositionFullConv",
     "getTrueRF",
+    "FilterBankRecommendation",
+    "recommend_filter_bank",
 ]

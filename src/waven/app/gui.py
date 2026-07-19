@@ -89,6 +89,11 @@ from ..storage.neural_cache import (
     load_unit_ids,
 )
 from ..stimulus.metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
+from ..stimulus.sampling import (
+    sampling_plan_from_degrees_per_pixel,
+    sampling_plan_from_max_cpd,
+    sampling_plan_from_percent,
+)
 
 from .constants import (
     ANALYSIS_FIELD_LABELS,
@@ -2676,8 +2681,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             cache_frequencies = (
                 frequencies if _selected_coarse_rf_frequency_mode() == "frequency_list" else []
             )
+            coupled_frequencies = _coarse_matched_pair_frequencies()
         else:
             raise ValueError(f"Unknown convolution kernel cache kind: {kind}")
+
+        if kind == "fine":
+            coupled_frequencies = []
 
         cache_path = _convolution_kernel_cache_output_path(kind)
         folder_path = os.path.dirname(cache_path) or "."
@@ -2688,6 +2697,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             n_theta,
             phase_offsets=phase_offsets,
             frequencies=cache_frequencies,
+            coupled_frequencies=coupled_frequencies,
             force=force,
             cancel_event=_current_cancel_event(),
         )
@@ -2710,7 +2720,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             value = coarse_rf_frequency_mode_var.get()
         except NameError:
             return "coupled"
-        return "frequency_list" if value in {"frequency_list", "Use frequency list"} else "coupled"
+        return "frequency_list" if value in {
+            "frequency_list", "Use frequency list", "Use independent list"
+        } else "coupled"
+
+    def _coarse_matched_pair_frequencies():
+        """Return user-defined sigma/frequency pairs when the two lists match.
+
+        A matched list is interpreted only by the convolution backend.  Unequal
+        lists deliberately retain the established legacy sigma-to-frequency
+        relationship, preserving existing configurations.
+        """
+        if _selected_coarse_rf_frequency_mode() != "coupled":
+            return []
+        try:
+            sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
+            frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        except (KeyError, NameError, ValueError):
+            return []
+        if len(sigmas) == len(frequencies) and len(sigmas) > 0:
+            return frequencies
+        return []
 
     def _selected_wavelet_format():
         """Return the selected durable format for wavelet/RF cache products."""
@@ -3153,10 +3183,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        matched_pair_frequencies = _coarse_matched_pair_frequencies()
         if product == "coarse_rf" and coarse_frequency_mode == "frequency_list" and backend != "convolution":
             raise ValueError(
                 "Coarse RF 'Use frequency list' requires the Convolution backend. "
                 "Select it in Advanced Session Config, then prepare the Coarse RF Power Cache."
+            )
+        if (
+            product == "coarse_rf"
+            and coarse_frequency_mode == "coupled"
+            and matched_pair_frequencies
+            and backend != "convolution"
+        ):
+            print(
+                "Coarse RF has matched sigma/frequency lists, but the Legacy backend uses its "
+                "historical sigma-coupled formula. Select the Convolution backend to use the "
+                "user-defined visual-angle-calibrated pairs."
             )
         phase_offsets = _gabor_phase_offsets_radians()
         fine_library_sigmas = _ordered_float_union(
@@ -3311,6 +3353,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "phase": coarse_phase_fingerprint,
                 "frequency_mode": coarse_frequency_mode,
                 "frequencies": frequencies if coarse_frequency_mode == "frequency_list" else [],
+                "matched_pair_frequencies": (
+                    matched_pair_frequencies
+                    if coarse_frequency_mode == "coupled" and backend == "convolution"
+                    else []
+                ),
                 # Chunking and codec determine both direct-write throughput and
                 # the spatial read plan used by Coarse RF correlation.  A
                 # versioned fingerprint makes an older 16 x 16/zstd cache
@@ -3433,6 +3480,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         progress_signature=coarse_power_fingerprint,
                         rf_neuron_count=rf_neuron_count,
                         frequencies=frequencies if coarse_frequency_mode == "frequency_list" else None,
+                        coupled_frequencies=(
+                            matched_pair_frequencies
+                            if coarse_frequency_mode == "coupled" else None
+                        ),
                     )
                     _raise_if_cancelled()
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
@@ -3463,6 +3514,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             n_orientations=n_thetas,
                             phase_offsets=phase_offsets,
                             kernel_cache_path=coarse_kernel_cache_path,
+                            coupled_frequencies=(
+                                matched_pair_frequencies
+                                if coarse_frequency_mode == "coupled" and backend == "convolution"
+                                else None
+                            ),
                             output_format="zarr",
                             output_stem=os.path.splitext(os.path.basename(real_phase_path))[0],
                             cancel_event=_current_cancel_event(),
@@ -3498,6 +3554,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             n_orientations=n_thetas,
                             phase_offsets=phase_offsets,
                             kernel_cache_path=coarse_kernel_cache_path,
+                            coupled_frequencies=(
+                                matched_pair_frequencies
+                                if coarse_frequency_mode == "coupled" and backend == "convolution"
+                                else None
+                            ),
                             output_format="zarr",
                             output_stem=os.path.splitext(os.path.basename(imag_phase_path))[0],
                             cancel_event=_current_cancel_event(),
@@ -3974,6 +4035,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
             degrees_per_pixel = (degrees_per_pixel_x + degrees_per_pixel_y) / 2.0
             frequencies_cpd = frequencies / degrees_per_pixel
+            matched_pair_frequencies_cpd = (
+                frequencies_cpd
+                if _selected_coarse_rf_frequency_mode() == "coupled" and len(frequencies) == len(sigmas)
+                else None
+            )
             n_orientations = int(gabor_entries["N_thetas"].get())
             ns = len(sigmas)
             spks_path = param_entries["Spks Path"].get()
@@ -4152,9 +4218,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled,
                                                 np.mean(spks[:, :n_frames], axis=0),
                                                  neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
-                                                 n_orientations=n_orientations,
-                                                 plotting=False,
-                                                 rf_output_path=rf_output_path)
+                                                  n_orientations=n_orientations,
+                                                  plotting=False,
+                                                 rf_output_path=rf_output_path,
+                                                 paired_frequencies=matched_pair_frequencies_cpd)
         update_progress(75, "Coarse receptive-field analysis", "Precomputing orientation tuning curves")
         # Both curve types select the same preferred Gabor features.  Compute
         # them in one chunk-batched traversal so this stage reads each Zarr
@@ -4214,6 +4281,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 feature_x, feature_y, feature_orientation, feature_sigma, feature_frequency = (
                     int(value) for value in best_feature
                 )
+                feature_frequency_cpd = (
+                    float(matched_pair_frequencies_cpd[feature_sigma])
+                    if matched_pair_frequencies_cpd is not None
+                    else float(rf_frequencies[feature_frequency])
+                )
                 records.append(
                     {
                         "unit_id": record_unit_id,
@@ -4256,8 +4328,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "preferred_rf_orientation_deg": float(angles[feature_orientation]),
                             "sigma_index": feature_sigma,
                             "sigma_deg": float(sigmas_deg[feature_sigma]),
-                            "frequency_index": feature_frequency,
-                            "frequency_cycles_per_deg": float(rf_frequencies[feature_frequency]),
+                            "frequency_index": (
+                                feature_sigma if matched_pair_frequencies_cpd is not None else feature_frequency
+                            ),
+                            "frequency_cycles_per_deg": feature_frequency_cpd,
+                            "frequency_pairing": (
+                                "matched_to_sigma" if matched_pair_frequencies_cpd is not None else "independent_axis"
+                            ),
                         },
                     }
                 )
@@ -4279,6 +4356,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             frequencies=frequencies,
             frequencies_cpd=frequencies_cpd,
             rf_frequencies=rf_frequencies,
+            matched_pair_frequencies_cpd=matched_pair_frequencies_cpd,
             analysis_coverage=analysis_coverage,
             visual_coverage=visual_coverage,
             screen_ratio=screen_ratio,
@@ -5525,6 +5603,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "wavelet_backend": _selected_wavelet_backend(),
                 "coarse_rf_frequency_mode": _selected_coarse_rf_frequency_mode(),
                 "downsample_percent": _selected_downsample_percent(),
+                "sampling_mode": sampling_mode_var.get(),
+                "target_degrees_per_pixel": target_degrees_per_pixel_var.get(),
+                "maximum_spatial_frequency_cpd": maximum_spatial_frequency_cpd_var.get(),
+                "filter_bank_minimum_cpd": filter_bank_minimum_cpd_var.get(),
+                "filter_bank_maximum_cpd": filter_bank_maximum_cpd_var.get(),
+                "filter_bank_density": filter_bank_density_var.get(),
+                "filter_bank_cycles_per_sigma": filter_bank_cycles_per_sigma_var.get(),
                 "gabor_format": gabor_format_var.get(),
                 "wavelet_format": wavelet_format_var.get(),
                 "downsample_format": _selected_downsample_format(),
@@ -5582,11 +5667,26 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             loaded_coarse_frequency_mode = gui_state.get("coarse_rf_frequency_mode")
             if loaded_coarse_frequency_mode in {"coupled", "frequency_list"}:
                 coarse_rf_frequency_mode_var.set(
-                    "Use frequency list" if loaded_coarse_frequency_mode == "frequency_list" else "Couple sigma/f"
+                    "Use independent list"
+                    if loaded_coarse_frequency_mode == "frequency_list"
+                    else "Couple size / frequency"
                 )
             loaded_percent = gui_state.get("downsample_percent", state.get("downsample_percent"))
             if loaded_percent is not None:
                 downsample_percent_var.set(float(loaded_percent))
+            sampling_mode = gui_state.get("sampling_mode")
+            if sampling_mode in {"Target degrees/pixel", "Retain up to cpd", "Compatibility percent"}:
+                sampling_mode_var.set(sampling_mode)
+            for state_key, variable in (
+                ("target_degrees_per_pixel", target_degrees_per_pixel_var),
+                ("maximum_spatial_frequency_cpd", maximum_spatial_frequency_cpd_var),
+                ("filter_bank_minimum_cpd", filter_bank_minimum_cpd_var),
+                ("filter_bank_maximum_cpd", filter_bank_maximum_cpd_var),
+                ("filter_bank_density", filter_bank_density_var),
+                ("filter_bank_cycles_per_sigma", filter_bank_cycles_per_sigma_var),
+            ):
+                if state_key in gui_state:
+                    variable.set(str(gui_state[state_key]))
             loaded_gabor = state.get("gabor_param") or state.get("gabor") or {}
             for key, value in loaded_gabor.items():
                 if key in gabor_entries:
@@ -5644,6 +5744,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             _apply_project_layout_defaults(force=True)
             try:
                 _refresh_neural_source_controls()
+                _refresh_sampling_mode()
                 _refresh_downsample_controls()
                 _sync_completed_actions_from_artifacts()
                 refresh_action_buttons()
@@ -6372,11 +6473,39 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     wavelet_backend_var = tk.StringVar(value=initial_backend if initial_backend in {"legacy", "convolution"} else "legacy")
     initial_coarse_frequency_mode = gui_options.get("coarse_rf_frequency_mode", "coupled")
     coarse_rf_frequency_mode_var = tk.StringVar(
-        value="Use frequency list" if initial_coarse_frequency_mode == "frequency_list" else "Couple sigma/f"
+        value=(
+            "Use independent list"
+            if initial_coarse_frequency_mode == "frequency_list"
+            else "Couple size / frequency"
+        )
     )
     initial_downsample_format = gui_options.get("downsample_format", "npy")
     downsample_format_var = tk.StringVar(value=initial_downsample_format if initial_downsample_format in {"npy", "zarr"} else "npy")
     downsample_percent_var = tk.DoubleVar(value=float(gui_options.get("downsample_percent", 20.0)))
+    initial_sampling_mode = gui_options.get("sampling_mode", "Target degrees/pixel")
+    sampling_mode_var = tk.StringVar(
+        value=initial_sampling_mode
+        if initial_sampling_mode in {"Target degrees/pixel", "Retain up to cpd", "Compatibility percent"}
+        else "Target degrees/pixel"
+    )
+    target_degrees_per_pixel_var = tk.StringVar(
+        value=str(gui_options.get("target_degrees_per_pixel", 0.75))
+    )
+    maximum_spatial_frequency_cpd_var = tk.StringVar(
+        value=str(gui_options.get("maximum_spatial_frequency_cpd", 0.4))
+    )
+    filter_bank_minimum_cpd_var = tk.StringVar(
+        value=str(gui_options.get("filter_bank_minimum_cpd", 0.025))
+    )
+    filter_bank_maximum_cpd_var = tk.StringVar(
+        value=str(gui_options.get("filter_bank_maximum_cpd", 0.4))
+    )
+    filter_bank_density_var = tk.StringVar(
+        value=str(gui_options.get("filter_bank_density", "Standard"))
+    )
+    filter_bank_cycles_per_sigma_var = tk.StringVar(
+        value=str(gui_options.get("filter_bank_cycles_per_sigma", 1.0))
+    )
     neural_source_var = tk.StringVar(value=initial_neural_source if initial_neural_source in {"data_dir", "spks_path"} else "data_dir")
     neural_source_display_var = tk.StringVar(
         value="Continue / existing cache" if neural_source_var.get() == "spks_path" else "Fresh / raw data"
@@ -6564,6 +6693,31 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             pass
 
+    def _on_coarse_rf_frequency_mode_changed(value):
+        """Invalidate artifacts after changing the coarse filter-bank topology."""
+        mode = "frequency_list" if value in {"Use frequency list", "Use independent list"} else "coupled"
+        _invalidate_completed_actions("gabor", "wavelet", "rf")
+        refresh_size_estimates()
+        mode_description = (
+            "the independent configured Frequencies list"
+            if mode == "frequency_list"
+            else "one matched frequency per filter size"
+        )
+        try:
+            filter_bank_mode_hint.configure(
+                text=(
+                    "Independent lists evaluate every size × frequency combination."
+                    if mode == "frequency_list"
+                    else "Matched lists pair each filter size with its corresponding frequency."
+                )
+            )
+        except NameError:
+            pass
+        print(
+            "Coarse RF filter-bank mode changed to " + mode_description + ". "
+            "Rebuild the coarse Gabor kernels and Coarse RF power cache before analysis."
+        )
+
     ctk.CTkLabel(
         frame_session,
         text="One metadata-derived analysis grid is shared by Coarse RF, Run Model, and Run Full Model.",
@@ -6750,10 +6904,169 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     gabor_entries = {}
     gabor_row_widgets = {}
+
+    filter_recommender = ctk.CTkFrame(frame_gabor, fg_color="#F8FAFC", corner_radius=8)
+    filter_recommender.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 14))
+    filter_recommender.columnconfigure(0, weight=1)
+    ctk.CTkLabel(
+        filter_recommender,
+        text="Scientifically Calibrated Filter Bank",
+        text_color=text_color,
+        font=ctk.CTkFont(size=13, weight="bold"),
+    ).grid(row=0, column=0, sticky="w", padx=10, pady=(9, 2))
+    ctk.CTkLabel(
+        filter_recommender,
+        text=(
+            "Choose physical frequencies first. WAVEN converts the generated cpd and degree values "
+            "to the calibrated analysis-pixel fields below."
+        ),
+        text_color=muted_text,
+        wraplength=420,
+        justify="left",
+    ).grid(row=1, column=0, sticky="w", padx=10)
+    filter_bank_mode_control = ctk.CTkSegmentedButton(
+        filter_recommender,
+        values=["Couple size / frequency", "Use independent list"],
+        variable=coarse_rf_frequency_mode_var,
+        command=_on_coarse_rf_frequency_mode_changed,
+        height=28,
+        selected_color=primary_btn,
+        selected_hover_color="#1D4ED8",
+        unselected_color="#E5E7EB",
+        unselected_hover_color="#D1D5DB",
+        text_color=text_color,
+    )
+    filter_bank_mode_control.grid(row=2, column=0, sticky="ew", padx=10, pady=(8, 2))
+    filter_bank_mode_hint = ctk.CTkLabel(
+        filter_recommender,
+        text=(
+            "Independent lists evaluate every size × frequency combination."
+            if _selected_coarse_rf_frequency_mode() == "frequency_list"
+            else "Matched lists pair each filter size with its corresponding frequency."
+        ),
+        text_color=muted_text,
+        wraplength=420,
+        justify="left",
+    )
+    filter_bank_mode_hint.grid(row=3, column=0, sticky="w", padx=10)
+
+    filter_bank_inputs = ctk.CTkFrame(filter_recommender, fg_color="transparent")
+    filter_bank_inputs.grid(row=4, column=0, sticky="ew", padx=10, pady=(8, 2))
+    for column in range(4):
+        filter_bank_inputs.columnconfigure(column, weight=1)
+    for column, label, variable in (
+        (0, "Minimum (cpd)", filter_bank_minimum_cpd_var),
+        (1, "Maximum (cpd)", filter_bank_maximum_cpd_var),
+        (2, "Cycles / sigma", filter_bank_cycles_per_sigma_var),
+    ):
+        ctk.CTkLabel(filter_bank_inputs, text=label, text_color=muted_text).grid(
+            row=0, column=column, sticky="w", padx=(0, 6)
+        )
+        ctk.CTkEntry(filter_bank_inputs, textvariable=variable, height=28).grid(
+            row=1, column=column, sticky="ew", padx=(0, 6)
+        )
+    ctk.CTkLabel(filter_bank_inputs, text="Density", text_color=muted_text).grid(
+        row=0, column=3, sticky="w"
+    )
+    ctk.CTkOptionMenu(
+        filter_bank_inputs,
+        values=["Fast", "Standard", "Dense"],
+        variable=filter_bank_density_var,
+        height=28,
+        fg_color="#64748B",
+        button_color="#475569",
+        button_hover_color="#334155",
+    ).grid(row=1, column=3, sticky="ew")
+
+    filter_bank_summary_label = ctk.CTkLabel(
+        filter_recommender,
+        text="Select a stimulus in Step 1, then recommend a physical filter bank.",
+        text_color=muted_text,
+        wraplength=420,
+        justify="left",
+    )
+    filter_bank_summary_label.grid(row=5, column=0, sticky="w", padx=10, pady=(4, 2))
+
+    def _format_filter_bank_values(values):
+        """Format a compact human-readable numeric list for the recommender."""
+        return "[" + ", ".join(f"{float(value):.4g}" for value in values) + "]"
+
+    def _recommend_filter_bank():
+        """Apply a calibrated physical filter-bank recommendation to editable fields."""
+        try:
+            from ..wavelets.recommendations import recommend_filter_bank
+
+            degrees_x, degrees_y = _analysis_degrees_per_pixel()
+            degrees_per_pixel = (degrees_x + degrees_y) / 2.0
+            nyquist_cpd = 1.0 / (2.0 * degrees_per_pixel)
+            recommendation = recommend_filter_bank(
+                filter_bank_minimum_cpd_var.get(),
+                filter_bank_maximum_cpd_var.get(),
+                degrees_per_pixel,
+                density=filter_bank_density_var.get(),
+                cycles_per_sigma=filter_bank_cycles_per_sigma_var.get(),
+                nyquist_cpd=nyquist_cpd,
+            )
+            grid_width, grid_height = _stimulus_grid_dimensions()
+        except Exception as exc:
+            messagebox.showerror(
+                "Filter-bank recommendation unavailable",
+                "Select a valid stimulus and analysis coverage in Step 1, then enter valid physical limits.\n\n"
+                f"{exc}",
+            )
+            return
+
+        _set_entry_value(
+            gabor_entries["Sigmas"],
+            repr([round(float(value), 8) for value in recommendation.sigmas_pixels]),
+        )
+        _set_entry_value(
+            gabor_entries["Frequencies"],
+            repr([round(float(value), 8) for value in recommendation.frequencies_per_pixel]),
+        )
+        mode = _selected_coarse_rf_frequency_mode()
+        if _selected_wavelet_backend() != "convolution":
+            # Both explicit matched pairs and independent frequency lists need
+            # convolution kernels; Legacy only knows its historical hard-coded
+            # coarse sigma/frequency relationship.
+            set_wavelet_backend_from_panel("convolution")
+        _invalidate_completed_actions("gabor", "wavelet", "rf")
+        complexity = (
+            recommendation.coupled_resource_multiplier
+            if mode == "coupled"
+            else recommendation.independent_resource_multiplier
+        )
+        summary_lines = [
+            "Applied "
+            + ("matched pairs" if mode == "coupled" else "independent lists")
+            + f": {len(recommendation.frequencies_cpd)} frequencies from "
+            + _format_filter_bank_values(recommendation.frequencies_cpd)
+            + " cpd.",
+            "Envelopes: " + _format_filter_bank_values(recommendation.sigmas_degrees) + " deg sigma.",
+            f"Coarse RF evaluates {complexity} size/frequency combination(s) per orientation "
+            f"on the {grid_width} x {grid_height} calibrated grid (Nyquist {nyquist_cpd:.3g} cpd).",
+        ]
+        if max(recommendation.sigmas_pixels) > min(grid_width, grid_height) / 2.0:
+            summary_lines.append("The lowest-frequency envelope is broad relative to this analysis field.")
+        summary_lines.extend(recommendation.warnings)
+        filter_bank_summary_label.configure(text="\n".join(summary_lines))
+        print("[filter bank] " + " ".join(summary_lines))
+        refresh_size_estimates()
+
+    ctk.CTkButton(
+        filter_recommender,
+        text="Recommend and Apply Filter Bank",
+        command=_recommend_filter_bank,
+        height=30,
+        fg_color=primary_btn,
+        hover_color="#1D4ED8",
+    ).grid(row=6, column=0, sticky="ew", padx=10, pady=(8, 10))
+
+    gabor_input_start_row = 4
     editable_gabor_params = [(key, value) for key, value in gabor_param.items() if key not in {"NX", "NY"}]
     for i, (label, default) in enumerate(editable_gabor_params):
         gabor_row_widgets[label] = add_config_row(
-            frame_gabor, label, default, gabor_entries, i, frame_color, GABOR_LABELS
+            frame_gabor, label, default, gabor_entries, i + gabor_input_start_row, frame_color, GABOR_LABELS
         )
 
     gabor_dimensions_label = ctk.CTkLabel(
@@ -6761,7 +7074,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         text="Stimulus grid: select a movie in Step 1",
         text_color=muted_text,
     )
-    gabor_dimensions_label.grid(row=len(editable_gabor_params), column=0, columnspan=2, sticky="w", pady=(6, 0))
+    gabor_dimensions_label.grid(
+        row=gabor_input_start_row + len(editable_gabor_params),
+        column=0,
+        columnspan=2,
+        sticky="w",
+        pady=(6, 0),
+    )
 
     initial_gabor_format = gui_options.get("gabor_format", "npy")
     gabor_format_var = tk.StringVar(value=initial_gabor_format if initial_gabor_format in {"npy", "zarr"} else "npy")
@@ -6774,10 +7093,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#1D4ED8",
         command=run_in_thread(create_both_gabor_libraries, "Gabor asset preparation"),
     )
-    btn_submit_gabor.grid(row=len(editable_gabor_params)+1, column=0, columnspan=2, pady=(15, 0), sticky="ew")
+    btn_submit_gabor.grid(
+        row=gabor_input_start_row + len(editable_gabor_params) + 1,
+        column=0,
+        columnspan=2,
+        pady=(15, 0),
+        sticky="ew",
+    )
 
     format_frame = ctk.CTkFrame(frame_gabor, fg_color="transparent")
-    format_frame.grid(row=len(editable_gabor_params)+2, column=0, columnspan=2, pady=(10, 0), sticky="w")
+    format_frame.grid(
+        row=gabor_input_start_row + len(editable_gabor_params) + 2,
+        column=0,
+        columnspan=2,
+        pady=(10, 0),
+        sticky="w",
+    )
     ctk.CTkLabel(format_frame, text="Library format:", text_color=muted_text).pack(side=tk.LEFT)
 
     def _set_gabor_format(val):
@@ -6823,7 +7154,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         background=frame_color,
         foreground=text_color,
     )
-    gabor_size_label.grid(row=len(editable_gabor_params)+3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    gabor_size_label.grid(
+        row=gabor_input_start_row + len(editable_gabor_params) + 3,
+        column=0,
+        columnspan=2,
+        sticky="w",
+        pady=(6, 0),
+    )
 
     # --- Stimulus wavelet pipeline ---
     frame_processing = ttk.LabelFrame(stage_wavelet, text="Stimulus Wavelet Pipeline", padding=15)
@@ -7152,10 +7489,160 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         param_entries, 0, frame_color, ANALYSIS_LABELS,
     )
 
-    downsample_percent_label = ctk.CTkLabel(frame_downsample, text="", text_color=muted_text)
+    ctk.CTkLabel(
+        frame_downsample,
+        text="1. Choose scientifically meaningful analysis sampling",
+        text_color=text_color,
+        font=ctk.CTkFont(size=13, weight="bold"),
+    ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 2))
+    ctk.CTkLabel(
+        frame_downsample,
+        text=(
+            "Target degrees/pixel and retained cpd use the current Analysis Coverage to make "
+            "analysis pixels square in visual angle. Percentage is retained for compatibility."
+        ),
+        text_color=muted_text,
+        wraplength=420,
+        justify="left",
+    ).grid(row=2, column=0, columnspan=2, sticky="w")
+
+    sampling_mode_control = ctk.CTkSegmentedButton(
+        frame_downsample,
+        values=["Target degrees/pixel", "Retain up to cpd", "Compatibility percent"],
+        variable=sampling_mode_var,
+        height=28,
+        selected_color=primary_btn,
+        selected_hover_color="#1D4ED8",
+        unselected_color="#E5E7EB",
+        unselected_hover_color="#D1D5DB",
+        text_color=text_color,
+    )
+    sampling_mode_control.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 2))
+
+    sampling_target_frame = ctk.CTkFrame(frame_downsample, fg_color="transparent")
+    sampling_target_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+    sampling_target_frame.columnconfigure(1, weight=1)
+    sampling_target_label = ctk.CTkLabel(
+        sampling_target_frame, text="Target analysis sampling (deg/pixel):", text_color=text_color
+    )
+    sampling_target_label.grid(row=0, column=0, sticky="w")
+    sampling_target_entry = ctk.CTkEntry(
+        sampling_target_frame, textvariable=target_degrees_per_pixel_var, height=28
+    )
+    sampling_target_entry.grid(row=0, column=1, sticky="ew", padx=(8, 8))
+    sampling_apply_button = ctk.CTkButton(
+        sampling_target_frame, text="Apply sampling", height=28, fg_color="#64748B", hover_color="#475569"
+    )
+    sampling_apply_button.grid(row=0, column=2, sticky="e")
+
+    downsample_percent_frame = ctk.CTkFrame(frame_downsample, fg_color="transparent")
+    downsample_percent_frame.columnconfigure(1, weight=1)
+    downsample_percent_label = ctk.CTkLabel(downsample_percent_frame, text="", text_color=muted_text)
+    downsample_percent_label.grid(row=0, column=0, sticky="w", pady=(4, 2))
+    downsample_slider = ctk.CTkSlider(
+        downsample_percent_frame,
+        from_=1,
+        to=100,
+        number_of_steps=100,
+        variable=downsample_percent_var,
+        height=18,
+    )
+    downsample_slider.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=(4, 2))
+
+    sampling_status_label = ctk.CTkLabel(
+        frame_downsample,
+        text="Select a valid movie and Analysis Coverage to calculate the calibrated grid.",
+        text_color=muted_text,
+        wraplength=420,
+        justify="left",
+    )
+    sampling_status_label.grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 2))
+
+    def _sampling_coverage():
+        """Return the currently configured analysis coverage for sampling planning."""
+        return parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
+
+    def _refresh_sampling_status():
+        """Show the calibrated grid, visual sampling, and Nyquist limit."""
+        try:
+            plan = sampling_plan_from_percent(
+                _movie_metadata(), _selected_downsample_percent(), _sampling_coverage()
+            )
+            mode = sampling_mode_var.get()
+            requested = (
+                f"Target: {target_degrees_per_pixel_var.get()} deg/px"
+                if mode == "Target degrees/pixel"
+                else f"Retain: {maximum_spatial_frequency_cpd_var.get()} cpd"
+                if mode == "Retain up to cpd"
+                else "Compatibility percentage"
+            )
+            sampling_status_label.configure(
+                text=(
+                    f"{requested} | Derived grid: {plan.grid_width} x {plan.grid_height} px | "
+                    f"{plan.degrees_per_pixel_x:.4g} x {plan.degrees_per_pixel_y:.4g} deg/px | "
+                    f"Nyquist: {plan.nyquist_cpd:.3g} cpd | "
+                    f"compatibility sampling: {plan.horizontal_percent:.1f}% horizontally"
+                ),
+                text_color=muted_text,
+            )
+        except Exception as exc:
+            sampling_status_label.configure(
+                text=(
+                    "Select a valid movie and Analysis Coverage to calculate the calibrated grid. "
+                    f"({exc})"
+                ),
+                text_color=muted_text,
+            )
+
+    def _apply_sampling_choice():
+        """Convert the selected physical sampling goal into the cache percentage."""
+        try:
+            metadata = _movie_metadata()
+            coverage = _sampling_coverage()
+            mode = sampling_mode_var.get()
+            if mode == "Target degrees/pixel":
+                plan = sampling_plan_from_degrees_per_pixel(
+                    metadata, target_degrees_per_pixel_var.get(), coverage
+                )
+            elif mode == "Retain up to cpd":
+                plan = sampling_plan_from_max_cpd(
+                    metadata, maximum_spatial_frequency_cpd_var.get(), coverage
+                )
+            else:
+                plan = sampling_plan_from_percent(metadata, _selected_downsample_percent(), coverage)
+            downsample_percent_var.set(plan.horizontal_percent)
+            _invalidate_completed_actions("downsample", "wavelet", "rf")
+            _refresh_downsample_controls()
+            if plan.was_clamped:
+                messagebox.showwarning(
+                    "Sampling limited by source resolution",
+                    "The requested sampling is outside the supported 1–100% horizontal source range. "
+                    "WAVEN applied the closest available calibrated grid.",
+                )
+        except Exception as exc:
+            messagebox.showerror("Sampling setting unavailable", str(exc))
+
+    def _refresh_sampling_mode(_value=None):
+        """Expose the active scientific input and hide compatibility-only controls."""
+        mode = sampling_mode_var.get()
+        if mode == "Retain up to cpd":
+            sampling_target_label.configure(text="Maximum spatial frequency to retain (cpd):")
+            sampling_target_entry.configure(textvariable=maximum_spatial_frequency_cpd_var)
+            downsample_percent_frame.grid_remove()
+        elif mode == "Compatibility percent":
+            sampling_target_frame.grid_remove()
+            downsample_percent_frame.grid(row=5, column=0, columnspan=2, sticky="ew")
+            _refresh_sampling_status()
+            return
+        else:
+            sampling_target_label.configure(text="Target analysis sampling (deg/pixel):")
+            sampling_target_entry.configure(textvariable=target_degrees_per_pixel_var)
+            downsample_percent_frame.grid_remove()
+        sampling_target_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        _refresh_sampling_status()
 
     def _refresh_downsample_controls(_value=None):
-        """Refresh downsample-control state and labels."""
+        """Refresh downsample-control state and the derived scientific sampling."""
         percent = _selected_downsample_percent()
         if _value is not None:
             completed_actions.difference_update({
@@ -7164,28 +7651,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         try:
             downsample_slider.configure(state="normal")
             downsample_format_segment.configure(state="normal")
-            btn_downsample_video.configure(
-                text="Prepare Stimulus Cache"
-            )
-            downsample_percent_label.configure(text=f"Downsampling percentage: {percent:.0f}%")
+            btn_downsample_video.configure(text="Prepare Stimulus Cache")
+            downsample_percent_label.configure(text=f"Compatibility percentage: {percent:.0f}%")
+            _refresh_sampling_status()
             refresh_size_estimates()
         except Exception:
             pass
 
-    downsample_percent_label.grid(row=1, column=0, sticky="w", pady=(8, 2))
-    downsample_slider = ctk.CTkSlider(
-        frame_downsample,
-        from_=1,
-        to=100,
-        number_of_steps=100,
-        variable=downsample_percent_var,
-        command=_refresh_downsample_controls,
-        height=18,
-    )
-    downsample_slider.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(8, 2))
+    sampling_apply_button.configure(command=_apply_sampling_choice)
+    sampling_mode_control.configure(command=_refresh_sampling_mode)
+    downsample_slider.configure(command=_refresh_downsample_controls)
 
     downsample_format_frame = ctk.CTkFrame(frame_downsample, fg_color="transparent")
-    downsample_format_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    downsample_format_frame.grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
     ctk.CTkLabel(
         downsample_format_frame,
         text="Cache array format:",
@@ -7220,7 +7698,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#1D4ED8",
         command=run_in_thread(create_downsampled_video_cache, "Stimulus video downsampling"),
     )
-    btn_downsample_video.grid(row=3, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    btn_downsample_video.grid(row=8, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    _refresh_sampling_mode()
     _refresh_downsample_controls()
 
     # --- Neural & RF analysis ---
@@ -7228,17 +7707,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
     force_2d_graphs_var = tk.BooleanVar(value=False)
-
-    def _on_coarse_rf_frequency_mode_changed(value):
-        """Require matching kernels and power data after the coarse RF mode changes."""
-        mode = "frequency_list" if value == "Use frequency list" else "coupled"
-        _invalidate_completed_actions("gabor", "wavelet", "rf")
-        refresh_size_estimates()
-        mode_description = "the configured Frequencies list" if mode == "frequency_list" else "sigma-coupled frequencies"
-        print(
-            "Coarse RF frequency mode changed to " + mode_description + ". "
-            "Rebuild the coarse Gabor kernels and Coarse RF power cache before analysis."
-        )
 
     coarse_rf_controls = ctk.CTkFrame(frame_analysis, fg_color="transparent")
     coarse_rf_controls.pack(fill=tk.X, pady=(0, 10))
@@ -7252,21 +7720,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         command=run_in_thread(plot_data, "Coarse receptive-field analysis"),
     )
     btn_submit_plot.pack(side=tk.LEFT, fill=tk.X, expand=True)
-    ctk.CTkSegmentedButton(
-        coarse_rf_controls,
-        values=["Couple sigma/f", "Use frequency list"],
-        variable=coarse_rf_frequency_mode_var,
-        command=_on_coarse_rf_frequency_mode_changed,
-        width=230,
-        height=30,
-        selected_color="#2563EB",
-        selected_hover_color="#1D4ED8",
-        unselected_color="#4B5563",
-        unselected_hover_color="#374151",
-        font=ctk.CTkFont(size=11),
-        text_color=text_color,
-        dynamic_resizing=False,
-    ).pack(side=tk.RIGHT, padx=(12, 0))
     ctk.CTkCheckBox(
         coarse_rf_controls,
         text="Force 3D graphs to 2D",

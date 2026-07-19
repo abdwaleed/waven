@@ -1193,7 +1193,9 @@ def convolution_kernel_cache_path(folder_path, kind):
     return os.path.join(folder_path, f"gabor_kernels_{kind}_conv.npz")
 
 
-def _kernel_cache_matches(cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets):
+def _kernel_cache_matches(
+    cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets, coupled_frequencies=None,
+):
     """Return whether an existing compact-kernel cache matches requested metadata."""
     if not cache_path or not os.path.exists(cache_path):
         return False
@@ -1202,6 +1204,9 @@ def _kernel_cache_matches(cache_path, kind, sigmas, frequencies, n_orientations,
             cache_kind = str(cache["kind"].item())
             cache_sigmas = np.asarray(cache["sigmas"], dtype=float)
             cache_frequencies = np.asarray(cache["frequencies"], dtype=float)
+            cache_coupled_frequencies = np.asarray(
+                cache["coupled_frequencies"] if "coupled_frequencies" in cache.files else [], dtype=float
+            )
             cache_phases = np.asarray(cache["phase_offsets"], dtype=float)
             cache_orientations = int(cache["n_orientations"].item())
             cache_kernels = cache["kernels"]
@@ -1210,6 +1215,9 @@ def _kernel_cache_matches(cache_path, kind, sigmas, frequencies, n_orientations,
         return False
 
     frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
+    coupled_frequencies = np.asarray(
+        coupled_frequencies if coupled_frequencies is not None else [], dtype=float
+    )
     phase_offsets = np.asarray(phase_offsets if phase_offsets is not None else (0.0, np.pi / 2), dtype=float)
     expected_prefix = (len(phase_offsets), len(sigmas), max(1, len(frequencies)))
     if cache_kind != str(kind).lower() or cache_orientations != int(n_orientations):
@@ -1220,11 +1228,14 @@ def _kernel_cache_matches(cache_path, kind, sigmas, frequencies, n_orientations,
         return False
     if cache_frequencies.shape != frequencies.shape:
         return False
+    if cache_coupled_frequencies.shape != coupled_frequencies.shape:
+        return False
     if cache_phases.shape != phase_offsets.shape:
         return False
     return (
         np.allclose(cache_sigmas, np.asarray(sigmas, dtype=float))
         and np.allclose(cache_frequencies, frequencies)
+        and np.allclose(cache_coupled_frequencies, coupled_frequencies)
         and np.allclose(cache_phases, phase_offsets)
     )
 
@@ -1236,6 +1247,7 @@ def build_convolution_kernel_cache(
     n_orientations,
     phase_offsets=None,
     frequencies=None,
+    coupled_frequencies=None,
     force=False,
     cancel_event=None,
 ):
@@ -1243,8 +1255,9 @@ def build_convolution_kernel_cache(
 
     The cache stores center-padded spatial kernels, not flattened image-sized
     filter libraries.  A coarse cache with no frequencies uses the legacy
-    sigma-coupled frequency; passing frequencies creates an independent coarse
-    frequency axis, just as the full-model cache does.
+    sigma-coupled frequency.  ``coupled_frequencies`` supplies one explicit
+    frequency per sigma without adding an output axis; ``frequencies`` creates
+    an independent coarse frequency axis, just as the full-model cache does.
     """
     kind = str(kind).lower()
     if kind not in {"coarse", "fine"}:
@@ -1254,6 +1267,18 @@ def build_convolution_kernel_cache(
     sigmas = np.asarray(sigmas, dtype=float)
     phase_offsets = np.asarray(phase_offsets if phase_offsets is not None else (0.0, np.pi / 2), dtype=float)
     frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
+    coupled_frequencies = np.asarray(
+        coupled_frequencies if coupled_frequencies is not None else [], dtype=float
+    )
+    if coupled_frequencies.size:
+        if kind != "coarse":
+            raise ValueError("Explicit matched frequencies are supported only for the coarse kernel cache.")
+        if frequencies.size:
+            raise ValueError("Choose either matched sigma/frequency pairs or an independent frequency list.")
+        if coupled_frequencies.shape != sigmas.shape:
+            raise ValueError("Matched coarse frequencies must contain exactly one value per sigma.")
+        if np.any(coupled_frequencies <= 0):
+            raise ValueError("Matched coarse frequencies must be greater than zero.")
     frequencies_for_cache = frequencies if frequencies.size else np.asarray([], dtype=float)
     kernel_frequencies = frequencies_for_cache if frequencies_for_cache.size else np.asarray([0.0], dtype=float)
 
@@ -1265,6 +1290,7 @@ def build_convolution_kernel_cache(
         frequencies_for_cache,
         n_orientations,
         phase_offsets,
+        coupled_frequencies,
     ):
         print(f"Resume: found completed convolution kernel cache, reusing {cache_path}")
         return cache_path
@@ -1272,11 +1298,18 @@ def build_convolution_kernel_cache(
     thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
     kernels = []
     for phase_offset in phase_offsets:
-        for sigma in sigmas:
+        for sigma_index, sigma in enumerate(sigmas):
             freq_iter = kernel_frequencies
             for frequency in freq_iter:
                 check_cancelled(cancel_event)
-                if kind == "coarse" and not frequencies_for_cache.size:
+                if kind == "coarse" and coupled_frequencies.size:
+                    orientation_kernels = [
+                        _gabor_kernel_for_conv(
+                            theta, sigma, phase_offset, frequency=coupled_frequencies[sigma_index]
+                        )
+                        for theta in thetas
+                    ]
+                elif kind == "coarse" and not frequencies_for_cache.size:
                     orientation_kernels = [
                         _gabor_kernel_for_conv(theta, sigma, phase_offset, coupled_frequency=True)
                         for theta in thetas
@@ -1303,6 +1336,7 @@ def build_convolution_kernel_cache(
         kind=np.asarray(kind),
         sigmas=sigmas,
         frequencies=frequencies_for_cache,
+        coupled_frequencies=coupled_frequencies,
         phase_offsets=phase_offsets,
         n_orientations=np.asarray(int(n_orientations)),
         kernels=kernel_bank,
@@ -1311,12 +1345,16 @@ def build_convolution_kernel_cache(
     return cache_path
 
 
-def _load_convolution_kernel_cache(cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets):
+def _load_convolution_kernel_cache(
+    cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets, coupled_frequencies=None,
+):
     """Load and validate a compact convolution-kernel cache."""
     if not cache_path:
         return None
     frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
-    if not _kernel_cache_matches(cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets):
+    if not _kernel_cache_matches(
+        cache_path, kind, sigmas, frequencies, n_orientations, phase_offsets, coupled_frequencies,
+    ):
         raise ValueError(
             "Convolution kernel cache does not match the current configuration. "
             f"Rebuild the Gabor library for the selected backend, or remove this cache: {cache_path}"
@@ -2002,6 +2040,7 @@ def waveletDecompositionConv(
     output_stem=None,
     zarr_chunks=None,
     cancel_event=None,
+    coupled_frequencies=None,
 ):
     """Decompose a movie using compact Gabor kernels and ``torch.conv2d``.
 
@@ -2013,6 +2052,11 @@ def waveletDecompositionConv(
     device = resolve_compute_device(prefer_gpu=True)
     num_frames, ny, nx = videodata.shape
     sigmas = np.asarray(sigmas, dtype=float)
+    coupled_frequencies = np.asarray(
+        coupled_frequencies if coupled_frequencies is not None else [], dtype=float
+    )
+    if coupled_frequencies.size and coupled_frequencies.shape != sigmas.shape:
+        raise ValueError("Matched coarse frequencies must contain exactly one value per sigma.")
     thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
     phase_offset = _phase_offset_from_index(phase, phase_offsets)
     kernel_cache = _load_convolution_kernel_cache(
@@ -2022,6 +2066,7 @@ def waveletDecompositionConv(
         [],
         n_orientations,
         phase_offsets,
+        coupled_frequencies,
     ) if kernel_cache_path else None
     final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
     output_format = str(output_format or "npy").lower()
@@ -2085,6 +2130,7 @@ def waveletDecompositionConv(
         )
         progress_kind = json.dumps(
             {"product": "coarse_phase", "phase": int(phase), "sigmas": sigmas.tolist(),
+             "coupled_frequencies": coupled_frequencies.tolist(),
              "orientations": int(n_orientations),
              "phase_offsets": list(phase_offsets) if phase_offsets is not None else []},
             sort_keys=True,
@@ -2132,8 +2178,14 @@ def waveletDecompositionConv(
                 kernels = kernel_cache[int(phase), group_start:group_end, 0].reshape(-1, *kernel_cache.shape[-2:])
             else:
                 kernels = [
-                    _gabor_kernel_for_conv(theta, sigma, phase_offset, coupled_frequency=True)
-                    for sigma in group_sigmas
+                    _gabor_kernel_for_conv(
+                        theta,
+                        sigma,
+                        phase_offset,
+                        frequency=(coupled_frequencies[group_start + sigma_offset] if coupled_frequencies.size else None),
+                        coupled_frequency=not bool(coupled_frequencies.size),
+                    )
+                    for sigma_offset, sigma in enumerate(group_sigmas)
                     for theta in thetas
                 ]
             print(
@@ -2206,6 +2258,7 @@ def waveletPowerDecompositionConv(
     kernel_cache_path=None, frame_chunk_size=None, filter_group_size=None,
     output_stem="coarse_rf_power", zarr_chunks=None, cancel_event=None,
     progress_signature=None, rf_neuron_count=None, frequencies=None,
+    coupled_frequencies=None,
 ):
     """Write coarse wavelet power directly, without temporary phase caches.
 
@@ -2223,12 +2276,23 @@ def waveletPowerDecompositionConv(
     num_frames, ny, nx = videodata.shape
     sigmas = np.asarray(sigmas, dtype=float)
     frequencies = np.asarray(frequencies if frequencies is not None else [], dtype=float)
+    coupled_frequencies = np.asarray(
+        coupled_frequencies if coupled_frequencies is not None else [], dtype=float
+    )
     independent_frequencies = bool(frequencies.size)
+    if coupled_frequencies.size:
+        if independent_frequencies:
+            raise ValueError("Choose either matched sigma/frequency pairs or an independent frequency list.")
+        if coupled_frequencies.shape != sigmas.shape:
+            raise ValueError("Matched coarse frequencies must contain exactly one value per sigma.")
+        if np.any(coupled_frequencies <= 0):
+            raise ValueError("Matched coarse frequencies must be greater than zero.")
     kernel_frequencies = frequencies if independent_frequencies else np.asarray([0.0], dtype=float)
     n_frequencies = len(kernel_frequencies)
     thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
     kernel_cache = _load_convolution_kernel_cache(
         kernel_cache_path, "coarse", sigmas, frequencies, n_orientations, phase_offsets,
+        coupled_frequencies,
     ) if kernel_cache_path else None
     final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
     if independent_frequencies:
@@ -2298,6 +2362,7 @@ def waveletPowerDecompositionConv(
     progress_kind = json.dumps(
         {"product": "coarse_rf_power", "sigmas": sigmas.tolist(),
          "orientations": int(n_orientations), "frequencies": frequencies.tolist(),
+          "coupled_frequencies": coupled_frequencies.tolist(),
          "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
          "resume_signature": progress_signature},
         sort_keys=True,
@@ -2333,7 +2398,13 @@ def waveletPowerDecompositionConv(
         if persisted_sigma_chunk <= int(filter_group_size):
             filter_group_size = persisted_sigma_chunk
         zarr_chunks = persisted_chunks
-    frequency_mode = "frequency list" if independent_frequencies else "sigma-coupled"
+    frequency_mode = (
+        "frequency list"
+        if independent_frequencies
+        else "matched sigma/frequency pairs"
+        if coupled_frequencies.size
+        else "legacy sigma-coupled"
+    )
     print(
         f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, "
         f"sigma group={filter_group_size}, frequency mode={frequency_mode}"
@@ -2358,18 +2429,24 @@ def waveletPowerDecompositionConv(
             imag_phase = _phase_offset_from_index(1, phase_offsets)
             real_kernels = [
                 _gabor_kernel_for_conv(
-                    theta, sigma, real_phase, frequency=frequency,
-                    coupled_frequency=not independent_frequencies,
+                    theta,
+                    sigma,
+                    real_phase,
+                    frequency=(coupled_frequencies[group_start + sigma_offset] if coupled_frequencies.size else frequency),
+                    coupled_frequency=not independent_frequencies and not bool(coupled_frequencies.size),
                 )
-                for sigma in sigmas[group_start:group_end]
+                for sigma_offset, sigma in enumerate(sigmas[group_start:group_end])
                 for frequency in kernel_frequencies for theta in thetas
             ]
             imag_kernels = [
                 _gabor_kernel_for_conv(
-                    theta, sigma, imag_phase, frequency=frequency,
-                    coupled_frequency=not independent_frequencies,
+                    theta,
+                    sigma,
+                    imag_phase,
+                    frequency=(coupled_frequencies[group_start + sigma_offset] if coupled_frequencies.size else frequency),
+                    coupled_frequency=not independent_frequencies and not bool(coupled_frequencies.size),
                 )
-                for sigma in sigmas[group_start:group_end]
+                for sigma_offset, sigma in enumerate(sigmas[group_start:group_end])
                 for frequency in kernel_frequencies for theta in thetas
             ]
 

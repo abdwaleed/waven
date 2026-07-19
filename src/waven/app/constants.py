@@ -13,8 +13,8 @@ from ..config import WORKFLOW_2P
 
 GABOR_FIELD_LABELS: Dict[str, str] = {
     "N_thetas": "Orientation Count",
-    "Sigmas": "Filter Sizes (analysis px)",
-    "Frequencies": "Spatial Frequencies (cyc/analysis px)",
+    "Sigmas": "Filter Sizes (analysis px; use recommender for degrees)",
+    "Frequencies": "Spatial Frequencies (cyc/analysis px; use recommender for cpd)",
     "Phases": "Phases (degrees)",
     "Save Path": "Gabor Cache Folder",
     "Coarse Library Path": "Coarse Gabor Folder",
