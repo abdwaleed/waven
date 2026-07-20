@@ -154,3 +154,21 @@ def test_direct_coarse_bundle_selects_coupled_phase_from_independent_power(tmp_p
             rtol=1e-5,
             atol=1e-6,
         )
+
+
+def test_full_kernel_cache_selects_full_sigma_axis_from_fine_union():
+    """The fine cache may include coarse sigmas without changing full output."""
+
+    from waven.wavelets.decomposition import _select_cached_sigma_axis
+
+    # (phase, cached_sigma, frequency, orientation, kernel_y, kernel_x)
+    kernels = np.arange(2 * 3, dtype=np.float32).reshape(2, 3, 1, 1, 1, 1)
+    selected = _select_cached_sigma_axis(
+        kernels,
+        cached_sigmas=[40.0, 10.0, 2.5],
+        requested_sigmas=[10.0, 2.5],
+    )
+
+    assert selected.shape == (2, 2, 1, 1, 1, 1)
+    np.testing.assert_array_equal(selected[:, 0], kernels[:, 1])
+    np.testing.assert_array_equal(selected[:, 1], kernels[:, 2])

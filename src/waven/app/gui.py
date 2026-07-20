@@ -4280,6 +4280,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     output_format=output_format,
                     zarr_chunks=zarr_chunks if is_zarr_wavelet else None,
                     kernel_cache_path=fine_kernel_cache_path,
+                    # The fine kernel cache holds the coarse/full sigma union,
+                    # just like the legacy fine Gabor library.  The convolution
+                    # writer selects only the Full Model sigma axis for output.
+                    library_sigmas=fine_library_sigmas,
                     cancel_event=_current_cancel_event(),
                 )
             else:

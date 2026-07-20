@@ -1402,6 +1402,28 @@ def _load_convolution_kernel_cache(
         return np.asarray(cache["kernels"], dtype=np.float32)
 
 
+def _select_cached_sigma_axis(kernel_cache, cached_sigmas, requested_sigmas):
+    """Select requested sigma values from a validated superset kernel cache.
+
+    Fine Gabor assets deliberately store the union of the coarse and full-model
+    sigma lists.  The full-model wavelet product, however, has only the
+    ``Sigmas Full Model`` axis.  Keep that output contract while allowing the
+    compact convolution cache to mirror the legacy fine-library contract.
+    """
+    cached_sigmas = np.asarray(cached_sigmas, dtype=float)
+    requested_sigmas = np.asarray(requested_sigmas, dtype=float)
+    indices = []
+    for sigma in requested_sigmas:
+        matches = np.flatnonzero(np.isclose(cached_sigmas, sigma, rtol=1e-6, atol=1e-9))
+        if len(matches) != 1:
+            raise ValueError(
+                "The fine convolution kernel cache does not contain a unique kernel "
+                f"for full-model sigma {float(sigma):g}. Rebuild the Gabor assets."
+            )
+        indices.append(int(matches[0]))
+    return np.asarray(kernel_cache)[:, indices, ...]
+
+
 def _process_binary_chunk(frames_buffer, xi, xe, yi, ye, shape, actual_len):
     """Background worker for binary downsampling."""
     chunk_arr = np.stack(frames_buffer, axis=0) > 100
@@ -2734,6 +2756,7 @@ def waveletDecompositionFullConv(
     frame_chunk_size=None,
     filter_group_size=None,
     cancel_event=None,
+    library_sigmas=None,
 ):
     """Decompose full-model wavelets with compact Gabor kernels and ``conv2d``.
 
@@ -2749,14 +2772,20 @@ def waveletDecompositionFullConv(
         frequencies = np.asarray([0.0], dtype=float)
     thetas = np.array([(idx * np.pi) / int(n_orientations) for idx in range(int(n_orientations))])
     phase_offset = _phase_offset_from_index(phase, phase_offsets)
+    cache_sigmas = np.asarray(
+        sigmas if library_sigmas is None else library_sigmas,
+        dtype=float,
+    )
     kernel_cache = _load_convolution_kernel_cache(
         kernel_cache_path,
         "fine",
-        sigmas,
+        cache_sigmas,
         frequencies,
         n_orientations,
         phase_offsets,
     ) if kernel_cache_path else None
+    if kernel_cache is not None and library_sigmas is not None:
+        kernel_cache = _select_cached_sigma_axis(kernel_cache, cache_sigmas, sigmas)
     final_shape = (
         int(num_frames),
         int(nx),
