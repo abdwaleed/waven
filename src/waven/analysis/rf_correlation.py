@@ -376,7 +376,7 @@ def _chunk_aligned_structured_correlation(
     # This also applies when an existing coarse-power cache is reused in a
     # later session, where the cache-writing stage did not configure Blosc.
     codec_threads = configure_zarr_codec_threads()
-    use_gpu = enabled_feature("RF_GPU", default=True) and torch.cuda.is_available()
+    use_gpu = torch.cuda.is_available()
     response_gpu = None
     if use_gpu:
         # Response is reused for every spatial tile.  Keeping it resident

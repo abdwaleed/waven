@@ -222,8 +222,6 @@ def PearsonCorrelationPinkNoise(
     for start in range(0, rfs.shape[0], max(1, neuron_block)):
         stop = min(rfs.shape[0], start + max(1, neuron_block))
         rows = np.asarray(rfs[start:stop])
-        if absolute:
-            np.abs(rows, out=rows)
         rows[rows >= 0.99] -= 1.0
         np.nan_to_num(rows, copy=False)
         # Assign explicitly so a Zarr slice is durably updated; for NPY/RAM it
@@ -231,7 +229,8 @@ def PearsonCorrelationPinkNoise(
         rfs[start:stop] = rows
         for local_neuron, row in enumerate(rows):
             flat_row = row.reshape(-1)
-            local_idx = int(np.argmax(np.abs(flat_row)))
+            selection_values = np.abs(flat_row) if absolute else flat_row
+            local_idx = int(np.argmax(selection_values))
             neuron_idx = start + local_neuron
             flat_max_idx[neuron_idx] = local_idx
             maxes[neuron_idx] = abs(flat_row[local_idx])

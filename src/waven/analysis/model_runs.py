@@ -199,21 +199,23 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
         spk = spks[:, :, idx]
 
         fig, ax = plt.subplots(6, 1, sharex=True)
-        x_trace = np.arange(8500, 9000)
+        trace_stop = min(len(w_i), spk.shape[1], 9000)
+        trace_start = max(0, min(8500, trace_stop - min(500, trace_stop)))
+        x_trace = np.arange(trace_start, trace_stop)
         sem_trials = _plot_trace_with_optional_sem(
             ax[0],
-            spk[:, 8500:9000],
+            spk[:, trace_start:trace_stop],
             x=x_trace,
             color='k',
             label='Trial-averaged spike activity',
             show_sem_errorbars=show_sem_errorbars,
         )
         _set_sem_caption(fig, sem_trials)
-        ax[1].plot(x_trace, w_r[8500:9000], c='r')
-        ax[2].plot(x_trace, w_i[8500:9000], c='b')
-        ax[3].plot(x_trace, rho[8500:9000], c='k')
-        ax[4].plot(x_trace, phi[8500:9000], c='k')
-        ax[5].plot(x_trace, dphi[8500:9000], c='k')
+        ax[1].plot(x_trace, w_r[trace_start:trace_stop], c='r')
+        ax[2].plot(x_trace, w_i[trace_start:trace_stop], c='b')
+        ax[3].plot(x_trace, rho[trace_start:trace_stop], c='k')
+        ax[4].plot(x_trace, phi[trace_start:trace_stop], c='k')
+        ax[5].plot(x_trace, dphi[trace_start:trace_stop], c='k')
         labels = [
             ("Spike activity", "Activity (a.u.)"),
             ("Cosine wavelet", "Wavelet value (a.u.)"),
@@ -230,7 +232,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
         colors = []
         fig3d = plt.figure()
         ax = fig3d.add_subplot(projection='3d')
-        for i in np.arange(1000, 3000, 1):
+        for i in np.arange(1, min(3000, len(rho)), 1):
             c = np.mean(spk, axis=0)[i]
             color = plt.cm.coolwarm(255 * c / 100)
             colors.append(color)
@@ -304,6 +306,8 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
             "frame rate. Pass int(Hz) * 60 from the GUI/config."
         )
     frames_per_minute = int(frames_per_minute)
+    if frames_per_minute <= 0 or int(n_min) <= 0:
+        raise ValueError("run_Model requires positive n_min and frames_per_minute values.")
 
     if spks.ndim != 3:
         raise ValueError(
@@ -327,6 +331,10 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
     overlap = sorted(set(train_idx) & set(test_idx))
     if overlap:
         raise ValueError(f"run_Model train and holdout trial indices overlap: {overlap}")
+    all_trial_indices = train_idx + test_idx
+    duplicates = sorted({index for index in all_trial_indices if all_trial_indices.count(index) > 1})
+    if duplicates:
+        raise ValueError(f"run_Model trial indices must be unique; duplicates: {duplicates}")
     for label, params in (("smoothed", maxes0), ("raw", maxes1)):
         params = np.asarray(params)
         if params.ndim != 2 or params.shape[0] < 4 or params.shape[1] != num_neurons:
@@ -377,7 +385,7 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         Predictions.append(res[0])
         nonlinParams.append(res[1])
         RhoPhiParams.append(res[2])
-        Metrics.append([res[3][0], res[3][1], res[3][2][0][1]])
+        Metrics.append([res[3][0], res[3][1], res[3][2]])
         interpolators.append(res[4])
 
     del parallel_results
@@ -394,9 +402,10 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     """Refine coarse RF seeds against full-model real/imaginary wavelets.
 
     Args:
-        maxes0: Smoothed coarse preferred indices with shape ``(at least 4,
-            n_neurons)``.
-        maxes1: Raw coarse preferred indices with the same neuron axis.
+        maxes0: Raw coarse preferred indices with shape ``(at least 4,
+            n_neurons)``. They seed the optional second-wavelet feature.
+        maxes1: Smoothed coarse preferred indices with the same neuron axis.
+            They seed the primary feature refinement.
         spks: Aligned responses with shape ``(trials, frames, neurons)``.
         idxs: Zero-based neuron indices to refine.
         thetas: Orientation-bin values or indices used by legacy outputs.
@@ -443,6 +452,16 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         frames_per_minute = int(round(float(hz) * SECONDS_PER_MINUTE))
     frames_per_minute = int(frames_per_minute)
     hz = float(hz) if hz is not None else frames_per_minute / SECONDS_PER_MINUTE
+    if frames_per_minute <= 0 or int(n_min) <= 0:
+        raise ValueError("run_Full_Model requires positive n_min and frames_per_minute values.")
+    frequencies = np.asarray(frequencies, dtype=float)
+    if frequencies.size == 0:
+        raise ValueError("Run Full Model requires at least one configured spatial frequency.")
+    if not np.all(np.isfinite(frequencies)) or np.any(frequencies <= 0):
+        raise ValueError("Run Full Model frequencies must be finite positive values.")
+    sigmas = np.asarray(sigmas, dtype=float)
+    if sigmas.size == 0 or not np.all(np.isfinite(sigmas)) or np.any(sigmas <= 0):
+        raise ValueError("Run Full Model sigmas must contain finite positive values.")
     train_idx = [int(i) for i in train_idx]
     test_idx = [int(i) for i in test_idx]
     if not train_idx or not test_idx:
@@ -459,6 +478,10 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     overlap = sorted(set(train_idx) & set(test_idx))
     if overlap:
         raise ValueError(f"Train and test trial indices overlap: {overlap}")
+    all_trial_indices = train_idx + test_idx
+    duplicates = sorted({index for index in all_trial_indices if all_trial_indices.count(index) > 1})
+    if duplicates:
+        raise ValueError(f"Full-model trial indices must be unique; duplicates: {duplicates}")
     if len(tt) != 2 or int(tt[0]) < 0 or int(tt[1]) <= int(tt[0]):
         raise ValueError(f"run_Full_Model requires a valid [start, stop] frame range; got {tt!r}.")
     if int(tt[1]) > int(spks.shape[1]):
@@ -497,19 +520,32 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
 
     if memmapping:
         print(f"[INFO] Run Full Model: loading full wavelets from {wavelet_path}")
-        try:
-            wavelets_i = load_array_with_ram_acceleration(
-                os.path.join(wavelet_path, 'dwt_videodata2_i.zarr'),
-                mmap_mode='r',
-                cache_label="Run Full Model imaginary phase",
-            )
-            wavelets_r = load_array_with_ram_acceleration(
-                os.path.join(wavelet_path, 'dwt_videodata2_r.zarr'),
-                mmap_mode='r',
-                cache_label="Run Full Model real phase",
-            )
-        except Exception:
-            print("[INFO] Run Full Model: Zarr phase cache unavailable; using NPY memory maps.")
+        real_zarr_path = os.path.join(wavelet_path, 'dwt_videodata2_r.zarr')
+        imag_zarr_path = os.path.join(wavelet_path, 'dwt_videodata2_i.zarr')
+        if os.path.exists(real_zarr_path) or os.path.exists(imag_zarr_path):
+            if not (os.path.exists(real_zarr_path) and os.path.exists(imag_zarr_path)):
+                raise FileNotFoundError(
+                    "Run Full Model requires both real and imaginary Zarr phase caches; "
+                    f"found real={os.path.exists(real_zarr_path)}, imaginary={os.path.exists(imag_zarr_path)}."
+                )
+            try:
+                wavelets_i = load_array_with_ram_acceleration(
+                    imag_zarr_path,
+                    mmap_mode='r',
+                    cache_label="Run Full Model imaginary phase",
+                )
+                wavelets_r = load_array_with_ram_acceleration(
+                    real_zarr_path,
+                    mmap_mode='r',
+                    cache_label="Run Full Model real phase",
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Run Full Model could not load its Zarr phase caches. "
+                    "Rebuild the Full Model cache if the files are corrupt or incompatible."
+                ) from exc
+        else:
+            print("[INFO] Run Full Model: Zarr phase cache not found; using NPY memory maps.")
             from ..stimulus import load_stimulus_simple_cell2
 
             wavelets_r, wavelets_i = load_stimulus_simple_cell2(
@@ -517,6 +553,11 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                 tt=tt,
                 downsampling=False,
             )
+            # The legacy loader has already applied ``tt``.  Shift the neural
+            # data into the same local time base so later indexing cannot apply
+            # the global range a second time.
+            spks = spks[:, int(tt[0]):int(tt[1]), :]
+            tt = [0, int(wavelets_r.shape[0])]
             memmapping = False
     else:
         from ..stimulus import load_stimulus_simple_cell2
@@ -526,6 +567,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             tt=tt,
             downsampling=False,
         )
+        spks = spks[:, int(tt[0]):int(tt[1]), :]
+        tt = [0, int(wavelets_r.shape[0])]
 
     nx_full, ny_full, n_orientations, n_sigmas_w, n_frequencies = wavelet_feature_dims(
         wavelets_r,
@@ -783,15 +826,23 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         if memmapping:
             (x, y, o, s, f) = findBestPos_profiled(int(np.round(x)), int(np.round(y)), int(np.round(o)),
                                                    int(np.round(s)), nmin=n_min, plotting=plotting)
-
-            (x1, y1, o1, s1, f1) = findBestPos_profiled(int(np.round(x1)), int(np.round(y1)), int(np.round(o1)),
-                                                        int(np.round(s1)), nmin=n_min, plotting=plotting)
+            if double_wavelet_model:
+                (x1, y1, o1, s1, f1) = findBestPos_profiled(
+                    int(np.round(x1)), int(np.round(y1)), int(np.round(o1)),
+                    int(np.round(s1)), nmin=n_min, plotting=plotting,
+                )
+            else:
+                x1, y1, o1, s1, f1 = x, y, o, s, f
         else:
             (x, y, o, s, f) = findBestPos(int(np.round(x)), int(np.round(y)), int(np.round(o)),
                                           int(np.round(s)), nmin=n_min, plotting=plotting)
-
-            (x1, y1, o1, s1, f1) = findBestPos(int(np.round(x1)), int(np.round(y1)), int(np.round(o1)),
-                                               int(np.round(s1)), nmin=n_min, plotting=plotting)
+            if double_wavelet_model:
+                (x1, y1, o1, s1, f1) = findBestPos(
+                    int(np.round(x1)), int(np.round(y1)), int(np.round(o1)),
+                    int(np.round(s1)), nmin=n_min, plotting=plotting,
+                )
+            else:
+                x1, y1, o1, s1, f1 = x, y, o, s, f
 
         if memmapping:
             wavelets_i_ = wavelets_i[train_start:train_stop, x, y, :, :, :]
@@ -1003,8 +1054,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             plt.title('Receptive field ' + str(idx))
 
         if plotting:
-            star = 4500
-            stop = star + 500
+            stop = min(len(rho), spks.shape[1], 5000)
+            star = max(0, min(4500, stop - min(500, stop)))
             spk = spks[:, :, idx]
             fig, ax = plt.subplots(7, 1, sharex=True)
             plt.rcParams.update({
@@ -1060,10 +1111,12 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         Metrics.append(a)
         interpolators.append(interp)
 
-    M = [[m[0], m[1], m[2][0][1], m[3], m[4]] for m in Metrics]
+    M = [[m[0], m[1], m[2], m[3], m[4]] for m in Metrics]
 
     folder_name = 'model_results'
-    full_path = os.path.join(savepath, folder_name)
+    selected_tag = "-".join(str(idx) for idx in selected_indices) or "none"
+    split_tag = f"train-{'-'.join(map(str, train_idx))}_test-{'-'.join(map(str, test_idx))}"
+    full_path = os.path.join(savepath, folder_name, f"neurons-{selected_tag}_{split_tag}")
     os.makedirs(full_path, exist_ok=True)
 
     model_tag = str(n_orientations)

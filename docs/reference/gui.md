@@ -66,19 +66,23 @@ units where applicable.
 
 ## Performance & Hardware controls
 
-Session Configuration includes a **Performance & Hardware** card. These are
-runtime scheduling controls, not scientific parameters: changing one never
-changes movie dimensions, Gabor values, cache shape, or fitted-model inputs.
-They apply immediately to the current GUI process and are included in **Save
-Current GUI Inputs / Parameters** under `gui.performance`.
+Session Configuration includes a **Performance & Hardware** card. Adaptive
+batch tuning, bounded input prefetch, asynchronous cache writing, time-major
+coarse convolution, parallel Suite2p plane loading, and Coarse RF GPU
+statistics are core execution paths: they are always enabled and are not saved
+as GUI or environment preferences. Coarse RF uses CUDA automatically when it
+is available and safely falls back to the CPU for unavailable or oversized
+work.
+
+The remaining controls are optional hardware choices, not scientific
+parameters: changing one never changes movie dimensions, Gabor values, cache
+shape, or fitted-model inputs. They apply immediately to the current GUI
+process and are included in **Save Current GUI Inputs / Parameters** under
+`gui.performance`.
 
 | GUI control | Runtime flag | Default | Applies to |
 | --- | --- | --- | --- |
-| Adaptive batch tuning | `WAVEN_AUTOTUNE` | on | Convolution wavelet actions |
-| Prefetch input chunks | `WAVEN_PREFETCH` | on | Downsampling and convolution wavelet reads |
-| Asynchronous cache writing | `WAVEN_ASYNC_WRITER` | on | Convolution wavelet outputs |
-| Read movie chunks once across filter groups | `WAVEN_TIME_MAJOR_CONV` | on | Direct coarse-RF power convolution; aligns Zarr chunks with frame/filter writes to avoid output recompression, with a group-major fallback when kernel banks cannot safely coexist |
-| GPU Coarse RF statistics | `WAVEN_RF_GPU` | on | Coarse RF sufficient-statistics cross-products |
+| RAM acceleration cache | `WAVEN_RAM_ACCELERATION_CACHE` | off | Safely sized reused Run Model and PSTH/STA inputs |
 | Use compatible GPUs | `WAVEN_MULTI_GPU` | off | Convolution wavelets only; mismatched cards automatically fall back to one GPU |
 | Compile stable convolution kernels | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile`; useful for repeated long fixed-shape jobs after its warm-up cost, with automatic eager fallback if setup or execution fails |
 | Tensor Core convolution | `WAVEN_AMP` | off | CUDA float16 autocast for convolution only; retain default precision for scientific-equivalence runs |
@@ -89,8 +93,7 @@ cards with matching CUDA architecture and broadly similar estimated convolution
 throughput and VRAM; otherwise it reports why it selected one GPU instead.
 Choosing multi-GPU on a one-GPU or CPU-only machine is safe and persists the
 preference, but it has no effect until the app runs on a compatible multi-GPU
-convolution system. GPU Coarse RF also remains safe on a constrained device:
-each tile falls back to CPU if it does not fit.
+convolution system.
 
 Cancelling a convolution wavelet action retains its resumable output tiles and
 the task's recovery checkpoint. After stimulus downsampling completes, both

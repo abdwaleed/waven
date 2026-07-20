@@ -229,9 +229,29 @@ class OperationTelemetry:
         print(self._message())
 
 
+_ALWAYS_ENABLED_FEATURES = frozenset({
+    "AUTOTUNE",
+    "PREFETCH",
+    "ASYNC_WRITER",
+    "TIME_MAJOR_CONV",
+    "2P_PARALLEL_IO",
+    "RF_GPU",
+})
+
+
 def enabled_feature(name: str, default: bool = True) -> bool:
-    """Read a conservative runtime feature flag from ``WAVEN_<NAME>``."""
-    value = os.environ.get(f"WAVEN_{str(name).upper()}")
+    """Return a runtime feature state.
+
+    The core scheduling paths listed in ``_ALWAYS_ENABLED_FEATURES`` are part
+    of Waven's execution contract rather than user preferences.  In
+    particular, old saved GUI settings and inherited ``WAVEN_*`` environment
+    variables cannot accidentally disable them.  Other flags retain their
+    conservative environment-controlled behaviour.
+    """
+    normalized_name = str(name).upper()
+    if normalized_name in _ALWAYS_ENABLED_FEATURES:
+        return True
+    value = os.environ.get(f"WAVEN_{normalized_name}")
     if value is None:
         return bool(default)
     return value.strip().lower() in {"1", "true", "yes", "on"}

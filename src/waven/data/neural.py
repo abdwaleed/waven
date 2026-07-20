@@ -25,7 +25,6 @@ from ..suite2p.utils import utils
 from ..runtime.performance import (
     available_ram_bytes,
     cpu_threadpool_scope,
-    enabled_feature,
     two_photon_io_worker_count,
 )
 
@@ -316,7 +315,7 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
         slice_start, slice_end = block_end[0], block_end[1]
 
     plane_ids = [int(plane)] if plane != -1 else list(range(int(Nb_plane)))
-    parallel_io = enabled_feature("2P_PARALLEL_IO", default=True) and len(plane_ids) > 1
+    parallel_io = len(plane_ids) > 1
     workers = two_photon_io_worker_count(len(plane_ids)) if parallel_io else 1
     if workers > 1:
         # Fancy indexing selected Suite2p ROIs materialises an in-RAM array.

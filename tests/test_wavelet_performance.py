@@ -80,8 +80,8 @@ def test_full_convolution_layout_avoids_one_pixel_zarr_writes():
     assert chunks[1] * chunks[2] > 1
 
 
-def test_time_major_coarse_power_matches_group_major(tmp_path, monkeypatch, capsys):
-    """Reading a frame chunk once must preserve the coarse-power tensor."""
+def test_time_major_coarse_power_ignores_legacy_disable_flag(tmp_path, monkeypatch, capsys):
+    """Time-major scheduling remains active even with an inherited old flag."""
     pytest.importorskip("zarr")
     generator = np.random.default_rng(11)
     movie = generator.normal(size=(5, 7, 6)).astype(np.float32)
@@ -98,30 +98,28 @@ def test_time_major_coarse_power_matches_group_major(tmp_path, monkeypatch, caps
     monkeypatch.setenv("WAVEN_TORCH_COMPILE", "0")
     monkeypatch.setenv("WAVEN_MULTI_GPU", "0")
     monkeypatch.setenv("WAVEN_TIME_MAJOR_CONV", "0")
-    group_path = waveletPowerDecompositionConv(output_stem="group_major", **common)
-    # A configured multi-GPU mode may fall back to one usable device.  It must
-    # not disable time-major scheduling, which avoids rereading the movie.
-    monkeypatch.setenv("WAVEN_MULTI_GPU", "1")
+    disabled_path = waveletPowerDecompositionConv(output_stem="legacy_disable", **common)
+    assert "using time-major filter scheduling" in capsys.readouterr().out
     monkeypatch.setenv("WAVEN_TIME_MAJOR_CONV", "1")
-    time_path = waveletPowerDecompositionConv(output_stem="time_major", **common)
+    enabled_path = waveletPowerDecompositionConv(output_stem="enabled", **common)
     assert "using time-major filter scheduling" in capsys.readouterr().out
 
-    group_major = np.asarray(load_array(group_path, mmap_mode="r"))
-    time_major = np.asarray(load_array(time_path, mmap_mode="r"))
-    np.testing.assert_allclose(time_major, group_major, rtol=2e-6, atol=2e-6)
+    legacy_disable = np.asarray(load_array(disabled_path, mmap_mode="r"))
+    enabled = np.asarray(load_array(enabled_path, mmap_mode="r"))
+    np.testing.assert_allclose(enabled, legacy_disable, rtol=2e-6, atol=2e-6)
 
     # The default layout must match each frame/filter write tile.  Otherwise
     # time-major scheduling repeatedly recompresses a partially updated Zarr
     # chunk and can be slower than simply rereading the movie per group.
     import zarr
 
-    time_major_zarr = zarr.open(time_path, mode="r")
+    time_major_zarr = zarr.open(enabled_path, mode="r")
     assert time_major_zarr.chunks[0] == common["frame_chunk_size"]
     assert time_major_zarr.chunks[-1] == common["filter_group_size"]
-    assert not (tmp_path / "time_major.zarr.waven-progress.json").exists()
+    assert not (tmp_path / "enabled.zarr.waven-progress.json").exists()
 
 
-def test_direct_coarse_power_resumes_completed_filter_groups(tmp_path, monkeypatch, capsys):
+def test_direct_coarse_power_resumes_completed_time_chunks(tmp_path, monkeypatch, capsys):
     """Cancellation keeps completed direct-RF work without exposing it as final."""
     pytest.importorskip("zarr")
 
@@ -146,10 +144,6 @@ def test_direct_coarse_power_resumes_completed_filter_groups(tmp_path, monkeypat
     monkeypatch.setenv("WAVEN_AMP", "0")
     monkeypatch.setenv("WAVEN_TORCH_COMPILE", "0")
     monkeypatch.setenv("WAVEN_MULTI_GPU", "0")
-    monkeypatch.setenv("WAVEN_TIME_MAJOR_CONV", "0")
-    monkeypatch.setenv("WAVEN_ASYNC_WRITER", "0")
-    monkeypatch.setenv("WAVEN_AUTOTUNE", "0")
-    monkeypatch.setenv("WAVEN_PREFETCH", "0")
 
     with pytest.raises(OperationCancelled):
         waveletPowerDecompositionConv(cancel_event=CancelBeforeSecondGroup(), **common)
@@ -157,7 +151,7 @@ def test_direct_coarse_power_resumes_completed_filter_groups(tmp_path, monkeypat
     progress_path = tmp_path / "resumable.zarr.waven-progress.json"
     assert progress_path.exists()
     output_path = waveletPowerDecompositionConv(**common)
-    assert "skipping completed sigma group 1/2" in capsys.readouterr().out
+    assert "skipping 1 completed time-major frame chunk(s)" in capsys.readouterr().out
     assert not progress_path.exists()
     assert np.asarray(load_array(output_path, mmap_mode="r")).shape == (5, 6, 7, 2, 2)
 
@@ -186,10 +180,6 @@ def test_direct_coarse_power_resume_keeps_the_persisted_time_chunk(tmp_path, mon
     monkeypatch.setenv("WAVEN_AMP", "0")
     monkeypatch.setenv("WAVEN_TORCH_COMPILE", "0")
     monkeypatch.setenv("WAVEN_MULTI_GPU", "0")
-    monkeypatch.setenv("WAVEN_TIME_MAJOR_CONV", "0")
-    monkeypatch.setenv("WAVEN_ASYNC_WRITER", "0")
-    monkeypatch.setenv("WAVEN_AUTOTUNE", "0")
-    monkeypatch.setenv("WAVEN_PREFETCH", "0")
 
     with pytest.raises(OperationCancelled):
         waveletPowerDecompositionConv(

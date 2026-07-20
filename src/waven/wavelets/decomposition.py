@@ -752,7 +752,7 @@ def _conv_frame_chunk_size(
             kernel_shape=kernel_shape,
             output_buffer_count=output_buffer_count,
         )
-    if nx is not None and ny is not None and enabled_feature("AUTOTUNE", default=True):
+    if nx is not None and ny is not None:
         return autotuned_frame_chunk_size(num_frames, nx, ny, n_channels=n_channels)
     if device == "cuda":
         return max(1, min(int(num_frames), 256))
@@ -954,7 +954,7 @@ def _conv2d_wavelet_bank(
     # snapshot used by the planner.
     max_frame_chunk = max(1, int(frame_chunk_size))
     active_frame_chunk = max_frame_chunk
-    prefetch = enabled_feature("PREFETCH", default=True) and num_frames > active_frame_chunk
+    prefetch = num_frames > active_frame_chunk
     reader_executor = ThreadPoolExecutor(max_workers=1) if prefetch else None
     gpu_executor = (
         ThreadPoolExecutor(max_workers=len(frame_parallel_runners))
@@ -1158,6 +1158,10 @@ def _time_major_convolution_groups(
             try:
                 frame_tensor = torch.as_tensor(frames[:, None, :, :], dtype=torch.float32, device=device)
                 for metadata, runner, postprocess in runners:
+                    # A frame chunk can contain many filter groups.  Keep
+                    # cancellation responsive without abandoning the bounded
+                    # resident frame buffer or partially executing a group.
+                    check_cancelled(cancel_event)
                     response = output_tensor = None
                     try:
                         compute_start = time.perf_counter()
@@ -1433,7 +1437,7 @@ def downsample_video_binary(
         # buffers.  Falling back before worker startup is safer than a CUDA OOM.
         and free_resize_vram >= bytes_per_gpu_frame * 6 * 8
     )
-    resize_prefetch = enabled_feature("PREFETCH", default=True)
+    resize_prefetch = True
     resize_workers = 1 if use_gpu_resize else cpu_worker_count(cap=4)
     max_pending_chunks = (
         (2 if use_gpu_resize else resize_workers + 1)
@@ -2158,7 +2162,7 @@ def waveletDecompositionConv(
 
     start_time = time.time()
     telemetry = OperationTelemetry(f"Convolution coarse phase {phase}")
-    writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
+    writer = _AsyncSliceWriter(telemetry)
     total_groups = max(1, math.ceil(len(sigmas) / filter_group_size))
 
     def tile_key(start, end, group_start):
@@ -2258,13 +2262,16 @@ def waveletPowerDecompositionConv(
     kernel_cache_path=None, frame_chunk_size=None, filter_group_size=None,
     output_stem="coarse_rf_power", zarr_chunks=None, cancel_event=None,
     progress_signature=None, rf_neuron_count=None, frequencies=None,
-    coupled_frequencies=None,
+    coupled_frequencies=None, phase_output_stems=None,
 ):
-    """Write coarse wavelet power directly, without temporary phase caches.
+    """Write coarse wavelet power, optionally retaining its phase pair.
 
     Coarse RF needs only ``real**2 + imaginary**2``. Real and imaginary
     kernels are fused into one convolution bank, so each movie chunk is read
-    and transferred to the GPU once before the power product is written.
+    and transferred to the GPU once before the power product is written.  When
+    ``phase_output_stems`` supplies ``(real_stem, imaginary_stem)``, the same
+    convolution also persists the quadrature responses needed by ``run_Model``.
+    This avoids rerunning the coarse movie/filter bank merely to recover phase.
     """
     try:
         import zarr
@@ -2280,6 +2287,14 @@ def waveletPowerDecompositionConv(
         coupled_frequencies if coupled_frequencies is not None else [], dtype=float
     )
     independent_frequencies = bool(frequencies.size)
+    phase_output_stems = tuple(phase_output_stems or ())
+    if phase_output_stems and len(phase_output_stems) != 2:
+        raise ValueError("phase_output_stems must contain real and imaginary output stems.")
+    if phase_output_stems and independent_frequencies:
+        raise ValueError(
+            "Run Model phase caches do not support an independent coarse frequency axis. "
+            "Use matched sigma/frequency pairs or leave Run Model unchecked."
+        )
     if coupled_frequencies.size:
         if independent_frequencies:
             raise ValueError("Choose either matched sigma/frequency pairs or an independent frequency list.")
@@ -2297,13 +2312,16 @@ def waveletPowerDecompositionConv(
     final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
     if independent_frequencies:
         final_shape += (n_frequencies,)
-    logical_cache_bytes = _array_bytes(final_shape, np.float32)
+    output_count = 1 + (2 if phase_output_stems else 0)
+    logical_cache_bytes = _array_bytes(final_shape, np.float32) * output_count
     # A Zarr cache is compressed on disk.  Monitor its measured footprint rather
     # than reserving an additional uncompressed 400+ GiB array up front.
     capacity_guard = _prepare_compressed_cache_capacity(
-        folder_path, logical_cache_bytes, "coarse RF power cache"
+        folder_path, logical_cache_bytes,
+        "coarse RF power and phase caches" if phase_output_stems else "coarse RF power cache",
     )
     kernel_shape = tuple(kernel_cache.shape[-2:]) if kernel_cache is not None else None
+    output_channel_multiplier = 3 if phase_output_stems else 1
     frame_chunk_was_auto = frame_chunk_size is None
     if frame_chunk_was_auto:
         frame_chunk_size = _conv_frame_chunk_size(
@@ -2312,7 +2330,7 @@ def waveletPowerDecompositionConv(
             ny,
             n_channels=2,
             filter_count=2 * int(n_orientations) * n_frequencies,
-            output_channels=int(n_orientations) * n_frequencies,
+            output_channels=output_channel_multiplier * int(n_orientations) * n_frequencies,
             device=device,
             kernel_shape=kernel_shape,
             output_buffer_count=2,
@@ -2327,7 +2345,7 @@ def waveletPowerDecompositionConv(
             n_orientations,
             device,
             filter_channels=2 * int(n_orientations) * n_frequencies,
-            output_channels=int(n_orientations) * n_frequencies,
+            output_channels=output_channel_multiplier * int(n_orientations) * n_frequencies,
             output_buffer_count=2,
         )
     filter_group_size = max(1, min(int(filter_group_size), len(sigmas)))
@@ -2341,7 +2359,7 @@ def waveletPowerDecompositionConv(
             ny,
             n_channels=2,
             filter_count=2 * int(n_orientations) * filter_group_size * n_frequencies,
-            output_channels=int(n_orientations) * filter_group_size * n_frequencies,
+            output_channels=output_channel_multiplier * int(n_orientations) * filter_group_size * n_frequencies,
             device=device,
             kernel_shape=kernel_shape,
             output_buffer_count=2,
@@ -2361,18 +2379,53 @@ def waveletPowerDecompositionConv(
     # reused after its stimulus/crop parameters changed.
     progress_kind = json.dumps(
         {"product": "coarse_rf_power", "sigmas": sigmas.tolist(),
-         "orientations": int(n_orientations), "frequencies": frequencies.tolist(),
-          "coupled_frequencies": coupled_frequencies.tolist(),
-         "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
-         "resume_signature": progress_signature},
+          "orientations": int(n_orientations), "frequencies": frequencies.tolist(),
+           "coupled_frequencies": coupled_frequencies.tolist(),
+          "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
+          "phase_outputs": list(phase_output_stems),
+          "resume_signature": progress_signature},
         sort_keys=True,
     )
     progress = _ConvolutionProgress(save_path, final_shape, progress_kind)
     compressor, compressor_description = _coarse_power_compressor(Blosc)
+    phase_paths = tuple(
+        os.path.join(folder_path, f"{stem}.zarr") for stem in phase_output_stems
+    )
+    if phase_paths and progress.reusable:
+        try:
+            phase_resume_ready = all(
+                tuple(_open_zarr_array(zarr, path, mode="r").shape) == tuple(final_shape)
+                for path in phase_paths
+            )
+        except Exception:
+            phase_resume_ready = False
+        if not phase_resume_ready:
+            # The power progress marker is shared with the phase pair.  It is
+            # only valid when all outputs have the same completed tiles.
+            print("Restarting incomplete coarse cache bundle because a phase output is missing or incompatible.")
+            progress.completed.clear()
+            progress.reusable = False
+            progress._pending = 1
+            progress.flush()
     power = _open_resumable_zarr(
         zarr, save_path, final_shape, zarr_chunks,
         compressor, progress,
     )
+    phase_outputs = ()
+    if phase_paths:
+        phase_mode = "a" if progress.reusable else "w"
+        phase_open_kwargs = {"mode": phase_mode}
+        if phase_mode == "w":
+            phase_open_kwargs.update(
+                shape=final_shape,
+                chunks=zarr_chunks,
+                dtype=np.float32,
+                compressor=compressor,
+            )
+        phase_outputs = tuple(
+            _open_zarr_array(zarr, path, **phase_open_kwargs)
+            for path in phase_paths
+        )
     # An interrupted run can be restarted when free VRAM differs. Keep an old
     # *smaller* time tile to retain write alignment, but never restore an old
     # larger tile that the current parameter-aware planner has declared unsafe.
@@ -2406,7 +2459,8 @@ def waveletPowerDecompositionConv(
         else "legacy sigma-coupled"
     )
     print(
-        f"Direct coarse RF power | device={device}, frame chunk={frame_chunk_size}, "
+        f"Direct coarse RF power{' + phase pair' if phase_outputs else ''} | "
+        f"device={device}, frame chunk={frame_chunk_size}, "
         f"sigma group={filter_group_size}, frequency mode={frequency_mode}"
     )
     print(
@@ -2416,7 +2470,7 @@ def waveletPowerDecompositionConv(
     )
     start_time = time.time()
     telemetry = OperationTelemetry("Direct coarse RF power")
-    writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
+    writer = _AsyncSliceWriter(telemetry)
     total_groups = max(1, math.ceil(len(sigmas) / filter_group_size))
     group_records = []
     for group_number, group_start in enumerate(range(0, len(sigmas), filter_group_size), start=1):
@@ -2458,7 +2512,14 @@ def waveletPowerDecompositionConv(
             power_response = shaped[:, 0].square() + shaped[:, 1].square()
             if independent_frequencies:
                 return power_response.permute(0, 5, 4, 3, 1, 2).contiguous()
-            return power_response[:, :, 0].permute(0, 4, 3, 2, 1).contiguous()
+            power_response = power_response[:, :, 0].permute(0, 4, 3, 2, 1).contiguous()
+            if not phase_outputs:
+                return power_response
+            real_response = shaped[:, 0, :, 0].permute(0, 4, 3, 2, 1).contiguous()
+            imag_response = shaped[:, 1, :, 0].permute(0, 4, 3, 2, 1).contiguous()
+            # One transfer carries all three outputs.  Keeping this axis on the
+            # host avoids another GPU convolution or movie read for Run Model.
+            return torch.stack((real_response, imag_response, power_response), dim=1)
 
         group_records.append(
             ((group_number, group_start, group_end), list(real_kernels) + list(imag_kernels), fused_power_response)
@@ -2470,7 +2531,7 @@ def waveletPowerDecompositionConv(
             frame_count=frame_chunk_size,
             spatial_pixels=int(nx) * int(ny),
             filter_channels=2 * int(n_orientations) * largest_group * n_frequencies,
-            output_channels=int(n_orientations) * largest_group * n_frequencies,
+            output_channels=output_channel_multiplier * int(n_orientations) * largest_group * n_frequencies,
             kernel_height=kernel_shape[0] if kernel_shape is not None else 1,
             kernel_width=kernel_shape[1] if kernel_shape is not None else 1,
             activation_dtype_bytes=2 if str(device).startswith("cuda") and amp_enabled() else 4,
@@ -2491,6 +2552,10 @@ def waveletPowerDecompositionConv(
     def store_power(start, end, group_start, group_end, payload):
         key = tile_key(start, end, group_start)
         def write_power(values, t0=start, t1=end, s0=group_start, s1=group_end):
+            if phase_outputs:
+                phase_outputs[0][t0:t1, :, :, :, s0:s1] = values[:, 0]
+                phase_outputs[1][t0:t1, :, :, :, s0:s1] = values[:, 1]
+                values = values[:, 2]
             if independent_frequencies:
                 power[t0:t1, :, :, :, s0:s1, :] = values
             else:
@@ -2507,11 +2572,7 @@ def waveletPowerDecompositionConv(
             mark_completed()
 
     try:
-        use_time_major = (
-            len(group_records) > 1
-            and enabled_feature("TIME_MAJOR_CONV", default=True)
-            and coarse_execution_plan.strategy == "single"
-        )
+        use_time_major = len(group_records) > 1 and coarse_execution_plan.strategy == "single"
         if use_time_major:
             try:
                 print("Direct coarse RF power using time-major filter scheduling (one movie read per frame chunk).")
@@ -2549,7 +2610,7 @@ def waveletPowerDecompositionConv(
                     cancel_event=cancel_event,
                     telemetry=telemetry,
                     postprocess=fused_power_response,
-                    output_channels=int(n_orientations) * (group_end - group_start) * n_frequencies,
+                    output_channels=output_channel_multiplier * int(n_orientations) * (group_end - group_start) * n_frequencies,
                     execution_plan=coarse_execution_plan,
                 ), start=1):
                     store_power(start, end, group_start, group_end, power_response)
@@ -2572,7 +2633,7 @@ def waveletPowerDecompositionConv(
                 _release_cuda_working_set()
         if writer_error is not None:
             raise writer_error
-    del power
+    del power, phase_outputs
     progress.discard()
     print(f"Success! Saved direct coarse RF power Zarr array to {save_path}")
     telemetry.report()
@@ -2721,7 +2782,7 @@ def waveletDecompositionFullConv(
     completed_steps = 0
     start_time = time.time()
     telemetry = OperationTelemetry(f"Convolution full-model phase {phase}")
-    writer = _AsyncSliceWriter(telemetry) if enabled_feature("ASYNC_WRITER", default=True) else None
+    writer = _AsyncSliceWriter(telemetry)
 
     def tile_key(start, end, group_start):
         return f"g{int(group_start)}:t{int(start)}-{int(end)}"

@@ -57,20 +57,19 @@ checking whether fast-precision convolution modes are worthwhile locally.
 
 ### Performance and hardware choices
 
-The GUI exposes every runtime choice in **Session Configuration → Performance &
-Hardware**.  The safe defaults require no configuration, apply to the next
-action without restarting the GUI, and are saved in `gui.performance` when you
-save the current GUI inputs and parameters. The matching environment variables
-remain supported for unattended or command-line launches. Set a value to `0`
-only when diagnosing a machine-specific driver or filesystem issue.
+The GUI exposes optional runtime choices in **Session Configuration →
+Performance & Hardware**. Adaptive batch tuning, bounded input prefetch,
+asynchronous cache writing, time-major coarse convolution, parallel Suite2p
+plane loading, and GPU Coarse RF statistics are automatic core paths. They are
+not GUI settings or supported environment overrides. Coarse RF uses CUDA when
+available and safely completes the remaining work on CPU when a tile cannot fit.
+The optional choices apply to the next action without restarting the GUI and
+are saved in `gui.performance` when you save the current GUI inputs and
+parameters.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `WAVEN_AUTOTUNE` | on | Measures early convolution chunks and adapts only within the safe batch ceiling. |
-| `WAVEN_PREFETCH` | on | Enables one bounded input prefetch worker and downsampling resize overlap. |
-| `WAVEN_ASYNC_WRITER` | on | Enables a single bounded wavelet-output writer. |
-| `WAVEN_TIME_MAJOR_CONV` | on | For direct coarse-RF power, reads/uploads each frame chunk once before applying its bounded filter groups. Its Zarr output is chunked to the frame/filter write tiles, avoiding repeated compression of the same output chunk; it falls back to group-major if the combined kernel banks exceed a safe live-memory budget. |
-| `WAVEN_RF_GPU` | on, if CUDA is present | Accumulates Coarse RF feature/response cross-products on GPU when the current tile fits. Each tile falls back to CPU on allocation failure. |
+| `WAVEN_RAM_ACCELERATION_CACHE` | off | Retains only safely sized reused later-analysis arrays in RAM. |
 | `WAVEN_MULTI_GPU` | off | Enables PyTorch batch-parallel convolution only across compatible CUDA GPUs. Cards with different compute capability, or less than 75% of the primary card's estimated throughput or VRAM, are excluded automatically. |
 | `WAVEN_TORCH_COMPILE` | off | Experimental `torch.compile` runner for long, fixed-shape convolution jobs. The first chunks are slower while the runner compiles; if setup or a compiled call fails, Waven retries eagerly and keeps the rest of the action eager. |
 | `WAVEN_AMP` | off | Explicit Tensor Core float16 autocast for convolution only. It changes convolution round-off, so use only after validating a representative run against default precision. |

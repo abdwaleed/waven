@@ -47,7 +47,6 @@ def test_structured_correlation_matches_reference_with_large_power_baseline(monk
     case.  The test uses the structured (5-D) path because that is the path
     used by Coarse RF Zarr caches.
     """
-    monkeypatch.setenv("WAVEN_RF_GPU", "0")
     generator = np.random.default_rng(19)
     n_frames = 2048
     stimulus = (
@@ -76,9 +75,8 @@ def test_structured_correlation_matches_reference_with_large_power_baseline(monk
     np.testing.assert_allclose(actual, synchronous, rtol=0.0, atol=0.0)
 
 
-def test_structured_correlation_can_write_a_disk_backed_result(tmp_path, monkeypatch):
+def test_structured_correlation_can_write_a_disk_backed_result(tmp_path):
     """Large GUI RF tensors remain sliceable without resident-RAM allocation."""
-    monkeypatch.setenv("WAVEN_RF_GPU", "0")
     generator = np.random.default_rng(41)
     stimulus = generator.normal(size=(64, 2, 3, 2, 1)).astype(np.float32)
     response = generator.normal(size=(64, 3)).astype(np.float32)
@@ -92,11 +90,10 @@ def test_structured_correlation_can_write_a_disk_backed_result(tmp_path, monkeyp
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=0.0)
 
 
-def test_structured_correlation_can_write_selected_zarr_layout(tmp_path, monkeypatch):
+def test_structured_correlation_can_write_selected_zarr_layout(tmp_path):
     """Zarr RF output remains disk-backed in its x/y/feature layout."""
     pytest.importorskip("zarr")
     pytest.importorskip("numcodecs")
-    monkeypatch.setenv("WAVEN_RF_GPU", "0")
     generator = np.random.default_rng(47)
     stimulus = generator.normal(size=(64, 2, 3, 2, 1)).astype(np.float32)
     response = generator.normal(size=(64, 3)).astype(np.float32)

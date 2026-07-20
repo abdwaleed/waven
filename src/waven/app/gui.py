@@ -816,12 +816,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         path = _plot_cache_path()
         if not os.path.exists(path):
             return {"version": 1, "entries": {}}
+        # Older cache versions embedded the entire RF tensor.  Loading one just
+        # to discover a cached model plot can consume gigabytes and make the UI
+        # appear hung.  Leave it untouched on disk and start a compact cache.
+        if os.path.getsize(path) > 256 * 1024**2:
+            print(
+                f"Ignoring oversized legacy plot cache ({os.path.getsize(path) / 1024**2:.0f} MiB): {path}. "
+                "Run Coarse RF once to create a compact replacement."
+            )
+            return {"version": 2, "entries": {}}
         try:
             with gzip.open(path, "rb") as handle:
                 cache = pickle.load(handle)
             if not isinstance(cache, dict):
                 return {"version": 1, "entries": {}}
-            cache.setdefault("version", 1)
+            cache.setdefault("version", 2)
             cache.setdefault("entries", {})
             return cache
         except Exception as exc:
@@ -2647,12 +2656,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         Returns:
             Result produced by the operation.
         """
-        excluded = {"wavelets_complex"}
+        excluded = {"wavelets_complex", "spks", "rfs_gabor"}
         cached = {}
         for key, value in state.items():
             if key in excluded:
                 continue
             cached[key] = value
+        rfs_gabor = state.get("rfs_gabor")
+        if isinstance(rfs_gabor, (tuple, list)) and len(rfs_gabor) >= 3:
+            cached["rf_best_params"] = np.asarray(rfs_gabor[1])
+            cached["rf_retinotopy"] = np.asarray(rfs_gabor[2])
         return cached
 
     def _get_cached_entry(kind, neuron_id=None, extra=None):
@@ -3068,6 +3081,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Return authoritative stimulus dimensions, frame count, and FPS."""
         return read_movie_metadata(path or _find_movie_path())
 
+    def _movie_source_provenance(movie_path=None):
+        """Return a cheap identity for invalidating caches after movie replacement."""
+        path = Path(movie_path or _find_movie_path()).resolve()
+        try:
+            stat = path.stat()
+        except OSError as exc:
+            raise FileNotFoundError(f"Could not inspect stimulus movie for cache provenance: {path}") from exc
+        return {
+            "movie_path": str(path),
+            "movie_size_bytes": int(stat.st_size),
+            "movie_modified_ns": int(stat.st_mtime_ns),
+        }
+
     def _stimulus_grid_dimensions(scale=None, movie_path=None):
         """Derive a visual-angle-calibrated grid from movie metadata and coverage."""
         try:
@@ -3093,6 +3119,36 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _gabor_phase_offsets_radians():
         """The GUI accepts degrees; skimage convolution kernels require radians."""
         return np.deg2rad(parse_literal(gabor_entries["Phases"].get(), "Phases (degrees)"))
+
+    def _coarse_wavelet_provenance(coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets):
+        """Return every scientific parameter that defines a coarse cache."""
+        frequency_mode = _selected_coarse_rf_frequency_mode()
+        matched_frequencies = _coarse_matched_pair_frequencies()
+        return {
+            "schema": 2,
+            "backend": _selected_wavelet_backend(),
+            "grid": [int(coarse_nx), int(coarse_ny)],
+            "n_orientations": int(gabor_entries["N_thetas"].get()),
+            "sigmas": [float(value) for value in sigmas],
+            "phase_offsets_radians": [float(value) for value in phase_offsets],
+            "frequency_mode": frequency_mode,
+            "frequencies": [float(value) for value in frequencies]
+            if frequency_mode == "frequency_list" else [],
+            "matched_pair_frequencies": [float(value) for value in matched_frequencies]
+            if frequency_mode == "coupled" else [],
+        }
+
+    def _full_wavelet_provenance(full_nx, full_ny, sigmas, frequencies, phase_offsets):
+        """Return every scientific parameter that defines a Full Model cache."""
+        return {
+            "schema": 2,
+            "backend": _selected_wavelet_backend(),
+            "grid": [int(full_nx), int(full_ny)],
+            "n_orientations": int(gabor_entries["N_thetas"].get()),
+            "sigmas": [float(value) for value in sigmas],
+            "frequencies": [float(value) for value in frequencies],
+            "phase_offsets_radians": [float(value) for value in phase_offsets],
+        }
 
     def _analysis_grid_dimensions(_nx=None, _ny=None, scale=None):
         """Compatibility wrapper; dimensions always come from movie metadata."""
@@ -3361,7 +3417,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         expected_shape = (expected_frames, target_ny, target_nx)
         visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
         analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
-        crop_params = _downsample_cache_crop_params(visual_coverage, analysis_coverage)
+        crop_params = {
+            **_downsample_cache_crop_params(visual_coverage, analysis_coverage),
+            **_movie_source_provenance(movpath),
+        }
         grid_geometry_params = {
             "degrees_per_pixel_x": abs(float(analysis_coverage[0]) - float(analysis_coverage[1])) / target_nx,
             "degrees_per_pixel_y": abs(float(analysis_coverage[2]) - float(analysis_coverage[3])) / target_ny,
@@ -3434,7 +3493,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _ensure_wavelet_imports("stimulus wavelet generation")
         _raise_if_cancelled()
         product = str(product or "coarse_rf").lower()
-        if product not in {"coarse_rf", "model", "full_model"}:
+        if product not in {"coarse_rf", "model", "coarse_bundle", "full_model"}:
             raise ValueError(f"Unknown wavelet product: {product}")
         scale = "full" if product == "full_model" else "coarse"
         backend = _selected_wavelet_backend()
@@ -3461,7 +3520,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
         frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        sigmas = [float(value) for value in sigmas]
+        frequencies = [float(value) for value in frequencies]
+        if not sigmas or not np.all(np.isfinite(sigmas)) or any(value <= 0 for value in sigmas):
+            raise ValueError("Sigmas must contain one or more finite positive values.")
+        if not np.all(np.isfinite(frequencies)) or any(value <= 0 for value in frequencies):
+            raise ValueError("Frequencies must contain only finite positive values.")
         matched_pair_frequencies = _coarse_matched_pair_frequencies()
+        include_model_phases = product in {"model", "coarse_bundle"}
+        if include_model_phases and coarse_frequency_mode == "frequency_list":
+            raise ValueError(
+                "Run Model requires the compact coarse phase cache, which has no independent "
+                "frequency axis. Choose matched sigma/frequency pairs (or legacy sigma coupling), "
+                "or leave 'Prepare Run Model cache' unchecked."
+            )
         if product == "coarse_rf" and coarse_frequency_mode == "frequency_list" and backend != "convolution":
             raise ValueError(
                 "Coarse RF 'Use frequency list' requires the Convolution backend. "
@@ -3479,6 +3551,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "user-defined visual-angle-calibrated pairs."
             )
         phase_offsets = _gabor_phase_offsets_radians()
+        if len(phase_offsets) < 2:
+            raise ValueError("Phases must contain real and imaginary offsets.")
         fine_library_sigmas = _ordered_float_union(
             sigmas,
             parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
@@ -3500,6 +3574,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             else:
                 coarse_kernel_cache_path = cache_path
         n_thetas = int(gabor_entries["N_thetas"].get())
+        if n_thetas <= 0:
+            raise ValueError("N_thetas must be a positive integer.")
         coarse_nx, coarse_ny = _stimulus_grid_dimensions("coarse", movpath)
         full_nx, full_ny = _stimulus_grid_dimensions("full", movpath)
         expected_frames = _movie_metadata(movpath)["frames"]
@@ -3508,7 +3584,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
         analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
-        crop_params = _downsample_cache_crop_params(visual_coverage, analysis_coverage)
+        crop_params = {
+            **_downsample_cache_crop_params(visual_coverage, analysis_coverage),
+            **_movie_source_provenance(movpath),
+        }
         coarse_downsample_shape = (expected_frames, coarse_ny, coarse_nx)
         full_downsample_shape = (expected_frames, full_ny, full_nx)
         coarse_downsample_ready = False
@@ -3583,8 +3662,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         model_imag_path = os.path.join(wavelet_folder, "coarse_model_imag.zarr")
         temp_real_path = os.path.join(wavelet_folder, ".coarse-rf-phase-real.zarr")
         temp_imag_path = os.path.join(wavelet_folder, ".coarse-rf-phase-imag.zarr")
-        real_phase_path = model_real_path if product == "model" else temp_real_path
-        imag_phase_path = model_imag_path if product == "model" else temp_imag_path
+        real_phase_path = model_real_path if include_model_phases else temp_real_path
+        imag_phase_path = model_imag_path if include_model_phases else temp_imag_path
         coarse_phase_shape = (
             expected_frames,
             coarse_nx,
@@ -3621,6 +3700,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "backend": backend,
                 "shape": coarse_phase_shape,
                 "downsample": coarse_downsample_fingerprint,
+                "scientific_parameters": _coarse_wavelet_provenance(
+                    coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                ),
             }
         )
         coarse_power_fingerprint = _cache_fingerprint(
@@ -3647,6 +3729,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 # require a coarse-power rebuild.  Avoiding a needless
                 # multi-hundred-GB regeneration is itself a performance win.
                 "storage_layout": "parameter-aware-compressed-lz4-v3",
+                "scientific_parameters": _coarse_wavelet_provenance(
+                    coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                ),
             }
         )
 
@@ -3697,17 +3782,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             gc.collect()
         if scale == "coarse":
             current_wavelet_dir[0] = wavelet_folder
-            requested_path = coarse_power_path if product == "coarse_rf" else model_real_path
-            requested_shape = coarse_power_shape if product == "coarse_rf" else coarse_phase_shape
+            requested_path = coarse_power_path if product in {"coarse_rf", "coarse_bundle"} else model_real_path
+            requested_shape = coarse_power_shape if product in {"coarse_rf", "coarse_bundle"} else coarse_phase_shape
             requested_fingerprint = (
-                coarse_power_fingerprint if product == "coarse_rf"
+                coarse_power_fingerprint if product in {"coarse_rf", "coarse_bundle"}
                 else _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
             )
-            requested_kind = "coarse_rf_power" if product == "coarse_rf" else "coarse_model_phase"
+            requested_kind = "coarse_rf_power" if product in {"coarse_rf", "coarse_bundle"} else "coarse_model_phase"
             coarse_cache_ready = _artifact_ready(
                 requested_path, requested_shape, requested_fingerprint, kind=requested_kind
             )
-            if product == "model":
+            if include_model_phases:
                 coarse_cache_ready = coarse_cache_ready and _artifact_ready(
                     model_imag_path,
                     coarse_phase_shape,
@@ -3742,10 +3827,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     coarse_downsample_path, streaming=(backend == "convolution")
                 )
 
-                if product == "coarse_rf" and backend == "convolution":
-                    update_progress(25, "Coarse wavelet decomposition", "Writing direct RF power cache")
-                    print("Step 2/2: Writing direct coarse RF power (no temporary phase caches)...")
+                if product in {"coarse_rf", "coarse_bundle"} and backend == "convolution":
+                    bundle_label = "power + Run Model phase caches" if include_model_phases else "RF power cache"
+                    update_progress(25, "Coarse wavelet decomposition", f"Writing direct {bundle_label}")
+                    print(f"Step 2/2: Writing direct coarse {bundle_label}...")
                     _register_cancel_cleanup_path(coarse_power_path, preserve_on_cancel=True)
+                    if include_model_phases:
+                        _register_cancel_cleanup_path(model_real_path, preserve_on_cancel=True)
+                        _register_cancel_cleanup_path(model_imag_path, preserve_on_cancel=True)
                     waveletPowerDecompositionConv(
                         videodata,
                         sigmas,
@@ -3762,23 +3851,47 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             matched_pair_frequencies
                             if coarse_frequency_mode == "coupled" else None
                         ),
+                        phase_output_stems=(
+                            os.path.splitext(os.path.basename(model_real_path))[0],
+                            os.path.splitext(os.path.basename(model_imag_path))[0],
+                        ) if include_model_phases else None,
                     )
                     _raise_if_cancelled()
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
                         raise ValueError(f"Direct coarse RF power cache has an unexpected shape: {coarse_power_path}")
+                    cache_params = {
+                        "crop": crop_params,
+                        "wavelet": _coarse_wavelet_provenance(
+                            coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                        ),
+                    }
                     _write_artifact_metadata(
                         coarse_power_path, "coarse_rf_power", coarse_power_shape,
-                        coarse_power_fingerprint, params=crop_params,
+                        coarse_power_fingerprint, params=cache_params,
                     )
+                    if include_model_phases:
+                        real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
+                        imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
+                        if not _artifact_matches(model_real_path, coarse_phase_shape) or not _artifact_matches(model_imag_path, coarse_phase_shape):
+                            raise ValueError("Direct coarse cache bundle did not create both Run Model phase caches.")
+                        _write_artifact_metadata(
+                            model_real_path, "coarse_model_phase", coarse_phase_shape,
+                            real_phase_fingerprint, params=cache_params,
+                        )
+                        _write_artifact_metadata(
+                            model_imag_path, "coarse_model_phase", coarse_phase_shape,
+                            imag_phase_fingerprint, params=cache_params,
+                        )
+                        _write_recovery_step("coarse_model_cache_complete", real=model_real_path, imag=model_imag_path)
                     _write_recovery_step("coarse_rf_power_complete", path=coarse_power_path)
-                    print(f"Direct coarse RF power cache is ready: {coarse_power_path}")
-                    update_progress(100, "Coarse wavelet decomposition", "Coarse RF power cache ready")
+                    print(f"Direct coarse cache product is ready: {coarse_power_path}")
+                    update_progress(100, "Coarse wavelet decomposition", "Coarse cache preparation complete")
                     return True
 
                 update_progress(25, "Coarse wavelet decomposition", "Preparing coarse real phase")
                 print("Step 2/4: Preparing coarse real phase wavelets...")
                 real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
-                if _artifact_ready(real_phase_path, coarse_phase_shape, real_phase_fingerprint, kind="coarse_model_phase" if product == "model" else "coarse_rf_temporary_phase"):
+                if _artifact_ready(real_phase_path, coarse_phase_shape, real_phase_fingerprint, kind="coarse_model_phase" if include_model_phases else "coarse_rf_temporary_phase"):
                     print(f"Resume: found completed coarse real phase, reusing {real_phase_path}")
                     _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
                 else:
@@ -3812,13 +3925,24 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             output_stem=os.path.splitext(os.path.basename(real_phase_path))[0],
                             cancel_event=_current_cancel_event(),
                         )
-                    _write_artifact_metadata(real_phase_path, "coarse_model_phase" if product == "model" else "coarse_rf_temporary_phase", coarse_phase_shape, real_phase_fingerprint)
+                    _write_artifact_metadata(
+                        real_phase_path,
+                        "coarse_model_phase" if include_model_phases else "coarse_rf_temporary_phase",
+                        coarse_phase_shape,
+                        real_phase_fingerprint,
+                        params={
+                            "crop": crop_params,
+                            "wavelet": _coarse_wavelet_provenance(
+                                coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                            ),
+                        },
+                    )
                     _write_recovery_step("coarse_phase_real_complete", path=real_phase_path)
 
                 update_progress(45, "Coarse wavelet decomposition", "Preparing coarse imaginary phase")
                 print("Step 3/4: Preparing coarse imaginary phase wavelets...")
                 imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
-                if _artifact_ready(imag_phase_path, coarse_phase_shape, imag_phase_fingerprint, kind="coarse_model_phase" if product == "model" else "coarse_rf_temporary_phase"):
+                if _artifact_ready(imag_phase_path, coarse_phase_shape, imag_phase_fingerprint, kind="coarse_model_phase" if include_model_phases else "coarse_rf_temporary_phase"):
                     print(f"Resume: found completed coarse imaginary phase, reusing {imag_phase_path}")
                     _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
                 else:
@@ -3852,26 +3976,43 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             output_stem=os.path.splitext(os.path.basename(imag_phase_path))[0],
                             cancel_event=_current_cancel_event(),
                         )
-                    _write_artifact_metadata(imag_phase_path, "coarse_model_phase" if product == "model" else "coarse_rf_temporary_phase", coarse_phase_shape, imag_phase_fingerprint)
+                    _write_artifact_metadata(
+                        imag_phase_path,
+                        "coarse_model_phase" if include_model_phases else "coarse_rf_temporary_phase",
+                        coarse_phase_shape,
+                        imag_phase_fingerprint,
+                        params={
+                            "crop": crop_params,
+                            "wavelet": _coarse_wavelet_provenance(
+                                coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                            ),
+                        },
+                    )
                     _write_recovery_step("coarse_phase_imaginary_complete", path=imag_phase_path)
 
                 update_progress(68, "Coarse wavelet decomposition", "Building the requested cache product")
                 print(f"Step 4/4: Building the {product.replace('_', ' ')} cache product...")
-                if product == "coarse_rf":
+                if product in {"coarse_rf", "coarse_bundle"}:
                     _register_cancel_cleanup_path(coarse_power_path, preserve_on_cancel=True)
                     _build_coarse_power_zarr(real_phase_path, imag_phase_path, coarse_power_path)
                 elif not _artifact_ready(model_imag_path, coarse_phase_shape, imag_phase_fingerprint, kind="coarse_model_phase"):
                     raise ValueError("Run Model requires both named coarse model phase caches.")
                 _raise_if_cancelled()
-                if product == "coarse_rf":
+                if product in {"coarse_rf", "coarse_bundle"}:
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
                         raise ValueError(f"Coarse RF power cache was written with an unexpected shape: {coarse_power_path}")
                     _write_artifact_metadata(
                         coarse_power_path, "coarse_rf_power", coarse_power_shape,
-                        coarse_power_fingerprint, params=crop_params,
+                        coarse_power_fingerprint,
+                        params={
+                            "crop": crop_params,
+                            "wavelet": _coarse_wavelet_provenance(
+                                coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                            ),
+                        },
                     )
                     _write_recovery_step("coarse_rf_power_complete", path=coarse_power_path)
-                    for intermediate_path in (real_phase_path, imag_phase_path):
+                    for intermediate_path in (() if include_model_phases else (real_phase_path, imag_phase_path)):
                         try:
                             if os.path.isdir(intermediate_path):
                                 shutil.rmtree(intermediate_path)
@@ -3910,6 +4051,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             param_entries["Sigmas Full Model"].get(),
             "Sigmas Full Model",
         )
+        sigmas_full = [float(value) for value in sigmas_full]
+        if not sigmas_full or not np.all(np.isfinite(sigmas_full)) or any(value <= 0 for value in sigmas_full):
+            raise ValueError("Sigmas Full Model must contain one or more finite positive values.")
+        if not frequencies:
+            raise ValueError("Run Full Model cache preparation requires at least one value in Frequencies.")
         update_progress(15, "Full wavelet decomposition", "Preparing full-resolution stimulus movie")
         print("Step 1/3: Preparing full-resolution stimulus movie...")
         if full_downsample_ready:
@@ -3951,6 +4097,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "shape": full_model_shape,
                 "downsample": full_downsample_fingerprint,
                 "output_format": output_format,
+                "scientific_parameters": _full_wavelet_provenance(
+                    full_nx, full_ny, sigmas_full, frequencies, phase_offsets,
+                ),
             }
         )
         for phase in (0, 1):
@@ -3993,7 +4142,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
             if not _artifact_matches(target, full_model_shape):
                 raise ValueError(f"Full-model wavelets were written with an unexpected shape: {target}")
-            _write_artifact_metadata(target, "full_wavelet_phase", full_model_shape, phase_fingerprint)
+            _write_artifact_metadata(
+                target,
+                "full_wavelet_phase",
+                full_model_shape,
+                phase_fingerprint,
+                params={
+                    "crop": crop_params,
+                    "wavelet": _full_wavelet_provenance(
+                        full_nx, full_ny, sigmas_full, frequencies, phase_offsets,
+                    ),
+                },
+            )
             _write_recovery_step(f"full_model_phase_{phase}_complete", path=target)
 
         if is_zarr_wavelet:
@@ -4426,13 +4586,31 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             from ..storage.array_store import load_array, load_array_with_ram_acceleration
             power_path = os.path.join(parent_dir, "coarse_rf_power.zarr")
             w_c_downsampled = load_array(power_path, mmap_mode="r")
-            if not _artifact_has_params(
-                power_path,
-                _downsample_cache_crop_params(visual_coverage, analysis_coverage),
-            ):
+            expected_power_shape = (
+                movie_metadata["frames"], coarse_nx, coarse_ny,
+                n_orientations, ns,
+            )
+            if _selected_coarse_rf_frequency_mode() == "frequency_list":
+                expected_power_shape += (len(frequencies),)
+            expected_cache_params = {
+                "crop": {
+                    **_downsample_cache_crop_params(visual_coverage, analysis_coverage),
+                    **_movie_source_provenance(movpath),
+                },
+                "wavelet": _coarse_wavelet_provenance(
+                    coarse_nx, coarse_ny, sigmas, frequencies, _gabor_phase_offsets_radians(),
+                ),
+            }
+            if tuple(w_c_downsampled.shape) != tuple(expected_power_shape):
                 raise ValueError(
-                    "Coarse RF power cache was built with an older stimulus crop. "
-                    "Prepare Stimulus Cache, then Prepare Coarse RF wavelets."
+                    "Coarse RF power cache has incompatible feature axes. "
+                    f"Expected {expected_power_shape}, got {tuple(w_c_downsampled.shape)}. "
+                    "Rebuild the cache for the current orientation/sigma/frequency settings."
+                )
+            if not _artifact_has_params(power_path, expected_cache_params):
+                raise ValueError(
+                    "Coarse RF power cache was built with different scientific parameters or stimulus crop. "
+                    "Use Prepare Analysis Caches to rebuild it for the current configuration."
                 )
         except Exception as e:
             print(f"Coarse RF power cache loading failed: {e}")
@@ -4440,7 +4618,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         try:
             expected_movie_shape = (movie_metadata["frames"], coarse_ny, coarse_nx)
-            crop_params = _downsample_cache_crop_params(visual_coverage, analysis_coverage)
+            crop_params = {
+                **_downsample_cache_crop_params(visual_coverage, analysis_coverage),
+                **_movie_source_provenance(movpath),
+            }
             downsample_path, _ = _find_compatible_downsample_cache(
                 movpath, "coarse", expected_movie_shape, _selected_downsample_format(),
                 required_params=crop_params,
@@ -4488,8 +4669,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         # Pass the disk-backed wavelet tensor directly.  PearsonCorrelationPinkNoise
         # streams spatial-feature blocks; flattening this Zarr selection here would
         # allocate the entire coarse cache (several GiB for long recordings).
+        rf_split_settings = _model_split_settings({"spks": spks})
         rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled,
-                                                np.mean(spks[:, :n_frames], axis=0),
+                                                np.mean(spks[rf_split_settings["train_idx"], :n_frames], axis=0),
                                                  neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
                                                   n_orientations=n_orientations,
                                                   plotting=False,
@@ -4623,6 +4805,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             unit_ids=unit_ids,
             unit_info=unit_info,
             rfs_gabor=rfs_gabor,
+            rf_best_params=np.asarray(rfs_gabor[1]),
+            rf_retinotopy=np.asarray(rfs_gabor[2]),
             wavelets_complex=w_c_downsampled,
             sigmas=sigmas,
             sigmas_deg=sigmas_deg,
@@ -4644,6 +4828,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             correlation_orientation_exports=correlation_orientation_exports,
             nb_frames=nb_frames,
             wavelet_dir=parent_dir,
+            neural_cache_dir=str(neural_cache_dir),
+            rf_train_idx=rf_split_settings["train_idx"],
             rf_correlation_path=rf_output_path,
         )
 
@@ -5533,6 +5719,30 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             raise RuntimeError("Run Coarse RF Analysis before model plotting.")
         return analysis_state
 
+    def _model_spikes_from_state(state):
+        """Load neural responses lazily after restoring a compact plot cache."""
+        if "spks" in state:
+            return state["spks"]
+        neural_cache_dir = state.get("neural_cache_dir")
+        if not neural_cache_dir:
+            raise RuntimeError(
+                "Cached Coarse RF plots do not include neural responses. "
+                "Run Coarse RF Analysis once to restore the model inputs."
+            )
+        spks, _positions, _spks_path, _positions_path = load_neural_cache_pair(
+            Path(neural_cache_dir), mmap_mode="r",
+        )
+        state["spks"] = spks
+        return spks
+
+    def _rf_best_params_from_state(state):
+        """Return small preferred-feature indices without materialising RF data."""
+        if "rf_best_params" in state:
+            return np.asarray(state["rf_best_params"])
+        if "rfs_gabor" in state:
+            return np.asarray(state["rfs_gabor"][1])
+        raise RuntimeError("Coarse RF preferred-feature indices are unavailable; rerun Coarse RF Analysis.")
+
     def _append_model_figures(figures, title_prefix):
         """Function for append model figures.
 
@@ -5552,11 +5762,29 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         figure = Figure(figsize=(7.2, 4.2), constrained_layout=True)
         axis = figure.add_subplot(111)
-        metrics = np.asarray(payload.get("metrics", []), dtype=float)
-        if metrics.size:
-            values = metrics.reshape(metrics.shape[0], -1)[0]
-            labels = ["Metric 1", "Metric 2", "Metric 3"][:values.size]
-            axis.bar(np.arange(values.size), values, color=["#2563EB", "#059669", "#7C3AED"][:values.size])
+        raw_metrics = payload.get("metrics", [])
+        try:
+            metrics = np.asarray(raw_metrics, dtype=float)
+            values = (
+                metrics.reshape(1, -1)[0]
+                if metrics.ndim < 2 and metrics.size
+                else metrics.reshape(metrics.shape[0], -1)[0]
+                if metrics.size else np.array([])
+            )
+        except (TypeError, ValueError):
+            # Be defensive with old result files that stored a correlation
+            # matrix among scalar metrics.  A summary plot must never turn a
+            # completed numerical model into a GUI failure.
+            values = np.asarray(
+                [value for value in np.asarray(raw_metrics, dtype=object).ravel()
+                 if np.isscalar(value) and np.isfinite(value)],
+                dtype=float,
+            )
+        if values.size:
+            labels = ["FEVE", "Explained variance", "Test correlation", "Train correlation", "Last-minute correlation"]
+            labels = labels[:values.size] + [f"Metric {index}" for index in range(len(labels) + 1, values.size + 1)]
+            colors = ["#2563EB", "#059669", "#7C3AED", "#EA580C", "#64748B"]
+            axis.bar(np.arange(values.size), values, color=[colors[index % len(colors)] for index in range(values.size)])
             axis.set_xticks(np.arange(values.size), labels)
             axis.set_ylabel("Model metric")
             axis.axhline(0, color="#64748B", linewidth=0.8)
@@ -5576,7 +5804,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _ensure_model_imports("run_Model plot capture")
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
+        spks = _model_spikes_from_state(state)
         split_settings = _model_split_settings(state)
+        if state.get("rf_train_idx") is not None and list(state["rf_train_idx"]) != list(split_settings["train_idx"]):
+            raise ValueError(
+                "Coarse RF features were selected with a different training split. "
+                "Run Coarse RF Analysis again before evaluating this model."
+            )
         cache_extra = {
             "model": "run_Model",
             "neuron": neuron_id,
@@ -5602,6 +5836,32 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             mmap_mode="r",
             cache_label="Run Model imaginary phase",
         )
+        if _selected_coarse_rf_frequency_mode() == "frequency_list":
+            raise ValueError(
+                "Run Model does not support Coarse RF's independent frequency-list mode. "
+                "Use matched sigma/frequency pairs and rebuild the unified coarse cache."
+            )
+        expected_phase_params = {
+            "crop": {
+                **_downsample_cache_crop_params(
+                    state["visual_coverage"], state["analysis_coverage"],
+                ),
+                **_movie_source_provenance(),
+            },
+            "wavelet": _coarse_wavelet_provenance(
+                state["coarse_nx"], state["coarse_ny"], state["sigmas"],
+                state["frequencies"], _gabor_phase_offsets_radians(),
+            ),
+        }
+        for phase_path in (
+            os.path.join(wavelet_dir, "coarse_model_real.zarr"),
+            os.path.join(wavelet_dir, "coarse_model_imag.zarr"),
+        ):
+            if not _artifact_has_params(phase_path, expected_phase_params):
+                raise ValueError(
+                    "Run Model phase cache has different wavelet parameters or stimulus crop than "
+                    "the current Coarse RF analysis. Rebuild it with Prepare Analysis Caches."
+                )
         expected_coarse_features = (
             int(state["coarse_nx"]),
             int(state["coarse_ny"]),
@@ -5615,7 +5875,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 f"{expected_coarse_features[2]}, {expected_coarse_features[3]}), got "
                 f"{w_r.shape} and {w_i.shape}. Re-run coarse wavelet decomposition and RF analysis."
             )
-        raw_best_params = np.array(state["rfs_gabor"][1])
+        raw_best_params = _rf_best_params_from_state(state)
         smoothed_best_params = smooth_best_positions(
             raw_best_params,
             state["neuron_pos"],
@@ -5629,7 +5889,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     f"{tuple(expected_coarse_features[:2])}. Re-run coarse RF analysis for the current cache."
                 )
         movie_metadata = _movie_metadata()
-        dt1 = min(movie_metadata["frames"], state["spks"].shape[1], w_r.shape[0], w_i.shape[0])
+        dt1 = min(movie_metadata["frames"], spks.shape[1], w_r.shape[0], w_i.shape[0])
         if dt1 < 2:
             raise ValueError("Run Model needs at least two frames shared by spikes and coarse wavelets.")
         frames_per_minute = int(round(movie_metadata["fps"] * 60))
@@ -5643,7 +5903,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return run_Model(
                 smoothed_best_params[:, [neuron_id]],
                 raw_best_params[:, [neuron_id]],
-                state["spks"][:, :, [neuron_id]],
+                spks[:, :, [neuron_id]],
                 w_i,
                 w_r,
                 dt1=dt1,
@@ -5691,7 +5951,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _ensure_model_imports("run_Full_Model plot capture")
         state = _require_rf_state()
         neuron_id = _selected_neuron_id()
+        spks = _model_spikes_from_state(state)
         split_settings = _model_split_settings(state)
+        if state.get("rf_train_idx") is not None and list(state["rf_train_idx"]) != list(split_settings["train_idx"]):
+            raise ValueError(
+                "Coarse RF features were selected with a different training split. "
+                "Run Coarse RF Analysis again before evaluating this model."
+            )
         cache_extra = {
             "model": "run_Full_Model",
             "neuron": neuron_id,
@@ -5705,7 +5971,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 clear=False,
             )
             return
-        raw_best_params = np.array(state["rfs_gabor"][1])
+        raw_best_params = _rf_best_params_from_state(state)
         smoothed_best_params = smooth_best_positions(
             raw_best_params,
             state["neuron_pos"],
@@ -5720,11 +5986,38 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
         sigmas_full = np.array(parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"))
         frequencies = np.array(parse_literal(gabor_entries["Frequencies"].get(), "Frequencies"))
+        if frequencies.size == 0:
+            raise ValueError("Run Full Model requires at least one configured value in Frequencies.")
         wavelet_path = _wavelet_folder("full")
         save_path = _folder_from_entry(param_entries, "Full Model Save Path", _project_layout().model_dir)
         os.makedirs(save_path, exist_ok=True)
         movie_metadata = _movie_metadata()
         frames_per_minute = int(round(movie_metadata["fps"] * 60))
+        full_nx, full_ny = _stimulus_grid_dimensions("full")
+        expected_full_shape = (
+            movie_metadata["frames"], full_nx, full_ny,
+            int(state["n_orientations"]), len(sigmas_full), len(frequencies),
+        )
+        expected_full_params = {
+            "crop": {
+                **_downsample_cache_crop_params(
+                    state["visual_coverage"], state["analysis_coverage"],
+                ),
+                **_movie_source_provenance(),
+            },
+            "wavelet": _full_wavelet_provenance(
+                full_nx, full_ny, sigmas_full, frequencies, _gabor_phase_offsets_radians(),
+            ),
+        }
+        for phase_path in (
+            os.path.join(wavelet_path, "dwt_videodata2_r.zarr"),
+            os.path.join(wavelet_path, "dwt_videodata2_i.zarr"),
+        ):
+            if not _artifact_matches(phase_path, expected_full_shape) or not _artifact_has_params(phase_path, expected_full_params):
+                raise ValueError(
+                    "Run Full Model needs current real and imaginary full phase caches. "
+                    "Select 'Prepare Run Full Model cache' in Prepare Analysis Caches and run it first."
+                )
 
         def call_full_model():
             """Function for call full model.
@@ -5735,7 +6028,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return run_Full_Model(
                 raw_best_params,
                 smoothed_best_params,
-                state["spks"],
+                spks,
                 [neuron_id],
                 np.array([(i * np.pi) / state["n_orientations"] for i in range(state["n_orientations"])]),
                 sigmas_full,
@@ -5745,7 +6038,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 wavelet_path=gui_trailing_sep(wavelet_path),
                 savepath=gui_trailing_sep(save_path),
                 n_min=5,
-                tt=[0, min(movie_metadata["frames"], state["nb_frames"], state["spks"].shape[1])],
+                tt=[0, min(movie_metadata["frames"], state["nb_frames"], spks.shape[1])],
                 memmapping=True,
                 train_idx=split_settings["train_idx"],
                 test_idx=split_settings["test_idx"],
@@ -5801,12 +6094,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if not path:
             return
         try:
-            retinotopy = np.asarray(state["rfs_gabor"][2])
+            retinotopy = np.asarray(
+                state.get("rf_retinotopy", state.get("rfs_gabor", [None, None, None])[2])
+            )
+            best_params = _rf_best_params_from_state(state)
             if path.lower().endswith(".npz"):
                 np.savez_compressed(
                     path,
                     retinotopy=retinotopy,
-                    best_params=np.asarray(state["rfs_gabor"][1]),
+                    best_params=best_params,
                     neuron_pos=np.asarray(state["neuron_pos"]),
                 )
             else:
@@ -6777,38 +7073,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ).strip()
     )
 
-    # These controls expose scheduling features for the shared analysis path
-    # and the Suite2p loader. They never alter scientific parameters.
+    # These controls expose the remaining optional hardware features.  Core
+    # scheduling and cache paths are automatic and deliberately not persisted
+    # as user-disableable preferences.
     runtime_control_specs = (
-        (
-            "autotune", "WAVEN_AUTOTUNE", True, "Adaptive batch tuning",
-            "Measures early convolution chunks and adjusts batch size within a safe RAM/VRAM ceiling.",
-        ),
-        (
-            "prefetch", "WAVEN_PREFETCH", True, "Prefetch input chunks",
-            "Overlaps one bounded movie/Zarr read with the current compute chunk.",
-        ),
         (
             "ram_acceleration_cache", "WAVEN_RAM_ACCELERATION_CACHE", False,
             "RAM acceleration cache (later analysis)",
             "Keeps only safely sized, reused model-phase and PSTH/STA inputs in RAM. "
             "Preparation remains disk-backed; oversized arrays automatically stay on disk.",
-        ),
-        (
-            "async_writer", "WAVEN_ASYNC_WRITER", True, "Asynchronous cache writing",
-            "Uses one bounded writer so completed wavelet chunks can be saved while the next chunk computes.",
-        ),
-        (
-            "time_major_conv", "WAVEN_TIME_MAJOR_CONV", True, "Read movie chunks once across filter groups",
-            "Keeps a bounded frame chunk resident while applying coarse-RF filter groups, reducing repeated disk reads.",
-        ),
-        (
-            "two_photon_parallel_io", "WAVEN_2P_PARALLEL_IO", True, "Parallel Suite2p plane loading",
-            "Reads and neuropil-corrects independent Suite2p planes concurrently, with at most four I/O workers.",
-        ),
-        (
-            "rf_gpu", "WAVEN_RF_GPU", True, "GPU Coarse RF statistics",
-            "Uses GPU feature-response cross-products and subdivides oversized tiles to retain GPU work; CPU is only the safe fallback.",
         ),
         (
             "multi_gpu", "WAVEN_MULTI_GPU", False, "Use compatible GPUs",
@@ -6862,12 +7135,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             backend = "legacy"
         if count >= 2 and backend == "convolution":
-            return f"Detected {count} CUDA GPUs. When enabled, only compatible GPUs are combined."
+            return (
+                f"Detected {count} CUDA GPUs. Coarse RF uses CUDA automatically; "
+                "when enabled, only compatible GPUs are combined for convolution."
+            )
         if count >= 2:
-            return f"Detected {count} CUDA GPUs. Multi-GPU applies after selecting the convolution backend."
+            return (
+                f"Detected {count} CUDA GPUs. Coarse RF uses CUDA automatically; "
+                "multi-GPU applies after selecting the convolution backend."
+            )
         if count == 1:
-            return "Detected 1 CUDA GPU. Multi-GPU is saved but has no effect on this computer."
-        return "No CUDA GPU detected. GPU options are saved but use safe CPU fallbacks on this computer."
+            return "Detected 1 CUDA GPU. Coarse RF uses it automatically; multi-GPU has no effect on this computer."
+        return "No CUDA GPU detected. Coarse RF safely uses the CPU; multi-GPU has no effect on this computer."
 
     def _apply_runtime_controls():
         """Apply GUI performance choices to this process before the next action starts."""
@@ -7038,7 +7317,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ).pack(anchor="w", padx=10, pady=(8, 1))
     ctk.CTkLabel(
         runtime_frame,
-        text="These controls affect scheduling and resource use only; they do not change analysis parameters or cache shapes.",
+        text=(
+            "Adaptive batch tuning, bounded input prefetch, asynchronous cache writes, "
+            "time-major coarse convolution, parallel Suite2p plane loading, and GPU Coarse RF "
+            "statistics are automatic. These remaining controls affect scheduling and resource "
+            "use only; they do not change analysis parameters or cache shapes."
+        ),
         text_color=muted_text,
         wraplength=310,
         justify="left",
@@ -7422,38 +7706,63 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     initial_wavelet_format = gui_options.get("wavelet_format", "zarr")
     wavelet_format_var = tk.StringVar(value=initial_wavelet_format if initial_wavelet_format in {"npy", "zarr"} else "zarr")
+    prepare_run_model_cache_var = tk.BooleanVar(
+        value=bool(gui_options.get("prepare_run_model_cache", False))
+    )
+    prepare_full_model_cache_var = tk.BooleanVar(
+        value=bool(gui_options.get("prepare_full_model_cache", False))
+    )
+
+    def _prepare_analysis_caches(include_model=False, include_full=False):
+        """Prepare exactly the cache products selected in the unified UI."""
+        coarse_product = "coarse_bundle" if include_model else "coarse_rf"
+        if not run_wavelet(coarse_product):
+            return False
+        if include_full:
+            return run_wavelet("full_model")
+        return True
+
+    def _start_prepare_analysis_caches():
+        """Capture Tk checkbox state before dispatching the worker thread."""
+        include_model = bool(prepare_run_model_cache_var.get())
+        include_full = bool(prepare_full_model_cache_var.get())
+        run_in_thread(
+            lambda: _prepare_analysis_caches(include_model, include_full),
+            "Prepare analysis caches",
+        )()
+
     btn_submit_wavelet = ctk.CTkButton(
         frame_processing,
-        text="Prepare Coarse RF Power Cache",
+        text="Prepare Analysis Caches",
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
         hover_color="#1D4ED8",
-        command=run_in_thread(lambda: run_wavelet("coarse_rf"), "Prepare Coarse RF wavelets"),
+        command=_start_prepare_analysis_caches,
     )
     btn_submit_wavelet.pack(fill=tk.X, pady=3)
 
-    btn_prepare_model_wavelets = ctk.CTkButton(
-        frame_processing,
-        text="Prepare Run Model Phase Caches",
-        height=34,
-        corner_radius=6,
-        fg_color="#374151",
-        hover_color="#111827",
-        command=run_in_thread(lambda: run_wavelet("model"), "Prepare Run Model wavelets"),
-    )
-    btn_prepare_model_wavelets.pack(fill=tk.X, pady=3)
-
-    btn_prepare_full_model_wavelets = ctk.CTkButton(
-        frame_processing,
-        text="Prepare Run Full Model Phase Caches",
-        height=34,
-        corner_radius=6,
-        fg_color="#374151",
-        hover_color="#111827",
-        command=run_in_thread(lambda: run_wavelet("full_model"), "Prepare Run Full Model wavelets"),
-    )
-    btn_prepare_full_model_wavelets.pack(fill=tk.X, pady=3)
+    cache_options_frame = ctk.CTkFrame(frame_processing, fg_color="transparent")
+    cache_options_frame.pack(fill=tk.X, pady=(2, 4))
+    ctk.CTkCheckBox(
+        cache_options_frame,
+        text="Also prepare Run Model phase caches (power + real + imaginary in one coarse pass)",
+        variable=prepare_run_model_cache_var,
+        text_color=text_color,
+    ).pack(anchor="w", pady=2)
+    ctk.CTkCheckBox(
+        cache_options_frame,
+        text="Also prepare Run Full Model phase caches (fine sigma × frequency bank)",
+        variable=prepare_full_model_cache_var,
+        text_color=text_color,
+    ).pack(anchor="w", pady=2)
+    ctk.CTkLabel(
+        cache_options_frame,
+        text="Full cache preparation is independent of Coarse RF; model fitting still requires Coarse RF seeds.",
+        text_color=muted_text,
+        wraplength=330,
+        justify="left",
+    ).pack(anchor="w", pady=(2, 0))
 
     format_frame_wavelet = ctk.CTkFrame(frame_processing, fg_color="transparent")
     format_frame_wavelet.pack(anchor="w", pady=(10, 0))
@@ -8235,8 +8544,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         btn_downsample_video,
         btn_submit_gabor,
         btn_submit_wavelet,
-        btn_prepare_model_wavelets,
-        btn_prepare_full_model_wavelets,
         btn_submit_plot,
         btn_runRF,
         btn_run_model_plots,

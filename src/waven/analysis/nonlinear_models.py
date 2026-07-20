@@ -1,4 +1,6 @@
 """Nonlinear Gabor model helper functions and tuning plots."""
+import os
+
 from .common import *
 from .receptive_fields import *
 from .trial_stats import circular_variance
@@ -489,8 +491,18 @@ def fitnonlin(X1, y_train, func):
                 parameterBounds.append([-1e1, 1e1])
         print(parameterBounds)
         
-        # OPTIMIZED: workers=-1 utilizes all available CPU threads for the genetic algorithm
-        result = differential_evolution(sumOfSquaredError, parameterBounds, seed=2, workers=-1, updating='deferred')
+        # ``run_Model`` can already distribute neurons with joblib.  Spawning a
+        # second all-core process pool here multiplies workers and was a common
+        # source of stalled or memory-starved model runs.  Keep the optimiser
+        # local; outer callers own any neuron-level parallelism.
+        max_iterations = max(1, int(os.environ.get("WAVEN_MODEL_DE_MAXITER", "200")))
+        result = differential_evolution(
+            sumOfSquaredError,
+            parameterBounds,
+            seed=2,
+            workers=1,
+            maxiter=max_iterations,
+        )
         return result.x
 
     geneticParameters = generate_Initial_Parameters(X1.shape[1])
@@ -1566,6 +1578,8 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
             "stimulus frame rate."
         )
     frames_per_minute = int(frames_per_minute)
+    if frames_per_minute <= 0 or int(n_min) <= 0:
+        raise ValueError("GetNeuronVisresponse requires positive n_min and frames_per_minute values.")
     train_idx = [int(i) for i in train_idx]
     test_idx = [int(i) for i in test_idx]
     if not train_idx or not test_idx:
@@ -1574,6 +1588,12 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
     invalid = [i for i in train_idx + test_idx if i < 0 or i >= n_trials]
     if invalid:
         raise ValueError(f"Trial index/indices out of range for {n_trials} trials: {invalid}")
+    if not double_wavelet_model:
+        # Keep coarse and full-model paths scientifically identical: a
+        # single-wavelet fit must not retain a hidden second feature.
+        w_i_inhib = np.zeros_like(w_i)
+        w_r_inhib = np.zeros_like(w_r)
+        dphi_inhib = np.zeros_like(dphi)
     spk = spks[:, :n_min * frames_per_minute, idx]
     signal_len = min(len(w_i), len(w_r), len(w_i_inhib), len(w_r_inhib), len(dphi), len(dphi_inhib), spks.shape[1])
     if lastmin:
@@ -1629,7 +1649,7 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
     res2 = np.mean(res1.reshape(len(test_idx), dt1), axis=0)
     ev = explained_variance_score(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2, multioutput='uniform_average')
     feve = FEVE(y_test.reshape(len(test_idx), dt1), res2)
-    cc = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2)
+    cc = np.corrcoef(np.mean(y_test.reshape(len(test_idx), dt1), axis=0), res2)[0, 1]
 
     cclastmin = np.nan
     if lastmin:
