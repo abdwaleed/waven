@@ -61,6 +61,31 @@ def _array_bytes(shape, dtype=np.float32):
     return int(math.prod(tuple(int(v) for v in shape)) * np.dtype(dtype).itemsize)
 
 
+def _host_convolution_output(value):
+    """Detach one tensor or a tuple of tensors into NumPy output payloads."""
+    if isinstance(value, tuple):
+        return tuple(_host_convolution_output(item) for item in value)
+    return value.cpu().numpy()
+
+
+def _convolution_output_bytes(value):
+    """Return the resident host size of a convolution output payload."""
+    if isinstance(value, tuple):
+        return sum(_convolution_output_bytes(item) for item in value)
+    return int(value.nbytes)
+
+
+def _concatenate_convolution_outputs(outputs):
+    """Concatenate frame shards without losing multi-product payload structure."""
+    first = outputs[0]
+    if isinstance(first, tuple):
+        return tuple(
+            np.concatenate([output[index] for output in outputs], axis=0)
+            for index in range(len(first))
+        )
+    return np.concatenate(outputs, axis=0)
+
+
 def _is_cuda_oom(exc):
     """Return whether an exception is a recoverable CUDA allocation failure."""
     return str(exc).lower().find("out of memory") >= 0
@@ -979,7 +1004,7 @@ def _conv2d_wavelet_bank(
                 with convolution_precision_scope(target_device):
                     response = target_runner(frame_tensor)
                     output_tensor = response.permute(0, 3, 2, 1) if postprocess is None else postprocess(response)
-            output = output_tensor.cpu().numpy()
+            output = _host_convolution_output(output_tensor)
             return output, time.perf_counter() - compute_start
         finally:
             del frame_tensor, response, output_tensor
@@ -1000,7 +1025,9 @@ def _conv2d_wavelet_bank(
         ]
         outputs_and_seconds = [future.result() for future in futures]
         return (
-            np.concatenate([output for output, _seconds in outputs_and_seconds], axis=0),
+            _concatenate_convolution_outputs(
+                [output for output, _seconds in outputs_and_seconds]
+            ),
             max(seconds for _output, seconds in outputs_and_seconds),
         )
 
@@ -1070,7 +1097,11 @@ def _conv2d_wavelet_bank(
                 telemetry.add("input", read_seconds, frames.nbytes)
             for output_start, output_end, output, output_seconds in convolve_with_backoff(frames, start):
                 if telemetry is not None:
-                    telemetry.add("gpu_compute_and_transfer", output_seconds, output.nbytes)
+                    telemetry.add(
+                        "gpu_compute_and_transfer",
+                        output_seconds,
+                        _convolution_output_bytes(output),
+                    )
                 yield output_start, output_end, output
             start = end
     finally:
@@ -1168,9 +1199,13 @@ def _time_major_convolution_groups(
                         with convolution_precision_scope(device):
                             response = runner(frame_tensor)
                             output_tensor = response.permute(0, 3, 2, 1) if postprocess is None else postprocess(response)
-                        output = output_tensor.cpu().numpy()
+                        output = _host_convolution_output(output_tensor)
                         if telemetry is not None:
-                            telemetry.add("gpu_compute_and_transfer", time.perf_counter() - compute_start, output.nbytes)
+                            telemetry.add(
+                                "gpu_compute_and_transfer",
+                                time.perf_counter() - compute_start,
+                                _convolution_output_bytes(output),
+                            )
                         yield metadata, start, end, output
                     finally:
                         del response, output_tensor
@@ -2263,6 +2298,7 @@ def waveletPowerDecompositionConv(
     output_stem="coarse_rf_power", zarr_chunks=None, cancel_event=None,
     progress_signature=None, rf_neuron_count=None, frequencies=None,
     coupled_frequencies=None, phase_output_stems=None,
+    phase_coupled_frequencies=None,
 ):
     """Write coarse wavelet power, optionally retaining its phase pair.
 
@@ -2271,7 +2307,9 @@ def waveletPowerDecompositionConv(
     and transferred to the GPU once before the power product is written.  When
     ``phase_output_stems`` supplies ``(real_stem, imaginary_stem)``, the same
     convolution also persists the quadrature responses needed by ``run_Model``.
-    This avoids rerunning the coarse movie/filter bank merely to recover phase.
+    With an independent power frequency axis, ``phase_coupled_frequencies``
+    selects one frequency per sigma for the compact phase pair; every selected
+    value must be present in the power frequency list.
     """
     try:
         import zarr
@@ -2286,15 +2324,32 @@ def waveletPowerDecompositionConv(
     coupled_frequencies = np.asarray(
         coupled_frequencies if coupled_frequencies is not None else [], dtype=float
     )
+    phase_coupled_frequencies = np.asarray(
+        phase_coupled_frequencies if phase_coupled_frequencies is not None else [],
+        dtype=float,
+    )
     independent_frequencies = bool(frequencies.size)
     phase_output_stems = tuple(phase_output_stems or ())
     if phase_output_stems and len(phase_output_stems) != 2:
         raise ValueError("phase_output_stems must contain real and imaginary output stems.")
+    phase_frequency_indices = None
     if phase_output_stems and independent_frequencies:
-        raise ValueError(
-            "Run Model phase caches do not support an independent coarse frequency axis. "
-            "Use matched sigma/frequency pairs or leave Run Model unchecked."
-        )
+        if phase_coupled_frequencies.shape != sigmas.shape or np.any(phase_coupled_frequencies <= 0):
+            raise ValueError(
+                "Independent coarse power needs one positive sigma-coupled frequency per "
+                "Run Model phase output."
+            )
+        phase_frequency_indices = []
+        for sigma, phase_frequency in zip(sigmas, phase_coupled_frequencies):
+            matches = np.flatnonzero(
+                np.isclose(frequencies, phase_frequency, rtol=1e-6, atol=1e-9)
+            )
+            if len(matches) != 1:
+                raise ValueError(
+                    "A Run Model sigma-coupled phase frequency is absent or ambiguous in "
+                    f"the Coarse RF independent list (sigma={sigma}, frequency={phase_frequency})."
+                )
+            phase_frequency_indices.append(int(matches[0]))
     if coupled_frequencies.size:
         if independent_frequencies:
             raise ValueError("Choose either matched sigma/frequency pairs or an independent frequency list.")
@@ -2312,8 +2367,10 @@ def waveletPowerDecompositionConv(
     final_shape = (int(num_frames), int(nx), int(ny), int(n_orientations), len(sigmas))
     if independent_frequencies:
         final_shape += (n_frequencies,)
-    output_count = 1 + (2 if phase_output_stems else 0)
-    logical_cache_bytes = _array_bytes(final_shape, np.float32) * output_count
+    phase_final_shape = final_shape[:-1] if independent_frequencies else final_shape
+    logical_cache_bytes = _array_bytes(final_shape, np.float32) + (
+        2 * _array_bytes(phase_final_shape, np.float32) if phase_output_stems else 0
+    )
     # A Zarr cache is compressed on disk.  Monitor its measured footprint rather
     # than reserving an additional uncompressed 400+ GiB array up front.
     capacity_guard = _prepare_compressed_cache_capacity(
@@ -2381,6 +2438,7 @@ def waveletPowerDecompositionConv(
         {"product": "coarse_rf_power", "sigmas": sigmas.tolist(),
           "orientations": int(n_orientations), "frequencies": frequencies.tolist(),
            "coupled_frequencies": coupled_frequencies.tolist(),
+          "phase_coupled_frequencies": phase_coupled_frequencies.tolist(),
           "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
           "phase_outputs": list(phase_output_stems),
           "resume_signature": progress_signature},
@@ -2394,7 +2452,7 @@ def waveletPowerDecompositionConv(
     if phase_paths and progress.reusable:
         try:
             phase_resume_ready = all(
-                tuple(_open_zarr_array(zarr, path, mode="r").shape) == tuple(final_shape)
+                tuple(_open_zarr_array(zarr, path, mode="r").shape) == tuple(phase_final_shape)
                 for path in phase_paths
             )
         except Exception:
@@ -2417,8 +2475,8 @@ def waveletPowerDecompositionConv(
         phase_open_kwargs = {"mode": phase_mode}
         if phase_mode == "w":
             phase_open_kwargs.update(
-                shape=final_shape,
-                chunks=zarr_chunks,
+                shape=phase_final_shape,
+                chunks=zarr_chunks[:-1] if independent_frequencies else zarr_chunks,
                 dtype=np.float32,
                 compressor=compressor,
             )
@@ -2463,6 +2521,11 @@ def waveletPowerDecompositionConv(
         f"device={device}, frame chunk={frame_chunk_size}, "
         f"sigma group={filter_group_size}, frequency mode={frequency_mode}"
     )
+    if phase_outputs and independent_frequencies:
+        print(
+            "Run Model phase cache uses the sigma-coupled subset of the "
+            "independent Coarse RF frequency list."
+        )
     print(
         f"Direct coarse RF power cache layout | chunks={zarr_chunks}; "
         f"compressor={compressor_description}"
@@ -2504,22 +2567,38 @@ def waveletPowerDecompositionConv(
                 for frequency in kernel_frequencies for theta in thetas
             ]
 
-        def fused_power_response(values, group_size=group_end - group_start):
+        def fused_power_response(
+            values,
+            group_size=group_end - group_start,
+            phase_indices=(
+                tuple(phase_frequency_indices[group_start:group_end])
+                if phase_frequency_indices is not None else ()
+            ),
+        ):
             """Square/sum real and imaginary responses before crossing PCIe."""
             shaped = values.reshape(
                 values.shape[0], 2, group_size, n_frequencies, int(n_orientations), values.shape[2], values.shape[3]
             )
             power_response = shaped[:, 0].square() + shaped[:, 1].square()
             if independent_frequencies:
-                return power_response.permute(0, 5, 4, 3, 1, 2).contiguous()
+                power_response = power_response.permute(0, 5, 4, 3, 1, 2).contiguous()
+                if not phase_outputs:
+                    return power_response
+                real_response = torch.stack(
+                    [shaped[:, 0, sigma_index, frequency_index] for sigma_index, frequency_index in enumerate(phase_indices)],
+                    dim=1,
+                ).permute(0, 4, 3, 2, 1).contiguous()
+                imag_response = torch.stack(
+                    [shaped[:, 1, sigma_index, frequency_index] for sigma_index, frequency_index in enumerate(phase_indices)],
+                    dim=1,
+                ).permute(0, 4, 3, 2, 1).contiguous()
+                return power_response, real_response, imag_response
             power_response = power_response[:, :, 0].permute(0, 4, 3, 2, 1).contiguous()
             if not phase_outputs:
                 return power_response
             real_response = shaped[:, 0, :, 0].permute(0, 4, 3, 2, 1).contiguous()
             imag_response = shaped[:, 1, :, 0].permute(0, 4, 3, 2, 1).contiguous()
-            # One transfer carries all three outputs.  Keeping this axis on the
-            # host avoids another GPU convolution or movie read for Run Model.
-            return torch.stack((real_response, imag_response, power_response), dim=1)
+            return power_response, real_response, imag_response
 
         group_records.append(
             ((group_number, group_start, group_end), list(real_kernels) + list(imag_kernels), fused_power_response)
@@ -2551,24 +2630,25 @@ def waveletPowerDecompositionConv(
 
     def store_power(start, end, group_start, group_end, payload):
         key = tile_key(start, end, group_start)
+        payload_bytes = _convolution_output_bytes(payload)
         def write_power(values, t0=start, t1=end, s0=group_start, s1=group_end):
             if phase_outputs:
-                phase_outputs[0][t0:t1, :, :, :, s0:s1] = values[:, 0]
-                phase_outputs[1][t0:t1, :, :, :, s0:s1] = values[:, 1]
-                values = values[:, 2]
+                values, real_values, imag_values = values
+                phase_outputs[0][t0:t1, :, :, :, s0:s1] = real_values
+                phase_outputs[1][t0:t1, :, :, :, s0:s1] = imag_values
             if independent_frequencies:
                 power[t0:t1, :, :, :, s0:s1, :] = values
             else:
                 power[t0:t1, :, :, :, s0:s1] = values
-        def mark_completed(tile_key_value=key, byte_count=payload.nbytes):
+        def mark_completed(tile_key_value=key, byte_count=payload_bytes):
             progress.mark(tile_key_value)
             capacity_guard.record_completed_write(byte_count)
         if writer is not None:
-            writer.submit(write_power, payload, payload.nbytes, on_complete=mark_completed)
+            writer.submit(write_power, payload, payload_bytes, on_complete=mark_completed)
         else:
             write_start = time.perf_counter()
             write_power(payload)
-            telemetry.add("output", time.perf_counter() - write_start, payload.nbytes)
+            telemetry.add("output", time.perf_counter() - write_start, payload_bytes)
             mark_completed()
 
     try:

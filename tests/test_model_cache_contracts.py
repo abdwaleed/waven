@@ -114,3 +114,43 @@ def test_direct_coarse_bundle_writes_power_and_phase_pair(tmp_path):
     imaginary = np.asarray(load_array(tmp_path / "imag.zarr", mmap_mode="r"))
     assert power.shape == real.shape == imaginary.shape == (3, 7, 7, 1, 1)
     np.testing.assert_allclose(power, real**2 + imaginary**2, rtol=1e-5, atol=1e-6)
+
+
+def test_direct_coarse_bundle_selects_coupled_phase_from_independent_power(tmp_path):
+    """Run Model phase caches remain compact while Coarse RF sweeps frequency."""
+
+    pytest.importorskip("zarr")
+    pytest.importorskip("numcodecs")
+    pytest.importorskip("torch")
+    from waven.storage.array_store import load_array
+    from waven.wavelets.decomposition import waveletPowerDecompositionConv
+
+    movie = np.random.default_rng(6).normal(size=(3, 7, 7)).astype(np.float32)
+    frequencies = [0.5, 0.25, 0.125]
+    coupled = [0.5, 0.25]
+    waveletPowerDecompositionConv(
+        movie,
+        sigmas=[1.0, 2.0],
+        folder_path=str(tmp_path),
+        n_orientations=1,
+        phase_offsets=[0.0, np.pi / 2],
+        output_stem="power_independent",
+        phase_output_stems=("real_coupled", "imag_coupled"),
+        frequencies=frequencies,
+        phase_coupled_frequencies=coupled,
+        frame_chunk_size=2,
+        filter_group_size=1,
+    )
+
+    power = np.asarray(load_array(tmp_path / "power_independent.zarr", mmap_mode="r"))
+    real = np.asarray(load_array(tmp_path / "real_coupled.zarr", mmap_mode="r"))
+    imaginary = np.asarray(load_array(tmp_path / "imag_coupled.zarr", mmap_mode="r"))
+    assert power.shape == (3, 7, 7, 1, 2, 3)
+    assert real.shape == imaginary.shape == (3, 7, 7, 1, 2)
+    for sigma_index, frequency_index in enumerate((0, 1)):
+        np.testing.assert_allclose(
+            power[..., sigma_index, frequency_index],
+            real[..., sigma_index] ** 2 + imaginary[..., sigma_index] ** 2,
+            rtol=1e-5,
+            atol=1e-6,
+        )

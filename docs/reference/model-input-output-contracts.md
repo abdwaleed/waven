@@ -16,6 +16,15 @@ All model actions validate array rank, paired real/imaginary shape, shared frame
 
 ## Run Model (coarse)
 
+When Coarse RF uses an independent frequency list, it may search every
+sigma-by-frequency combination. Run Model intentionally remains a compact
+five-dimensional phase model: it keeps the selected x/y/orientation/sigma seed
+and rebuilds its carrier from the configured cycles-per-sigma relationship.
+It does not choose frequency index zero or copy the RF frequency axis. When
+the coupled carrier values are present in the RF list, cache preparation reuses
+that convolution response; otherwise it writes the small real/imaginary phase
+pair in a separate safe pass.
+
 | Field | Contract |
 | --- | --- |
 | input wavelets | real and imaginary arrays, `(frames, coarse_x, coarse_y, orientations, sigmas)` |

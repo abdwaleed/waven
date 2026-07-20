@@ -3037,6 +3037,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return frequencies
         return []
 
+    def _run_model_phase_coupled_frequencies(sigmas):
+        """Return the one-frequency-per-sigma phase bank used by ``run_Model``.
+
+        Coarse RF may intentionally sweep every sigma/frequency combination.
+        ``run_Model`` has no frequency axis, so in that mode its compact phase
+        pair follows the calibrated cycles-per-sigma relationship instead of
+        silently selecting an arbitrary independent-frequency slice.  The
+        established matched-pair/legacy behaviour is retained when Coarse RF
+        itself is coupled.
+        """
+        sigmas = np.asarray(sigmas, dtype=float)
+        if _selected_coarse_rf_frequency_mode() != "frequency_list":
+            return np.asarray(_coarse_matched_pair_frequencies(), dtype=float), "matched_or_legacy"
+        try:
+            cycles_per_sigma = float(filter_bank_cycles_per_sigma_var.get())
+        except (NameError, TypeError, ValueError) as exc:
+            raise ValueError("Cycles / sigma must be a finite positive number for Run Model phase caches.") from exc
+        if not np.isfinite(cycles_per_sigma) or cycles_per_sigma <= 0:
+            raise ValueError("Cycles / sigma must be a finite positive number for Run Model phase caches.")
+        return cycles_per_sigma / sigmas, "cycles_per_sigma"
+
     def _selected_wavelet_format():
         """Return the selected durable format for wavelet/RF cache products."""
         try:
@@ -3136,6 +3157,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if frequency_mode == "frequency_list" else [],
             "matched_pair_frequencies": [float(value) for value in matched_frequencies]
             if frequency_mode == "coupled" else [],
+        }
+
+    def _coarse_model_phase_provenance(coarse_nx, coarse_ny, sigmas, phase_offsets):
+        """Return the compact Run Model phase-bank contract, separate from RF power."""
+        phase_frequencies, coupling_source = _run_model_phase_coupled_frequencies(sigmas)
+        return {
+            "schema": 3,
+            "backend": _selected_wavelet_backend(),
+            "grid": [int(coarse_nx), int(coarse_ny)],
+            "n_orientations": int(gabor_entries["N_thetas"].get()),
+            "sigmas": [float(value) for value in sigmas],
+            "phase_offsets_radians": [float(value) for value in phase_offsets],
+            "frequency_mode": "sigma_coupled",
+            "coupling_source": coupling_source,
+            "coupled_frequencies": [float(value) for value in phase_frequencies],
         }
 
     def _full_wavelet_provenance(full_nx, full_ny, sigmas, frequencies, phase_offsets):
@@ -3528,16 +3564,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             raise ValueError("Frequencies must contain only finite positive values.")
         matched_pair_frequencies = _coarse_matched_pair_frequencies()
         include_model_phases = product in {"model", "coarse_bundle"}
-        if include_model_phases and coarse_frequency_mode == "frequency_list":
+        if (
+            (product in {"coarse_rf", "coarse_bundle"} or include_model_phases)
+            and coarse_frequency_mode == "frequency_list"
+            and backend != "convolution"
+        ):
             raise ValueError(
-                "Run Model requires the compact coarse phase cache, which has no independent "
-                "frequency axis. Choose matched sigma/frequency pairs (or legacy sigma coupling), "
-                "or leave 'Prepare Run Model cache' unchecked."
-            )
-        if product == "coarse_rf" and coarse_frequency_mode == "frequency_list" and backend != "convolution":
-            raise ValueError(
-                "Coarse RF 'Use frequency list' requires the Convolution backend. "
-                "Select it in Advanced Session Config, then prepare the Coarse RF Power Cache."
+                "Independent Coarse RF frequencies and their compact Run Model phase cache require "
+                "the Convolution backend. Select it in Advanced Session Config, then prepare the caches."
             )
         if (
             product == "coarse_rf"
@@ -3553,6 +3587,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         phase_offsets = _gabor_phase_offsets_radians()
         if len(phase_offsets) < 2:
             raise ValueError("Phases must contain real and imaginary offsets.")
+        model_phase_coupled_frequencies, model_phase_coupling_source = _run_model_phase_coupled_frequencies(sigmas)
+        model_phase_fused_into_power = include_model_phases
+        if include_model_phases and coarse_frequency_mode == "frequency_list":
+            model_phase_fused_into_power = all(
+                np.count_nonzero(
+                    np.isclose(frequencies, phase_frequency, rtol=1e-6, atol=1e-9)
+                ) == 1
+                for phase_frequency in model_phase_coupled_frequencies
+            )
+            print(
+                "Run Model phase cache uses "
+                f"{model_phase_coupling_source.replace('_', ' ')} coupling, independent of the Coarse RF frequency axis."
+            )
         fine_library_sigmas = _ordered_float_union(
             sigmas,
             parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
@@ -3672,7 +3719,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             len(sigmas),
         )
         coarse_power_shape = coarse_phase_shape
-        if product == "coarse_rf" and coarse_frequency_mode == "frequency_list":
+        if product in {"coarse_rf", "coarse_bundle"} and coarse_frequency_mode == "frequency_list":
             if not frequencies:
                 raise ValueError("Coarse RF frequency-list mode requires at least one value in Frequencies.")
             coarse_power_shape += (len(frequencies),)
@@ -3681,7 +3728,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         # cache header lets the wavelet writer choose a GPU-aware Zarr layout
         # without materializing neural data during cache preparation.
         rf_neuron_count = None
-        if product == "coarse_rf":
+        if product in {"coarse_rf", "coarse_bundle"}:
             try:
                 from ..storage.array_store import load_array
 
@@ -3700,8 +3747,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "backend": backend,
                 "shape": coarse_phase_shape,
                 "downsample": coarse_downsample_fingerprint,
-                "scientific_parameters": _coarse_wavelet_provenance(
-                    coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                "scientific_parameters": _coarse_model_phase_provenance(
+                    coarse_nx, coarse_ny, sigmas, phase_offsets,
                 ),
             }
         )
@@ -3780,6 +3827,57 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         power[t0:t1, x0:x1, y0:y1, :, :] = real_chunk * real_chunk + imag_chunk * imag_chunk
             del power, real, imag
             gc.collect()
+
+        def _prepare_model_phase_cache(phase, phase_path, phase_fingerprint, videodata):
+            """Write one compact sigma-coupled Run Model phase cache."""
+            phase_name = "real" if int(phase) == 0 else "imaginary"
+            if _artifact_ready(
+                phase_path, coarse_phase_shape, phase_fingerprint,
+                kind="coarse_model_phase",
+            ):
+                print(f"Resume: found completed Run Model {phase_name} phase, reusing {phase_path}")
+                return
+            _register_cancel_cleanup_path(phase_path, preserve_on_cancel=True)
+            if backend != "convolution":
+                raise ValueError(
+                    "Run Model sigma-coupled phase caches require the Convolution backend."
+                )
+            waveletDecompositionConv(
+                videodata,
+                phase,
+                sigmas,
+                wavelet_folder,
+                n_orientations=n_thetas,
+                phase_offsets=phase_offsets,
+                kernel_cache_path=(
+                    coarse_kernel_cache_path
+                    if coarse_frequency_mode == "coupled" else None
+                ),
+                coupled_frequencies=(
+                    model_phase_coupled_frequencies
+                    if model_phase_coupled_frequencies.size else None
+                ),
+                output_format="zarr",
+                output_stem=os.path.splitext(os.path.basename(phase_path))[0],
+                cancel_event=_current_cancel_event(),
+            )
+            if not _artifact_matches(phase_path, coarse_phase_shape):
+                raise ValueError(
+                    f"Run Model {phase_name} phase cache has an unexpected shape: {phase_path}"
+                )
+            _write_artifact_metadata(
+                phase_path,
+                "coarse_model_phase",
+                coarse_phase_shape,
+                phase_fingerprint,
+                params={
+                    "crop": crop_params,
+                    "wavelet": _coarse_model_phase_provenance(
+                        coarse_nx, coarse_ny, sigmas, phase_offsets,
+                    ),
+                },
+            )
+
         if scale == "coarse":
             current_wavelet_dir[0] = wavelet_folder
             requested_path = coarse_power_path if product in {"coarse_rf", "coarse_bundle"} else model_real_path
@@ -3828,7 +3926,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
 
                 if product in {"coarse_rf", "coarse_bundle"} and backend == "convolution":
-                    bundle_label = "power + Run Model phase caches" if include_model_phases else "RF power cache"
+                    bundle_label = (
+                        "power + Run Model phase caches"
+                        if include_model_phases and model_phase_fused_into_power
+                        else "power + separately sigma-coupled Run Model phase caches"
+                        if include_model_phases
+                        else "RF power cache"
+                    )
                     update_progress(25, "Coarse wavelet decomposition", f"Writing direct {bundle_label}")
                     print(f"Step 2/2: Writing direct coarse {bundle_label}...")
                     _register_cancel_cleanup_path(coarse_power_path, preserve_on_cancel=True)
@@ -3854,7 +3958,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         phase_output_stems=(
                             os.path.splitext(os.path.basename(model_real_path))[0],
                             os.path.splitext(os.path.basename(model_imag_path))[0],
-                        ) if include_model_phases else None,
+                        ) if include_model_phases and model_phase_fused_into_power else None,
+                        phase_coupled_frequencies=(
+                            model_phase_coupled_frequencies
+                            if coarse_frequency_mode == "frequency_list" and model_phase_fused_into_power
+                            else None
+                        ),
                     )
                     _raise_if_cancelled()
                     if not _artifact_matches(coarse_power_path, coarse_power_shape):
@@ -3872,20 +3981,54 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     if include_model_phases:
                         real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
                         imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
-                        if not _artifact_matches(model_real_path, coarse_phase_shape) or not _artifact_matches(model_imag_path, coarse_phase_shape):
-                            raise ValueError("Direct coarse cache bundle did not create both Run Model phase caches.")
-                        _write_artifact_metadata(
-                            model_real_path, "coarse_model_phase", coarse_phase_shape,
-                            real_phase_fingerprint, params=cache_params,
-                        )
-                        _write_artifact_metadata(
-                            model_imag_path, "coarse_model_phase", coarse_phase_shape,
-                            imag_phase_fingerprint, params=cache_params,
-                        )
+                        if model_phase_fused_into_power:
+                            if not _artifact_matches(model_real_path, coarse_phase_shape) or not _artifact_matches(model_imag_path, coarse_phase_shape):
+                                raise ValueError("Direct coarse cache bundle did not create both Run Model phase caches.")
+                            phase_cache_params = {
+                                "crop": crop_params,
+                                "wavelet": _coarse_model_phase_provenance(
+                                    coarse_nx, coarse_ny, sigmas, phase_offsets,
+                                ),
+                            }
+                            _write_artifact_metadata(
+                                model_real_path, "coarse_model_phase", coarse_phase_shape,
+                                real_phase_fingerprint, params=phase_cache_params,
+                            )
+                            _write_artifact_metadata(
+                                model_imag_path, "coarse_model_phase", coarse_phase_shape,
+                                imag_phase_fingerprint, params=phase_cache_params,
+                            )
+                        else:
+                            print(
+                                "Run Model's sigma-coupled phase frequencies are not in the independent "
+                                "Coarse RF list; writing the compact phase pair in a separate pass."
+                            )
+                            _prepare_model_phase_cache(
+                                0, model_real_path, real_phase_fingerprint, videodata,
+                            )
+                            _prepare_model_phase_cache(
+                                1, model_imag_path, imag_phase_fingerprint, videodata,
+                            )
                         _write_recovery_step("coarse_model_cache_complete", real=model_real_path, imag=model_imag_path)
                     _write_recovery_step("coarse_rf_power_complete", path=coarse_power_path)
                     print(f"Direct coarse cache product is ready: {coarse_power_path}")
                     update_progress(100, "Coarse wavelet decomposition", "Coarse cache preparation complete")
+                    return True
+
+                if include_model_phases and coarse_frequency_mode == "frequency_list":
+                    # Preparing Run Model alone still uses the compact
+                    # sigma-coupled phase bank, never an arbitrary slice of
+                    # the independent Coarse RF sweep.
+                    real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
+                    imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
+                    _prepare_model_phase_cache(
+                        0, model_real_path, real_phase_fingerprint, videodata,
+                    )
+                    _prepare_model_phase_cache(
+                        1, model_imag_path, imag_phase_fingerprint, videodata,
+                    )
+                    _write_recovery_step("coarse_model_cache_complete", real=model_real_path, imag=model_imag_path)
+                    update_progress(100, "Coarse wavelet decomposition", "Run Model phase caches ready")
                     return True
 
                 update_progress(25, "Coarse wavelet decomposition", "Preparing coarse real phase")
@@ -3906,7 +4049,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             phase_offsets=phase_offsets,
                             kernel_cache_path=coarse_kernel_cache_path,
                             coupled_frequencies=(
-                                matched_pair_frequencies
+                                model_phase_coupled_frequencies
+                                if include_model_phases and model_phase_coupled_frequencies.size
+                                else matched_pair_frequencies
                                 if coarse_frequency_mode == "coupled" and backend == "convolution"
                                 else None
                             ),
@@ -3932,8 +4077,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         real_phase_fingerprint,
                         params={
                             "crop": crop_params,
-                            "wavelet": _coarse_wavelet_provenance(
-                                coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                            "wavelet": (
+                                _coarse_model_phase_provenance(
+                                    coarse_nx, coarse_ny, sigmas, phase_offsets,
+                                ) if include_model_phases else _coarse_wavelet_provenance(
+                                    coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                                )
                             ),
                         },
                     )
@@ -3957,7 +4106,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             phase_offsets=phase_offsets,
                             kernel_cache_path=coarse_kernel_cache_path,
                             coupled_frequencies=(
-                                matched_pair_frequencies
+                                model_phase_coupled_frequencies
+                                if include_model_phases and model_phase_coupled_frequencies.size
+                                else matched_pair_frequencies
                                 if coarse_frequency_mode == "coupled" and backend == "convolution"
                                 else None
                             ),
@@ -3983,8 +4134,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         imag_phase_fingerprint,
                         params={
                             "crop": crop_params,
-                            "wavelet": _coarse_wavelet_provenance(
-                                coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                            "wavelet": (
+                                _coarse_model_phase_provenance(
+                                    coarse_nx, coarse_ny, sigmas, phase_offsets,
+                                ) if include_model_phases else _coarse_wavelet_provenance(
+                                    coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets,
+                                )
                             ),
                         },
                     )
@@ -5814,6 +5969,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         cache_extra = {
             "model": "run_Model",
             "neuron": neuron_id,
+            "phase_bank": _coarse_model_phase_provenance(
+                state["coarse_nx"], state["coarse_ny"], state["sigmas"],
+                _gabor_phase_offsets_radians(),
+            ),
             **split_settings,
         }
         cached = _get_cached_entry("run_model", neuron_id=neuron_id, extra=cache_extra)
@@ -5836,11 +5995,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             mmap_mode="r",
             cache_label="Run Model imaginary phase",
         )
-        if _selected_coarse_rf_frequency_mode() == "frequency_list":
-            raise ValueError(
-                "Run Model does not support Coarse RF's independent frequency-list mode. "
-                "Use matched sigma/frequency pairs and rebuild the unified coarse cache."
-            )
         expected_phase_params = {
             "crop": {
                 **_downsample_cache_crop_params(
@@ -5848,9 +6002,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 ),
                 **_movie_source_provenance(),
             },
-            "wavelet": _coarse_wavelet_provenance(
+            "wavelet": _coarse_model_phase_provenance(
                 state["coarse_nx"], state["coarse_ny"], state["sigmas"],
-                state["frequencies"], _gabor_phase_offsets_radians(),
+                _gabor_phase_offsets_radians(),
             ),
         }
         for phase_path in (
@@ -5880,6 +6034,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             raw_best_params,
             state["neuron_pos"],
         )
+        # Coarse RF may have selected a best independent-frequency feature.
+        # Run Model deliberately refits the same x/y/orientation/sigma seed on
+        # its compact sigma-coupled phase bank, so its absent frequency axis is
+        # explicit rather than an accidental index-0 choice.
+        model_raw_best_params = np.asarray(raw_best_params)[:4]
+        model_smoothed_best_params = np.asarray(smoothed_best_params)[:4]
         for name, params in (("raw", raw_best_params), ("smoothed", smoothed_best_params)):
             coords = np.asarray(params[:2, neuron_id], dtype=float)
             limits = np.asarray(expected_coarse_features[:2], dtype=float) - 1
@@ -5901,8 +6061,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 Result produced by the operation.
             """
             return run_Model(
-                smoothed_best_params[:, [neuron_id]],
-                raw_best_params[:, [neuron_id]],
+                model_smoothed_best_params[:, [neuron_id]],
+                model_raw_best_params[:, [neuron_id]],
                 spks[:, :, [neuron_id]],
                 w_i,
                 w_r,
@@ -7241,7 +7401,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         try:
             filter_bank_mode_hint.configure(
                 text=(
-                    "Independent lists evaluate every size × frequency combination."
+                    "Independent lists evaluate every size × frequency combination; Run Model still uses its sigma-coupled phase pair."
                     if mode == "frequency_list"
                     else "Matched lists pair each filter size with its corresponding frequency."
                 )
@@ -7480,7 +7640,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     filter_bank_mode_hint = ctk.CTkLabel(
         filter_recommender,
         text=(
-            "Independent lists evaluate every size × frequency combination."
+            "Independent lists evaluate every size × frequency combination; Run Model still uses its sigma-coupled phase pair."
             if _selected_coarse_rf_frequency_mode() == "frequency_list"
             else "Matched lists pair each filter size with its corresponding frequency."
         ),
@@ -7746,7 +7906,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     cache_options_frame.pack(fill=tk.X, pady=(2, 4))
     ctk.CTkCheckBox(
         cache_options_frame,
-        text="Also prepare Run Model phase caches (power + real + imaginary in one coarse pass)",
+        text=(
+            "Also prepare Run Model phase caches "
+            "(sigma-coupled; reused from the RF pass when those frequencies overlap)"
+        ),
         variable=prepare_run_model_cache_var,
         text_color=text_color,
     ).pack(anchor="w", pady=2)
