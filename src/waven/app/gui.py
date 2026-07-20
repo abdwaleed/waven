@@ -287,21 +287,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "last_log_progress": -1,
         "last_log_stage": None,
     }
-    completed_actions = set()
-
-    def _invalidate_completed_actions(*prefixes):
-        """Remove completed stage markers affected by a changed GUI input."""
-        prefixes = tuple(str(prefix) for prefix in prefixes)
-        stale = {
-            action
-            for action in completed_actions
-            if any(action == prefix or action.startswith(f"{prefix}:") for prefix in prefixes)
-        }
-        completed_actions.difference_update(stale)
-        try:
-            refresh_action_buttons()
-        except NameError:
-            pass
     active_task = {
         "cancel_event": None,
         "cleanup_paths": [],
@@ -552,27 +537,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             print(task_finish_message(task_state["name"], status_label))
             print()
             flash_taskbar()
-            if success:
-                action_map = {
-                    "Neural cache creation": "neural",
-                    "Stimulus video downsampling": "downsample",
-                    "Gabor asset preparation": "gabor_all",
-                    "Prepare Coarse RF wavelets": "wavelet:coarse_rf",
-                    "Prepare Run Model wavelets": "wavelet:model",
-                    "Prepare Run Full Model wavelets": "wavelet:full_model",
-                    "Coarse receptive-field analysis": "rf",
-                }
-                action = action_map.get(completed_name)
-                if action:
-                    if action == "downsample":
-                        # Neural-cache creation and both coarse wavelet actions
-                        # consume this shared coarse movie.  Record the concrete
-                        # prerequisite instead of relying on a UI selector.
-                        completed_actions.add("downsample:coarse")
-                    elif action == "gabor_all":
-                        completed_actions.update({"gabor:coarse", "gabor:full"})
-                    else:
-                        completed_actions.add(action)
         task_state["name"] = None
         task_state["start"] = None
         task_state["detail"] = None
@@ -590,15 +554,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             pass
         for btn in all_buttons:
             btn.configure(state=tk.NORMAL)
-        try:
-            if success and completed_name == "Stimulus video downsampling":
-                # The worker writes metadata before it returns.  Rechecking on
-                # the UI thread prevents either neural-cache source mode from
-                # being left disabled by a stale prerequisite set.
-                _sync_completed_actions_from_artifacts()
-            refresh_action_buttons(advance_from=completed_name if success else None)
-        except NameError:
-            pass
 
     def run_in_thread(func, task_name=None):
         """Function for run in thread.
@@ -3415,9 +3370,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             movpath, scale, expected_shape, output_format, required_params=crop_params,
         )
         if reusable_path:
-            # Mark this prerequisite immediately.  This makes the next stage
-            # available even when the cache was created in an earlier session.
-            completed_actions.add("downsample:coarse")
             update_progress(100, "Stimulus downsample", f"Existing {reusable_format.upper()} cache ready")
             return True
 
@@ -3470,7 +3422,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 **grid_geometry_params,
             },
         )
-        completed_actions.add("downsample:coarse")
         update_progress(100, "Stimulus downsample", "Downsampled movie ready")
         return True
 
@@ -4244,11 +4195,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def create_neural_cache():
         """Create or validate the aligned neural firing-rate cache."""
-        if "downsample:coarse" not in completed_actions:
-            raise RuntimeError(
-                "Prepare Stimulus & Metadata first. Neural alignment uses the selected movie's "
-                "metadata-derived frame count and duration."
-            )
         context = _neural_alignment_context()
         spks_text = param_entries["Spks Path"].get().strip()
         if _selected_neural_source() == "spks_path":
@@ -6083,8 +6029,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 _refresh_neural_source_controls()
                 _refresh_sampling_mode()
                 _refresh_downsample_controls()
-                _sync_completed_actions_from_artifacts()
-                refresh_action_buttons()
             except NameError:
                 pass
             refresh_size_estimates()
@@ -6322,30 +6266,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _on_config_entry_changed(key):
         """Invalidate only the completed stages that consume ``key``."""
-        if key in {
-            "Dir", "Spks Path", "Experiment Info", "Block End", "Resolution",
-            "Number of Planes", "Sampling Rate (samples / sec)",
-        }:
-            _invalidate_completed_actions("neural", "rf")
-        if key in {
-            "Movie Path", "Visual Coverage", "Analysis Coverage",
-        }:
-            _invalidate_completed_actions("downsample", "wavelet", "rf")
-        if key in {
-            "N_thetas", "Sigmas", "Frequencies", "Phases",
-            "Coarse Library Path", "Fine Library Path",
-        }:
-            _invalidate_completed_actions("gabor", "wavelet", "rf")
-        if key == "Sigmas Full Model":
-            completed_actions.difference_update({"gabor:full", "wavelet:full", "rf"})
-        if key == "Path Directory":
-            completed_actions.difference_update({"wavelet:coarse", "rf"})
-        if key == "Full Model Wavelet Path":
-            completed_actions.discard("wavelet:full")
-        try:
-            refresh_action_buttons()
-        except NameError:
-            pass
+        # Buttons validate their required inputs and artifacts when clicked.
+        # Editing a field never changes the availability of another action.
 
     def add_config_row(parent, key, default, entries_dict, row, bg, labels_map):
         """Render one labeled configuration row with an optional typed browse button."""
@@ -7013,7 +6935,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 gabor_dimensions_label.configure(
                     text="Select one stimulus movie in the Stimulus step to derive the analysis grid."
                 )
-            refresh_action_buttons()
             refresh_size_estimates()
         except NameError:
             pass
@@ -7023,7 +6944,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if value not in {"legacy", "convolution"}:
             return
         wavelet_backend_var.set(value)
-        _invalidate_completed_actions("gabor", "wavelet", "rf")
         refresh_scale_controls()
         try:
             _apply_runtime_controls()
@@ -7033,7 +6953,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _on_coarse_rf_frequency_mode_changed(value):
         """Invalidate artifacts after changing the coarse filter-bank topology."""
         mode = "frequency_list" if value in {"Use frequency list", "Use independent list"} else "coupled"
-        _invalidate_completed_actions("gabor", "wavelet", "rf")
         refresh_size_estimates()
         mode_description = (
             "the independent configured Frequencies list"
@@ -7367,7 +7286,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # convolution kernels; Legacy only knows its historical hard-coded
             # coarse sigma/frequency relationship.
             set_wavelet_backend_from_panel("convolution")
-        _invalidate_completed_actions("gabor", "wavelet", "rf")
         complexity = (
             recommendation.coupled_resource_multiplier
             if mode == "coupled"
@@ -7455,7 +7373,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             val: Input value for this operation.
         """
         gabor_format_var.set(val)
-        _invalidate_completed_actions("gabor", "wavelet", "rf")
         try:
             refresh_size_estimates()
         except NameError:
@@ -7551,7 +7468,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         wavelet_format_var.set(val)
         # The durable correlation result created by Coarse RF follows this
         # choice too, so a prior RF run cannot be treated as current.
-        _invalidate_completed_actions("rf")
         try:
             refresh_size_estimates()
         except NameError:
@@ -7712,7 +7628,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Show only the neural input required by the selected starting point."""
         if value in neural_source_labels:
             neural_source_var.set(neural_source_labels[value])
-            _invalidate_completed_actions("neural", "rf")
         source = _selected_neural_source()
         try:
             neural_source_display_var.set(
@@ -7730,12 +7645,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             else:
                 neural_cache_format_frame.grid_remove()
                 btn_create_neural_cache.configure(text="Validate Existing Neural Cache")
-            # Switching between fresh-data and existing-cache modes must not
-            # retain a stale disabled state after stimulus preparation.
-            try:
-                refresh_action_buttons()
-            except NameError:
-                pass
         except Exception:
             pass
 
@@ -7948,7 +7857,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             else:
                 plan = sampling_plan_from_percent(metadata, _selected_downsample_percent(), coverage)
             downsample_percent_var.set(plan.horizontal_percent)
-            _invalidate_completed_actions("downsample", "wavelet", "rf")
             _refresh_downsample_controls()
             if plan.was_clamped:
                 messagebox.showwarning(
@@ -7981,10 +7889,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _refresh_downsample_controls(_value=None):
         """Refresh downsample-control state and the derived scientific sampling."""
         percent = _selected_downsample_percent()
-        if _value is not None:
-            completed_actions.difference_update({
-                "downsample:coarse", "wavelet:coarse_rf", "wavelet:model", "wavelet:full_model", "rf",
-            })
         try:
             downsample_slider.configure(state="normal")
             downsample_format_segment.configure(state="normal")
@@ -8345,127 +8249,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         btn_load_state,
     ]
 
-    def _sync_completed_actions_from_artifacts():
-        """Unlock stages whose validated artifacts already exist on disk."""
-        try:
-            movpath = _find_movie_path()
-            nx, ny = _stimulus_grid_dimensions("coarse", movpath)
-            expected_movie_shape = (_movie_metadata(movpath)["frames"], ny, nx)
-            visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
-            analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
-            cache_path, _cache_format = _find_compatible_downsample_cache(
-                movpath, "coarse", expected_movie_shape, _selected_downsample_format(),
-                required_params=_downsample_cache_crop_params(visual_coverage, analysis_coverage),
-            )
-            if cache_path:
-                completed_actions.add("downsample:coarse")
-        except Exception:
-            # The movie may not be selected yet; that is the normal initial state.
-            pass
-
-        try:
-            neural_dir = _folder_from_entry(
-                param_entries, "Spks Path", _project_layout().neural_cache_dir
-            )
-            cache_pair = find_neural_cache_pair(neural_dir)
-            if cache_pair is not None:
-                spikes, _positions, spikes_path, _positions_path = load_neural_cache_pair(
-                    neural_dir, mmap_mode="r"
-                )
-                if spikes.ndim == 3:
-                    movpath = _find_movie_path()
-                    expected_frames = _movie_metadata(movpath)["frames"]
-                    if spikes.shape[1] == expected_frames:
-                        completed_actions.add("neural")
-                    else:
-                        print(
-                            "Existing neural cache was not used for prerequisites: "
-                            f"{spikes_path} has {spikes.shape[1]} frames; movie has {expected_frames}."
-                        )
-        except Exception:
-            pass
-
-        try:
-            if _selected_wavelet_backend() == "legacy":
-                if _find_gabor_library("coarse"):
-                    completed_actions.add("gabor:coarse")
-                if _find_gabor_library("fine"):
-                    completed_actions.add("gabor:full")
-            else:
-                kernel_dir = _project_layout().gabor_kernel_dir
-                if os.path.exists(os.path.join(kernel_dir, "gabor_kernels_coarse_conv.npz")):
-                    completed_actions.add("gabor:coarse")
-                if os.path.exists(os.path.join(kernel_dir, "gabor_kernels_fine_conv.npz")):
-                    completed_actions.add("gabor:full")
-        except Exception:
-            pass
-
-        try:
-            movpath = _find_movie_path()
-            frames = _movie_metadata(movpath)["frames"]
-            nx, ny = _stimulus_grid_dimensions("coarse", movpath)
-            n_orientations = int(gabor_entries["N_thetas"].get())
-            n_sigmas = len(parse_literal(gabor_entries["Sigmas"].get(), "Sigmas"))
-            coarse_shape = (frames, nx, ny, n_orientations, n_sigmas)
-            if _selected_coarse_rf_frequency_mode() == "frequency_list":
-                coarse_shape += (len(parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")),)
-            wavelet_dir = _wavelet_folder("coarse")
-            crop_params = _downsample_cache_crop_params(
-                parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage"),
-                parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage"),
-            )
-            coarse_power_path = os.path.join(wavelet_dir, "coarse_rf_power.zarr")
-            if (
-                "downsample:coarse" in completed_actions
-                and _artifact_matches(coarse_power_path, coarse_shape)
-                and _artifact_has_params(coarse_power_path, crop_params)
-            ):
-                completed_actions.add("wavelet:coarse_rf")
-            if (
-                _artifact_matches(os.path.join(wavelet_dir, "coarse_model_real.zarr"), coarse_shape)
-                and _artifact_matches(os.path.join(wavelet_dir, "coarse_model_imag.zarr"), coarse_shape)
-            ):
-                completed_actions.add("wavelet:model")
-            full_sigmas = parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model")
-            frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
-            full_shape = (frames, nx, ny, n_orientations, len(full_sigmas), max(1, len(frequencies)))
-            full_dir = _wavelet_folder("full")
-            if (
-                _artifact_matches(os.path.join(full_dir, "dwt_videodata2_r.zarr"), full_shape)
-                and _artifact_matches(os.path.join(full_dir, "dwt_videodata2_i.zarr"), full_shape)
-            ):
-                completed_actions.add("wavelet:full_model")
-        except Exception:
-            pass
-
-    def refresh_action_buttons(advance_from=None):
-        """Apply stage prerequisites and advance to the next chronological tab."""
-        prerequisites = {
-            btn_create_neural_cache: {"downsample:coarse"},
-            btn_submit_wavelet: {"downsample:coarse", "gabor:coarse"},
-            btn_prepare_model_wavelets: {"downsample:coarse", "gabor:coarse"},
-            btn_prepare_full_model_wavelets: {"downsample:coarse", "gabor:full"},
-            btn_submit_plot: {"neural", "wavelet:coarse_rf"},
-            btn_runRF: {"rf"},
-            btn_run_model_plots: {"rf", "wavelet:model"},
-            btn_run_full_model_plots: {"rf", "wavelet:full_model"},
-            btn_export_all_results: {"rf"},
-            btn_export_all_neurons: {"rf"},
-            btn_export_individual_neuron: {"rf"},
-            btn_export_all_individual_graph_types: {"rf"},
-        }
-        for button, required in prerequisites.items():
-            button.configure(state=tk.NORMAL if required.issubset(completed_actions) else tk.DISABLED)
-        next_tabs = {
-            "Stimulus video downsampling": "2 Session Setup",
-            "Neural cache creation": "3 Gabor",
-            "Gabor asset preparation": "4 Wavelet Products",
-            "Prepare Coarse RF wavelets": "5 Analysis",
-            "Coarse receptive-field analysis": "6 Export",
-        }
-        if advance_from in next_tabs:
-            stage_tabs.set(next_tabs[advance_from])
-
     def _set_grid_row_visible(row_widgets, visible):
         """Show or hide one label/entry pair without discarding its value."""
         for widget in row_widgets:
@@ -8487,8 +8270,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         format_frame_wavelet.pack(anchor="w", pady=(10, 0), before=wavelet_size_label)
 
     refresh_scale_controls()
-    _sync_completed_actions_from_artifacts()
-    refresh_action_buttons()
 
     for section in (frame_session, stage_tabs, frame_controls):
         section.pack_forget()
