@@ -18,6 +18,7 @@ import shutil
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import gc
 import traceback
@@ -1505,6 +1506,59 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     }
     export_file_vars = {}
     export_packaging_var = None
+    export_profile_var = None
+    export_numeric_layout_var = None
+
+    _EXPORT_TIMING_STAGES = (
+        "restore", "draw", "extract", "png", "svg", "array_collect",
+        "arrays", "pickle", "manifest",
+    )
+
+    def _new_export_timing():
+        """Create a compact, per-job export timing accumulator."""
+        return {
+            "started": time.perf_counter(),
+            "seconds": {stage: 0.0 for stage in _EXPORT_TIMING_STAGES},
+            "files": 0,
+            "bytes": 0,
+            "graphs": 0,
+        }
+
+    def _time_export_stage(timing, stage, callback):
+        """Run one export operation and attribute its wall time to ``stage``."""
+        started = time.perf_counter()
+        try:
+            return callback()
+        finally:
+            timing["seconds"][stage] = timing["seconds"].get(stage, 0.0) + (time.perf_counter() - started)
+
+    def _record_export_file(timing, path):
+        """Track an exported file without making a failed stat fatal."""
+        timing["files"] += 1
+        try:
+            timing["bytes"] += os.path.getsize(path)
+        except OSError:
+            pass
+
+    def _format_export_timing(timing):
+        """Return stable, useful export timing fields for the terminal."""
+        seconds = timing["seconds"]
+        parts = [
+            f"{stage}={seconds.get(stage, 0.0):.2f}s"
+            for stage in _EXPORT_TIMING_STAGES
+            if seconds.get(stage, 0.0) >= 0.005
+        ]
+        total = time.perf_counter() - timing["started"]
+        parts.extend((
+            f"files={timing['files']}",
+            f"size={_format_bytes(timing['bytes'])}",
+            f"total={total:.2f}s",
+        ))
+        return " | ".join(parts)
+
+    def _log_export_timing(label, timing):
+        """Report a concise timing breakdown after a completed export job."""
+        print(f"[EXPORT] Timing {label} | {_format_export_timing(timing)}")
 
     def _selected_export_files():
         """Return the file products selected in the Export tab."""
@@ -1529,6 +1583,52 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return "folder"
         value = str(export_packaging_var.get()).lower()
         return value if value in {"folder", "zip", "both"} else "folder"
+
+    def _selected_export_numeric_layout():
+        """Return whether Section B writes graph-local or per-neuron numeric data."""
+        if export_numeric_layout_var is None:
+            return "per_graph"
+        value = str(export_numeric_layout_var.get()).lower()
+        if value in {"per_neuron", "per-neuron .npz"}:
+            return "per_neuron"
+        return "per_graph"
+
+    def _apply_export_profile(profile=None):
+        """Apply a purposeful export preset without removing custom controls."""
+        selected = str(profile or (export_profile_var.get() if export_profile_var is not None else "")).lower()
+        profiles = {
+            "quick review": {
+                "files": {"png": True, "svg": False, "data_pickle": False,
+                          "figure_pickle": False, "arrays": False, "manifest": False},
+                "numeric_layout": "per_graph",
+            },
+            "data bundle": {
+                "files": {"png": True, "svg": False, "data_pickle": False,
+                          "figure_pickle": False, "arrays": True, "manifest": True},
+                "numeric_layout": "per_neuron",
+            },
+            "full archive": {
+                "files": {"png": True, "svg": True, "data_pickle": True,
+                          "figure_pickle": True, "arrays": True, "manifest": True},
+                "numeric_layout": "per_graph",
+            },
+        }
+        chosen = profiles.get(selected)
+        if chosen is None:
+            return
+        for key, value in chosen["files"].items():
+            variable = export_file_vars.get(key)
+            if variable is not None:
+                variable.set(value)
+        if export_numeric_layout_var is not None:
+            export_numeric_layout_var.set(
+                "Per-neuron .npz" if chosen["numeric_layout"] == "per_neuron" else "Per-graph files"
+            )
+
+    def _mark_export_profile_custom(_value=None):
+        """Keep the preset label honest after a user changes an individual control."""
+        if export_profile_var is not None:
+            export_profile_var.set("Custom")
 
     def _validate_export_file_selection():
         """Reject an export with no selected output products."""
@@ -1577,7 +1677,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if classify_export_record(record.get("tab"), record.get("title")) in selected
         ]
 
-    def _export_figure_record(record, base_dir, index=None):
+    def _export_figure_record(record, base_dir, index=None, timing=None):
         """Function for export figure record.
 
         Args:
@@ -1588,7 +1688,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         Returns:
             Result produced by the operation.
         """
-        fig = _figure_from_export_snapshot(record)
+        owns_timing = timing is None
+        timing = timing or _new_export_timing()
+        fig = _time_export_stage(timing, "restore", lambda: _figure_from_export_snapshot(record))
         tab_name = record.get("tab") or "Plots"
         title = record.get("title") or _figure_title(fig)
         prefix_bits = []
@@ -1610,16 +1712,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         file_options = record.get("file_options") or _selected_export_files()
         if file_options["png"]:
-            fig.savefig(png_path, dpi=200, bbox_inches="tight")
+            _time_export_stage(timing, "png", lambda: fig.savefig(png_path, dpi=200, bbox_inches="tight"))
+            _record_export_file(timing, png_path)
         if file_options["svg"]:
-            fig.savefig(svg_path, format="svg", bbox_inches="tight")
+            _time_export_stage(timing, "svg", lambda: fig.savefig(svg_path, format="svg", bbox_inches="tight"))
+            _record_export_file(timing, svg_path)
 
-        current_figure_data = record.get("current_figure_data") or _extract_figure_data(fig)
-        cached_artist_data = record.get(
-            "cached_artist_data", getattr(fig, "_waven_cached_artist_data", None)
-        )
-        figure_data = cached_artist_data or current_figure_data
-        payload = record.get("export_payload", getattr(fig, "_waven_export_payload", None))
+        needs_graph_data = bool(file_options["arrays"] or file_options["data_pickle"] or file_options["manifest"])
+        if needs_graph_data:
+            current_figure_data = record.get("current_figure_data")
+            if current_figure_data is None:
+                current_figure_data = _time_export_stage(timing, "extract", lambda: _extract_figure_data(fig))
+            cached_artist_data = record.get(
+                "cached_artist_data", getattr(fig, "_waven_cached_artist_data", None)
+            )
+            figure_data = cached_artist_data or current_figure_data
+            payload = record.get("export_payload", getattr(fig, "_waven_export_payload", None))
+        else:
+            current_figure_data = {"axes": []}
+            cached_artist_data = None
+            figure_data = current_figure_data
+            payload = None
         bundle = {
             "tab": tab_name,
             "title": title,
@@ -1632,11 +1745,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         arrays = {}
         metadata = {}
         if file_options["arrays"]:
-            _add_array_exports("figure", figure_data, arrays, metadata)
-            _add_array_exports("current_figure", current_figure_data, arrays, metadata)
-            if cached_artist_data is not None:
-                _add_array_exports("source_artist", cached_artist_data, arrays, metadata)
-            _add_array_exports("payload", payload, arrays, metadata)
+            def collect_arrays():
+                _add_array_exports("figure", figure_data, arrays, metadata)
+                _add_array_exports("current_figure", current_figure_data, arrays, metadata)
+                if cached_artist_data is not None:
+                    _add_array_exports("source_artist", cached_artist_data, arrays, metadata)
+                _add_array_exports("payload", payload, arrays, metadata)
+            _time_export_stage(timing, "array_collect", collect_arrays)
         try:
             array_format = record.get("array_format", export_array_format_var.get())
         except (NameError, RuntimeError):
@@ -1652,7 +1767,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             array = np.asarray(value)
             if array_format in {"npy", "both"}:
                 path = os.path.join(array_dir, f"{safe_key}.npy")
-                np.save(path, array)
+                _time_export_stage(timing, "arrays", lambda path=path, array=array: np.save(path, array))
+                _record_export_file(timing, path)
                 array_files["npy"].append(os.path.relpath(path, graph_dir))
             if array_format in {"zarr", "both"}:
                 try:
@@ -1662,7 +1778,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 path = os.path.join(array_dir, f"{safe_key}.zarr")
                 try:
                     zarr_array = array.astype(str) if array.dtype == object else array
-                    _zarr.save(path, zarr_array)
+                    _time_export_stage(timing, "arrays", lambda path=path, zarr_array=zarr_array: _zarr.save(path, zarr_array))
+                    _record_export_file(timing, path)
                     array_files["zarr"].append(os.path.relpath(path, graph_dir))
                 except Exception as exc:
                     metadata[f"{key}.zarr_export_error"] = str(exc)
@@ -1671,8 +1788,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if file_options["data_pickle"]:
             pickle_data_saved = True
             try:
-                with open(pickle_path, "wb") as handle:
-                    pickle.dump(bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                def write_full_pickle():
+                    with open(pickle_path, "wb") as handle:
+                        pickle.dump(bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                _time_export_stage(timing, "pickle", write_full_pickle)
+                _record_export_file(timing, pickle_path)
             except Exception as exc:
                 pickle_data_saved = False
                 safe_bundle = {
@@ -1684,16 +1804,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "payload": _json_safe(payload),
                     "pickle_note": f"Original payload was not pickleable: {exc}",
                 }
-                with open(pickle_path, "wb") as handle:
-                    pickle.dump(safe_bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                def write_safe_pickle():
+                    with open(pickle_path, "wb") as handle:
+                        pickle.dump(safe_bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                _time_export_stage(timing, "pickle", write_safe_pickle)
+                _record_export_file(timing, pickle_path)
                 print(f"Saved summarized data pickle for '{title}' because the full payload was not pickleable: {exc}")
 
         figure_pickle_saved = None
         if file_options["figure_pickle"]:
             figure_pickle_saved = False
             try:
-                with open(figure_pickle_path, "wb") as handle:
-                    pickle.dump(fig, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                def write_figure_pickle():
+                    with open(figure_pickle_path, "wb") as handle:
+                        pickle.dump(fig, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                _time_export_stage(timing, "pickle", write_figure_pickle)
+                _record_export_file(timing, figure_pickle_path)
                 figure_pickle_saved = True
             except Exception as exc:
                 print(f"Could not pickle matplotlib figure '{title}': {exc}")
@@ -1718,8 +1844,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "source_axes": _json_safe(cached_artist_data.get("axes", [])) if cached_artist_data else None,
         }
         if file_options["manifest"]:
-            with open(manifest_path, "w", encoding="utf-8") as handle:
-                json.dump(manifest, handle, indent=2)
+            def write_manifest():
+                with open(manifest_path, "w", encoding="utf-8") as handle:
+                    json.dump(manifest, handle, indent=2)
+            _time_export_stage(timing, "manifest", write_manifest)
+            _record_export_file(timing, manifest_path)
+        timing["graphs"] += 1
+        if owns_timing:
+            _log_export_timing(f"graph '{title}'", timing)
         return graph_dir
 
     def _snapshot_export_record(record, array_format=None, file_options=None):
@@ -1932,25 +2064,116 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         records = _filter_export_records(_active_export_records("Individual neuron"), "current_individual")
         _export_records(records, "current_individual_neuron", "Select Folder for Current Individual-Neuron Export")
 
-    def _export_individual_axes(records, base_dir, selected_kinds=None, array_format=None, file_options=None):
+    def _new_consolidated_numeric_bundle():
+        """Create one fast numeric archive for an individual-neuron export."""
+        return {"arrays": {}, "metadata": {}, "graphs": [], "pickles": {}}
+
+    def _add_consolidated_numeric_graph(
+        bundle, graph_name, graph_path, graph_data, arrays, metadata, include_pickle, visual_files,
+    ):
+        """Add one graph's numeric data to a per-neuron archive without copies."""
+        array_keys = []
+        for key, value in arrays.items():
+            archive_key = f"{graph_name}__{_safe_name(key)}"
+            bundle["arrays"][archive_key] = value
+            array_keys.append(archive_key)
+        bundle["metadata"][graph_name] = metadata
+        bundle["graphs"].append({
+            "graph": graph_path,
+            "visual_files": visual_files,
+            "title": graph_data["title"],
+            "graph_kind": graph_data["graph_kind"],
+            "axis_index": graph_data["axis_index"],
+            "array_keys": array_keys,
+            "axis_data": _json_safe(graph_data["axis_data"]),
+            "payload": _json_safe(graph_data["payload"]),
+        })
+        if include_pickle:
+            bundle["pickles"][graph_name] = graph_data
+
+    def _write_consolidated_numeric_bundle(base_dir, bundle, file_options, timing):
+        """Write a compact, uncompressed per-neuron data bundle and index.
+
+        ``np.savez`` intentionally remains uncompressed: export is commonly
+        bottlenecked by many small-file operations, and users can compress the
+        resulting single file later if archival size matters more than speed.
+        """
+        result = {"npz": None, "pickle": None, "manifest": None}
+        if file_options["arrays"] and bundle["arrays"]:
+            npz_path = os.path.join(base_dir, "data.npz")
+            _time_export_stage(
+                timing, "arrays",
+                lambda: np.savez(npz_path, **bundle["arrays"]),
+            )
+            _record_export_file(timing, npz_path)
+            result["npz"] = "data.npz"
+        if file_options["data_pickle"] and bundle["pickles"]:
+            pickle_path = os.path.join(base_dir, "data.pkl")
+            def write_pickle():
+                with open(pickle_path, "wb") as handle:
+                    pickle.dump(bundle["pickles"], handle, protocol=pickle.HIGHEST_PROTOCOL)
+            _time_export_stage(
+                timing, "pickle",
+                write_pickle,
+            )
+            _record_export_file(timing, pickle_path)
+            result["pickle"] = "data.pkl"
+        if file_options["manifest"]:
+            manifest_path = os.path.join(base_dir, "data_manifest.json")
+            manifest = {
+                "numeric_layout": "per_neuron",
+                "array_bundle": result["npz"],
+                "pickle_bundle": result["pickle"],
+                "graphs": bundle["graphs"],
+                "metadata": _json_safe(bundle["metadata"]),
+            }
+            def write_manifest():
+                with open(manifest_path, "w", encoding="utf-8") as handle:
+                    json.dump(manifest, handle, indent=2)
+            _time_export_stage(timing, "manifest", write_manifest)
+            _record_export_file(timing, manifest_path)
+            result["manifest"] = "data_manifest.json"
+        return result
+
+    def _export_individual_axes(
+        records, base_dir, selected_kinds=None, array_format=None, file_options=None,
+        numeric_layout="per_graph",
+    ):
         """Write selected individual-neuron axes as one-graph export bundles.
 
-        Unlike a dashboard export, every folder contains exactly one cropped
-        graph and only its axis data plus the matching payload values. PNG,
-        SVG, pickle, NPY/Zarr arrays, and a manifest remain available in the
-        same style as complete-figure exports.
+        Full archive mode retains one cropped graph folder per axis. Fast
+        modes store flat image files under ``graphs/`` and, when requested,
+        consolidate all numerical values into one per-neuron NPZ bundle.
         """
         selected_kinds = set(selected_kinds or {kind for kind, _label in SINGLE_NEURON_GRAPH_OPTIONS})
         file_options = dict(file_options or _selected_export_files())
+        numeric_layout = numeric_layout if numeric_layout in {"per_graph", "per_neuron"} else "per_graph"
+        consolidated = _new_consolidated_numeric_bundle() if numeric_layout == "per_neuron" else None
+        compact_visual_layout = bool(
+            numeric_layout == "per_neuron"
+            or (file_options["png"] and not any(
+                file_options[key] for key in ("svg", "data_pickle", "figure_pickle", "arrays", "manifest")
+            ))
+        )
+        needs_graph_data = bool(
+            consolidated is not None
+            or file_options["arrays"]
+            or file_options["data_pickle"]
+            or file_options["manifest"]
+        )
+        timing = _new_export_timing()
         axis_root = os.path.join(base_dir, "graphs")
         os.makedirs(axis_root, exist_ok=True)
         exported = []
         png_dpi = 200
         for record_index, record in enumerate(records, start=1):
-            fig = _figure_from_export_snapshot(record)
-            fig.canvas.draw()
+            fig = _time_export_stage(timing, "restore", lambda record=record: _figure_from_export_snapshot(record))
+            _time_export_stage(timing, "draw", fig.canvas.draw)
             renderer = fig.canvas.get_renderer()
-            figure_data = _extract_figure_data(fig)
+            figure_data = (
+                _time_export_stage(timing, "extract", lambda fig=fig: _extract_figure_data(fig))
+                if needs_graph_data else {"axes": []}
+            )
             has_selected_axis = any(
                 axis.get_visible()
                 and axis.get_title().strip()
@@ -1964,19 +2187,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # rasterizing the entire dashboard again for every PNG.  The SVG
             # remains vector-native and is still written by Matplotlib below.
             full_png = None
-            try:
-                figure_width, figure_height = fig.get_size_inches()
-                estimated_bytes = int(figure_width * png_dpi * figure_height * png_dpi * 4)
-                if estimated_bytes <= 96 * 1024 * 1024:
-                    png_buffer = io.BytesIO()
-                    fig.savefig(png_buffer, format="png", dpi=png_dpi)
-                    png_buffer.seek(0)
-                    full_png = Image.open(png_buffer).convert("RGBA")
-                    full_png.load()
-            except Exception as exc:
-                # Keep the established per-axis save path as a safe fallback
-                # for an unusual backend or exceptionally large figure.
-                print(f"[EXPORT] Shared PNG render unavailable; using per-axis renders: {exc}")
+            if file_options["png"]:
+                try:
+                    figure_width, figure_height = fig.get_size_inches()
+                    estimated_bytes = int(figure_width * png_dpi * figure_height * png_dpi * 4)
+                    if estimated_bytes <= 96 * 1024 * 1024:
+                        png_buffer = io.BytesIO()
+                        _time_export_stage(timing, "png", lambda: fig.savefig(png_buffer, format="png", dpi=png_dpi))
+                        png_buffer.seek(0)
+                        def load_shared_png():
+                            image = Image.open(png_buffer).convert("RGBA")
+                            image.load()
+                            return image
+                        full_png = _time_export_stage(timing, "png", load_shared_png)
+                except Exception as exc:
+                    # Keep the established per-axis save path as a safe fallback
+                    # for an unusual backend or exceptionally large figure.
+                    print(f"[EXPORT] Shared PNG render unavailable; using per-axis renders: {exc}")
 
             def save_axis_png(path, bbox_inches):
                 if full_png is None:
@@ -2005,20 +2232,34 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 graph_name = _export_safe_name(
                     f"{record_index:02d}_{axis_index:02d}_{title}", maximum_length=56,
                 )
-                graph_dir = os.path.join(axis_root, graph_name)
-                os.makedirs(graph_dir, exist_ok=True)
+                graph_dir = axis_root if compact_visual_layout else os.path.join(axis_root, graph_name)
+                if not compact_visual_layout:
+                    os.makedirs(graph_dir, exist_ok=True)
                 bbox = axis.get_tightbbox(renderer).expanded(1.08, 1.16)
                 bbox_inches = bbox.transformed(fig.dpi_scale_trans.inverted())
+                visual_files = []
                 if file_options["png"]:
-                    save_axis_png(os.path.join(graph_dir, "graph.png"), bbox_inches)
+                    png_path = os.path.join(
+                        graph_dir, f"{graph_name}.png" if compact_visual_layout else "graph.png",
+                    )
+                    _time_export_stage(timing, "png", lambda: save_axis_png(png_path, bbox_inches))
+                    _record_export_file(timing, png_path)
+                    visual_files.append(os.path.relpath(png_path, base_dir))
                 if file_options["svg"]:
-                    fig.savefig(os.path.join(graph_dir, "graph.svg"), format="svg", bbox_inches=bbox_inches)
+                    svg_path = os.path.join(
+                        graph_dir, f"{graph_name}.svg" if compact_visual_layout else "graph.svg",
+                    )
+                    _time_export_stage(
+                        timing, "svg", lambda: fig.savefig(svg_path, format="svg", bbox_inches=bbox_inches),
+                    )
+                    _record_export_file(timing, svg_path)
+                    visual_files.append(os.path.relpath(svg_path, base_dir))
                 axis_data = figure_data.get("axes", [])[axis_index] if axis_index < len(figure_data.get("axes", [])) else {}
                 payload = graph_payload(
                     record.get("export_payload", getattr(fig, "_waven_export_payload", None)),
                     graph_kind,
-                )
-                if graph_kind == "sta" and "sta_maps" in payload:
+                ) if needs_graph_data else {}
+                if needs_graph_data and graph_kind == "sta" and "sta_maps" in payload:
                     # A lag grid is a display convenience.  Each Section B
                     # bundle must contain only the map represented by this
                     # cropped axis, never the entire multi-lag cube.
@@ -2047,76 +2288,115 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 arrays = {}
                 metadata = {}
                 if file_options["arrays"]:
-                    _add_array_exports("axis", axis_data, arrays, metadata)
-                    _add_array_exports("payload", payload, arrays, metadata)
+                    def collect_arrays():
+                        _add_array_exports("axis", axis_data, arrays, metadata)
+                        _add_array_exports("payload", payload, arrays, metadata)
+                    _time_export_stage(timing, "array_collect", collect_arrays)
                 active_array_format = array_format or record.get("array_format", "npy")
                 if active_array_format not in {"npy", "zarr", "both"}:
                     active_array_format = "npy"
-                array_dir = os.path.join(graph_dir, "arrays")
-                if arrays:
-                    os.makedirs(array_dir, exist_ok=True)
                 array_files = {"npy": [], "zarr": []}
-                for key, value in arrays.items():
-                    safe_key = _safe_name(key)
-                    array = np.asarray(value)
-                    if active_array_format in {"npy", "both"}:
-                        path = os.path.join(array_dir, f"{safe_key}.npy")
-                        np.save(path, array)
-                        array_files["npy"].append(os.path.relpath(path, graph_dir))
-                    if active_array_format in {"zarr", "both"}:
-                        try:
-                            import zarr as _zarr
-                        except ImportError as exc:
-                            raise ImportError("Zarr export requires the 'zarr' package.") from exc
-                        path = os.path.join(array_dir, f"{safe_key}.zarr")
-                        try:
-                            _zarr.save(path, array.astype(str) if array.dtype == object else array)
-                            array_files["zarr"].append(os.path.relpath(path, graph_dir))
-                        except Exception as exc:
-                            metadata[f"{key}.zarr_export_error"] = str(exc)
-                            print(f"  Skipped Zarr array '{key}': {exc}")
-                if file_options["data_pickle"]:
-                    with open(os.path.join(graph_dir, "data.pkl"), "wb") as handle:
-                        pickle.dump(bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                orientation_export = payload.get("orientation_export") if graph_kind in {
-                    "orientation_correlation", "orientation_firing_rate"
-                } else None
-                orientation_pickle = None
-                orientation_note = None
-                if isinstance(orientation_export, dict):
-                    orientation_note = "orientation_tuning_comparison_note.txt"
-                    with open(os.path.join(graph_dir, orientation_note), "w", encoding="utf-8") as handle:
-                        handle.write(ORIENTATION_EXPORT_COMPARISON_NOTE)
+                if consolidated is not None:
+                    _add_consolidated_numeric_graph(
+                        consolidated, graph_name,
+                        visual_files[0] if visual_files else os.path.join("graphs", graph_name),
+                        bundle, arrays, metadata, include_pickle=file_options["data_pickle"],
+                        visual_files=visual_files,
+                    )
+                else:
+                    array_dir = os.path.join(graph_dir, "arrays")
+                    if arrays:
+                        os.makedirs(array_dir, exist_ok=True)
+                    for key, value in arrays.items():
+                        safe_key = _safe_name(key)
+                        array = np.asarray(value)
+                        if active_array_format in {"npy", "both"}:
+                            path = os.path.join(array_dir, f"{safe_key}.npy")
+                            _time_export_stage(timing, "arrays", lambda path=path, array=array: np.save(path, array))
+                            _record_export_file(timing, path)
+                            array_files["npy"].append(os.path.relpath(path, graph_dir))
+                        if active_array_format in {"zarr", "both"}:
+                            try:
+                                import zarr as _zarr
+                            except ImportError as exc:
+                                raise ImportError("Zarr export requires the 'zarr' package.") from exc
+                            path = os.path.join(array_dir, f"{safe_key}.zarr")
+                            try:
+                                zarr_array = array.astype(str) if array.dtype == object else array
+                                _time_export_stage(
+                                    timing, "arrays",
+                                    lambda path=path, zarr_array=zarr_array: _zarr.save(path, zarr_array),
+                                )
+                                _record_export_file(timing, path)
+                                array_files["zarr"].append(os.path.relpath(path, graph_dir))
+                            except Exception as exc:
+                                metadata[f"{key}.zarr_export_error"] = str(exc)
+                                print(f"  Skipped Zarr array '{key}': {exc}")
                     if file_options["data_pickle"]:
-                        orientation_pickle = "orientation_tuning.pkl"
-                        with open(os.path.join(graph_dir, orientation_pickle), "wb") as handle:
-                            # This is intentionally the direct, reference-like
-                            # record rather than an export wrapper. It was fully
-                            # calculated during Run Coarse RF Analysis.
-                            pickle.dump(orientation_export, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                manifest = {
-                    "title": title,
-                    "source_figure": record.get("title"),
-                    "axis_index": axis_index,
-                    "graph_kind": graph_kind,
-                    "one_graph_per_file": True,
-                    "files": {
-                        "png": "graph.png" if file_options["png"] else None,
-                        "svg": "graph.svg" if file_options["svg"] else None,
-                        "pickle_data": "data.pkl" if file_options["data_pickle"] else None,
-                        "orientation_tuning_pickle": orientation_pickle,
-                        "orientation_comparison_note": orientation_note,
-                        "array_format": active_array_format if file_options["arrays"] else None,
-                        "array_files": array_files,
-                    },
-                    "array_keys": sorted(arrays),
-                    "metadata": _json_safe(metadata),
-                    "axis_data": _json_safe(axis_data),
-                }
-                if file_options["manifest"]:
-                    with open(os.path.join(graph_dir, "manifest.json"), "w", encoding="utf-8") as handle:
-                        json.dump(manifest, handle, indent=2)
+                        pickle_path = os.path.join(graph_dir, "data.pkl")
+                        def write_data_pickle():
+                            with open(pickle_path, "wb") as handle:
+                                pickle.dump(bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                        _time_export_stage(timing, "pickle", write_data_pickle)
+                        _record_export_file(timing, pickle_path)
+                    orientation_export = payload.get("orientation_export") if graph_kind in {
+                        "orientation_correlation", "orientation_firing_rate"
+                    } else None
+                    orientation_pickle = None
+                    orientation_note = None
+                    if (file_options["data_pickle"] or file_options["manifest"]) and isinstance(orientation_export, dict):
+                        orientation_note = "orientation_tuning_comparison_note.txt"
+                        orientation_note_path = os.path.join(graph_dir, orientation_note)
+                        def write_orientation_note():
+                            with open(orientation_note_path, "w", encoding="utf-8") as handle:
+                                handle.write(ORIENTATION_EXPORT_COMPARISON_NOTE)
+                        _time_export_stage(timing, "manifest", write_orientation_note)
+                        _record_export_file(timing, orientation_note_path)
+                        if file_options["data_pickle"]:
+                            orientation_pickle = "orientation_tuning.pkl"
+                            orientation_pickle_path = os.path.join(graph_dir, orientation_pickle)
+                            def write_orientation_pickle():
+                                with open(orientation_pickle_path, "wb") as handle:
+                                    # This is intentionally the direct, reference-like
+                                    # record rather than an export wrapper. It was fully
+                                    # calculated during Run Coarse RF Analysis.
+                                    pickle.dump(orientation_export, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                            _time_export_stage(timing, "pickle", write_orientation_pickle)
+                            _record_export_file(timing, orientation_pickle_path)
+                if consolidated is None:
+                    manifest = {
+                        "title": title,
+                        "source_figure": record.get("title"),
+                        "axis_index": axis_index,
+                        "graph_kind": graph_kind,
+                        "one_graph_per_file": True,
+                        "files": {
+                            "png": "graph.png" if file_options["png"] else None,
+                            "svg": "graph.svg" if file_options["svg"] else None,
+                            "pickle_data": "data.pkl" if file_options["data_pickle"] else None,
+                            "orientation_tuning_pickle": orientation_pickle,
+                            "orientation_comparison_note": orientation_note,
+                            "array_format": active_array_format if file_options["arrays"] else None,
+                            "array_files": array_files,
+                        },
+                        "array_keys": sorted(arrays),
+                        "metadata": _json_safe(metadata),
+                        "axis_data": _json_safe(axis_data),
+                    }
+                    if file_options["manifest"]:
+                        manifest_path = os.path.join(graph_dir, "manifest.json")
+                        def write_graph_manifest():
+                            with open(manifest_path, "w", encoding="utf-8") as handle:
+                                json.dump(manifest, handle, indent=2)
+                        _time_export_stage(timing, "manifest", write_graph_manifest)
+                        _record_export_file(timing, manifest_path)
                 exported.append(graph_dir)
+                timing["graphs"] += 1
+        if consolidated is not None:
+            _write_consolidated_numeric_bundle(base_dir, consolidated, file_options, timing)
+        _log_export_timing(
+            f"neuron bundle '{os.path.basename(base_dir)}' ({numeric_layout})", timing,
+        )
         return exported
 
     def export_all_individual_graph_types_results():
@@ -2156,75 +2436,146 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             batch_array_format = export_array_format_var.get()
         except (NameError, RuntimeError):
             batch_array_format = "npy"
+        batch_numeric_layout = _selected_export_numeric_layout()
+        try:
+            batch_workers = int(os.environ.get("WAVEN_EXPORT_WORKERS", "2"))
+        except ValueError:
+            batch_workers = 2
+        batch_workers = max(1, min(batch_workers, 4))
+        batch_queue_limit = max(2, 2 * batch_workers)
+        total_neurons = sum(job[1] for job in jobs)
+        export_started = time.perf_counter()
+        print(
+            f"[EXPORT] Pipeline | workers={batch_workers} | queue={batch_queue_limit} | "
+            f"numeric_layout={batch_numeric_layout}"
+        )
         state = {
             "job": 0,
             "neuron_id": 0,
             "failures": [],
             "sta_results": {},
             "sta_loading": False,
-            "writer_active": False,
+            "pending": {},
+            "finished": 0,
+            "finalizing": False,
+            "writer_pool": ThreadPoolExecutor(
+                max_workers=batch_workers, thread_name_prefix="waven-export",
+            ),
         }
 
-        def export_next_graph_type():
-            if state["job"] >= len(jobs):
-                batch_manifest = {
-                    "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "selected_graph_kinds": sorted(selected_kinds),
-                    "skipped_neurons": state["failures"],
-                }
-                if batch_file_options["manifest"]:
-                    try:
-                        with open(os.path.join(export_root, "export_manifest.json"), "w", encoding="utf-8") as handle:
-                            json.dump(_json_safe(batch_manifest), handle, indent=2)
-                    except Exception as exc:
-                        # The individual graph bundles are already complete at this
-                        # point. A missing summary must not turn a successful
-                        # long-running batch export into a reported failure.
-                        print(f"[EXPORT] Could not write batch manifest: {exc}")
-                def finish_delivery():
-                    try:
-                        destination = _package_export_root(export_root, batch_packaging)
-                    except Exception as exc:
-                        def show_packaging_error(error=str(exc)):
-                            try:
-                                btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
-                            except NameError:
-                                pass
-                            messagebox.showerror(
-                                "Export Packaging Failed", f"The files were written, but packaging failed: {error}\n\n{export_root}"
-                            )
-                        root.after(0, show_packaging_error)
-                        return
+        def report_finished(kind, count):
+            """Update progress only after a queued writer has actually completed."""
+            completed = state["finished"]
+            if completed == 1 or completed == total_neurons or completed % 10 == 0:
+                print(
+                    f"[EXPORT] Completed {completed}/{total_neurons} neuron bundles "
+                    f"({count} graph file(s); pending={len(state['pending'])})."
+                )
+            update_progress(
+                100.0 * completed / total_neurons,
+                "Exporting single graphs",
+                f"{kind}: {completed}/{total_neurons} complete; {len(state['pending'])} queued",
+            )
 
-                    def show_delivery():
+        def reap_completed_writes():
+            """Harvest worker results on Tk's thread without blocking it."""
+            for future, info in list(state["pending"].items()):
+                if not future.done():
+                    continue
+                del state["pending"][future]
+                kind, neuron_id = info
+                state["finished"] += 1
+                try:
+                    exported_graphs = future.result()
+                except Exception as exc:
+                    state["failures"].append({"kind": kind, "neuron_id": neuron_id, "error": str(exc)})
+                    print(f"[EXPORT] Skipped {kind} neuron {neuron_id}: {exc}")
+                    report_finished(kind, 0)
+                    continue
+                report_finished(kind, len(exported_graphs))
+
+        def finish_export():
+            """Finalize only after every bounded worker job has been reaped."""
+            if state["finalizing"]:
+                return
+            state["finalizing"] = True
+            state["writer_pool"].shutdown(wait=False)
+            batch_manifest = {
+                "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "selected_graph_kinds": sorted(selected_kinds),
+                "numeric_layout": batch_numeric_layout,
+                "writer_workers": batch_workers,
+                "skipped_neurons": state["failures"],
+            }
+            if batch_file_options["manifest"]:
+                try:
+                    with open(os.path.join(export_root, "export_manifest.json"), "w", encoding="utf-8") as handle:
+                        json.dump(_json_safe(batch_manifest), handle, indent=2)
+                except Exception as exc:
+                    # The individual graph bundles are already complete at this
+                    # point. A missing summary must not turn a successful
+                    # long-running batch export into a reported failure.
+                    print(f"[EXPORT] Could not write batch manifest: {exc}")
+
+            def finish_delivery():
+                try:
+                    destination = _package_export_root(export_root, batch_packaging)
+                except Exception as exc:
+                    def show_packaging_error(error=str(exc)):
                         try:
                             btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
                         except NameError:
                             pass
-                        completed = sum(job[1] for job in jobs) - len(state["failures"])
-                        print(
-                            f"[DONE] Exported selected single-graph files | "
-                            f"neuron bundles={completed}/{sum(job[1] for job in jobs)}\n       {destination}"
+                        messagebox.showerror(
+                            "Export Packaging Failed", f"The files were written, but packaging failed: {error}\n\n{export_root}"
                         )
-                        if state["failures"]:
-                            messagebox.showwarning(
-                                "Export Completed with Skips",
-                                f"Export finished with {len(state['failures'])} skipped neuron(s).\n"
-                                f"See export_manifest.json and the terminal for details.\n\n{destination}",
-                            )
-                        else:
-                            messagebox.showinfo("Export Complete", f"Exported selected single-graph files.\n\n{destination}")
-                    root.after(0, show_delivery)
+                    root.after(0, show_packaging_error)
+                    return
 
-                threading.Thread(target=finish_delivery, daemon=True).start()
+                def show_delivery():
+                    try:
+                        btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
+                    except NameError:
+                        pass
+                    completed = total_neurons - len(state["failures"])
+                    elapsed = time.perf_counter() - export_started
+                    print(
+                        f"[DONE] Exported selected single-graph files | "
+                        f"neuron bundles={completed}/{total_neurons} | elapsed={elapsed:.1f}s\n       {destination}"
+                    )
+                    if state["failures"]:
+                        messagebox.showwarning(
+                            "Export Completed with Skips",
+                            f"Export finished with {len(state['failures'])} skipped neuron(s).\n"
+                            f"See export_manifest.json and the terminal for details.\n\n{destination}",
+                        )
+                    else:
+                        messagebox.showinfo("Export Complete", f"Exported selected single-graph files.\n\n{destination}")
+                root.after(0, show_delivery)
+
+            threading.Thread(target=finish_delivery, daemon=True).start()
+
+        def export_next_graph_type():
+            reap_completed_writes()
+            if state["job"] >= len(jobs):
+                if state["pending"]:
+                    root.after(25, export_next_graph_type)
+                    return
+                finish_export()
                 return
             kind, count, draw, tab_name = jobs[state["job"]]
             neuron_id = state["neuron_id"]
             if neuron_id >= count:
+                if state["pending"]:
+                    root.after(25, export_next_graph_type)
+                    return
                 state["job"] += 1
                 state["neuron_id"] = 0
                 state["sta_results"].clear()
                 root.after(1, export_next_graph_type)
+                return
+            if len(state["pending"]) >= batch_queue_limit:
+                root.after(25, export_next_graph_type)
                 return
             try:
                 sta_result = None
@@ -2247,6 +2598,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                         {"kind": kind, "neuron_id": neuron_id, "error": error}
                                     )
                                     print(f"[EXPORT] Skipped {kind} neuron {neuron_id}: {error}")
+                                    state["finished"] += 1
+                                    report_finished(kind, 0)
                                     state["neuron_id"] += 1
                                     root.after(1, export_next_graph_type)
                                 root.after(0, record_sta_failure)
@@ -2268,48 +2621,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 neuron_dir = os.path.join(export_root, "rf", f"n{neuron_id:05d}")
                 os.makedirs(neuron_dir, exist_ok=True)
                 snapshots = _snapshot_export_records(_active_export_records(tab_name))
-                state["writer_active"] = True
-
-                def write_neuron_graphs():
-                    try:
-                        exported_graphs = _export_individual_axes(
-                            snapshots, neuron_dir, selected_kinds,
-                            array_format=batch_array_format,
-                            file_options=batch_file_options,
-                        )
-                    except Exception as exc:
-                        def record_failure(error=str(exc)):
-                            state["writer_active"] = False
-                            state["failures"].append({"kind": kind, "neuron_id": neuron_id, "error": error})
-                            print(f"[EXPORT] Skipped {kind} neuron {neuron_id}: {error}")
-                            state["neuron_id"] += 1
-                            root.after(1, export_next_graph_type)
-                        root.after(0, record_failure)
-                        return
-
-                    def advance_after_write():
-                        state["writer_active"] = False
-                        state["neuron_id"] += 1
-                        completed = sum(job[1] for job in jobs[:state["job"]]) + state["neuron_id"]
-                        total = sum(job[1] for job in jobs)
-                        if completed == 1 or completed == total or completed % 10 == 0:
-                            print(
-                                f"[EXPORT] Completed {completed}/{total} neuron bundles "
-                                f"({len(exported_graphs)} graph file(s) for neuron {neuron_id})."
-                            )
-                        update_progress(
-                            100.0 * completed / total,
-                            "Exporting single graphs",
-                            f"{kind} neuron {state['neuron_id']}/{count}",
-                        )
-                        root.after(1, export_next_graph_type)
-                    root.after(0, advance_after_write)
-
-                threading.Thread(target=write_neuron_graphs, daemon=True).start()
+                future = state["writer_pool"].submit(
+                    _export_individual_axes,
+                    snapshots, neuron_dir, selected_kinds,
+                    array_format=batch_array_format,
+                    file_options=batch_file_options,
+                    numeric_layout=batch_numeric_layout,
+                )
+                state["pending"][future] = (kind, neuron_id)
+                state["neuron_id"] += 1
+                root.after(1, export_next_graph_type)
                 return
             except Exception as exc:
                 state["failures"].append({"kind": kind, "neuron_id": neuron_id, "error": str(exc)})
                 print(f"[EXPORT] Skipped {kind} neuron {neuron_id}: {exc}")
+                state["finished"] += 1
+                report_finished(kind, 0)
                 state["neuron_id"] += 1
                 root.after(1, export_next_graph_type)
 
@@ -5618,7 +5945,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "performance": _runtime_control_values(),
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
                 "export_files": _selected_export_files(),
+                "export_profile": export_profile_var.get() if export_profile_var is not None else "Full archive",
                 "export_array_format": export_array_format_var.get(),
+                "export_numeric_layout": _selected_export_numeric_layout(),
                 "export_packaging": _selected_export_packaging(),
             },
             "gabor_param": {key: entry.get() for key, entry in gabor_entries.items()},
@@ -5733,6 +6062,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             export_array_format = save_options.get("export_array_format")
             if export_array_format in {"npy", "zarr", "both"}:
                 export_array_format_var.set(export_array_format)
+            export_numeric_layout = str(save_options.get("export_numeric_layout", "")).lower()
+            if export_numeric_layout in {"per_graph", "per_neuron"}:
+                export_numeric_layout_var.set(
+                    "Per-neuron .npz" if export_numeric_layout == "per_neuron" else "Per-graph files"
+                )
+            export_profile = save_options.get("export_profile")
+            if export_profile in {"Quick review", "Data bundle", "Full archive", "Custom"}:
+                export_profile_var.set(export_profile)
             export_packaging = str(save_options.get("export_packaging", "")).lower()
             if export_packaging in {"folder", "zip", "both"}:
                 export_packaging_var.set(export_packaging)
@@ -7797,14 +8134,36 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         )
 
     ctk.CTkLabel(
-        frame_export, text="1. Files to include", text_color=text_color,
+        frame_export, text="1. Fast export preset", text_color=text_color,
         font=ctk.CTkFont(size=13, weight="bold"),
     ).pack(anchor="w", pady=(0, 2))
     ctk.CTkLabel(
         frame_export,
-        text="Choose only the visual and reusable-data files you need. JSON manifests describe every selected export.",
+        text="Quick review writes PNGs only. Data bundle keeps PNGs plus one fast .npz per neuron. Full archive preserves every legacy export product.",
         text_color=muted_text, wraplength=650, justify="left",
     ).pack(anchor="w", pady=(0, 4))
+    configured_export_files = dict(gui_options.get("export_files") or {})
+    profile_default = str(gui_options.get("export_profile", "")).strip()
+    if profile_default not in {"Quick review", "Data bundle", "Full archive"}:
+        profile_default = "Full archive" if not configured_export_files or all(
+            _coerce_runtime_bool(configured_export_files.get(key), default)
+            for key, _label, default in (
+                ("png", "", True), ("svg", "", True), ("data_pickle", "", True),
+                ("figure_pickle", "", True), ("arrays", "", True), ("manifest", "", True),
+            )
+        ) else "Custom"
+    export_profile_var = tk.StringVar(value=profile_default)
+    export_profile_segment = ctk.CTkSegmentedButton(
+        frame_export, values=["Quick review", "Data bundle", "Full archive", "Custom"],
+        variable=export_profile_var, command=_apply_export_profile,
+        height=28, corner_radius=6, selected_color=primary_btn, selected_hover_color="#1D4ED8",
+    )
+    export_profile_segment.pack(fill=tk.X, pady=(0, 8))
+
+    ctk.CTkLabel(
+        frame_export, text="2. Files to include", text_color=text_color,
+        font=ctk.CTkFont(size=13, weight="bold"),
+    ).pack(anchor="w", pady=(0, 2))
     export_files_wrap = ctk.CTkFrame(frame_export, fg_color="#F8FAFC", corner_radius=8)
     export_files_wrap.pack(fill=tk.X, pady=(0, 8))
     export_file_specs = (
@@ -7815,13 +8174,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ("arrays", "Reusable arrays", True),
         ("manifest", "Manifest (.json)", True),
     )
-    configured_export_files = dict(gui_options.get("export_files") or {})
     for index, (key, label, default) in enumerate(export_file_specs):
         variable = tk.BooleanVar(value=_coerce_runtime_bool(configured_export_files.get(key), default))
         export_file_vars[key] = variable
         ctk.CTkCheckBox(
             export_files_wrap, text=label, variable=variable,
             onvalue=True, offvalue=False, text_color=text_color, height=24,
+            command=_mark_export_profile_custom,
         ).grid(row=index // 2, column=index % 2, sticky="w", padx=10, pady=3)
     export_files_wrap.columnconfigure(0, weight=1)
     export_files_wrap.columnconfigure(1, weight=1)
@@ -7829,7 +8188,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     export_array_format_var = tk.StringVar(value=gui_options.get("export_array_format", "npy"))
     export_format_wrap = ctk.CTkFrame(frame_export, fg_color="transparent")
     export_format_wrap.pack(fill=tk.X, pady=(0, 5))
-    ctk.CTkLabel(export_format_wrap, text="2. Array format:", text_color=muted_text).pack(side=tk.LEFT)
+    ctk.CTkLabel(export_format_wrap, text="3. Per-graph array format:", text_color=muted_text).pack(side=tk.LEFT)
     export_format_segment = ctk.CTkSegmentedButton(
         export_format_wrap,
         values=["npy", "zarr", "both"],
@@ -7842,12 +8201,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     export_format_segment.pack(side=tk.LEFT, padx=(10, 0))
     export_format_segment.set(export_array_format_var.get() if export_array_format_var.get() in {"npy", "zarr", "both"} else "npy")
 
+    configured_numeric_layout = str(gui_options.get("export_numeric_layout", "per_graph")).lower()
+    export_numeric_layout_var = tk.StringVar(
+        value="Per-neuron .npz" if configured_numeric_layout == "per_neuron" else "Per-graph files"
+    )
+    export_numeric_wrap = ctk.CTkFrame(frame_export, fg_color="transparent")
+    export_numeric_wrap.pack(fill=tk.X, pady=(0, 5))
+    ctk.CTkLabel(
+        export_numeric_wrap, text="4. Every-neuron numeric data:", text_color=muted_text,
+    ).pack(side=tk.LEFT)
+    export_numeric_segment = ctk.CTkSegmentedButton(
+        export_numeric_wrap, values=["Per-graph files", "Per-neuron .npz"],
+        variable=export_numeric_layout_var, command=_mark_export_profile_custom,
+        height=26, corner_radius=6, selected_color=primary_btn, selected_hover_color="#1D4ED8",
+    )
+    export_numeric_segment.pack(side=tk.LEFT, padx=(10, 0))
+
     export_packaging_var = tk.StringVar(value=str(gui_options.get("export_packaging", "folder")).lower())
     if export_packaging_var.get() not in {"folder", "zip", "both"}:
         export_packaging_var.set("folder")
     export_delivery_wrap = ctk.CTkFrame(frame_export, fg_color="transparent")
     export_delivery_wrap.pack(fill=tk.X, pady=(0, 10))
-    ctk.CTkLabel(export_delivery_wrap, text="3. Delivery:", text_color=muted_text).pack(side=tk.LEFT)
+    ctk.CTkLabel(export_delivery_wrap, text="5. Delivery:", text_color=muted_text).pack(side=tk.LEFT)
     export_delivery_segment = ctk.CTkSegmentedButton(
         export_delivery_wrap, values=["folder", "zip", "both"], variable=export_packaging_var,
         height=26, corner_radius=6, selected_color=primary_btn, selected_hover_color="#1D4ED8",
