@@ -512,6 +512,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         active_task["cancel_requested"] = False
         show_terminal_half()
         update_progress(None, f"Running: {task_name}")
+        try:
+            root.configure(cursor="watch")
+        except Exception:
+            pass
         for btn in all_buttons:
             btn.configure(state=tk.DISABLED)
         try:
@@ -519,6 +523,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             pass
         print(task_start_message(task_name, task_state["start"]))
+        # Let Windows paint the busy cursor/progress indicator before a
+        # compute-heavy worker starts.  Without this, a cache build can look
+        # like a frozen window even though it is already running correctly.
+        root.update_idletasks()
         root.after(1000, _refresh_task_heartbeat)
 
     def end_task(success=False, cancelled=False, metrics=None):
@@ -555,6 +563,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             pass
         for btn in all_buttons:
             btn.configure(state=tk.NORMAL)
+        try:
+            root.configure(cursor="")
+        except Exception:
+            pass
 
     def run_in_thread(func, task_name=None):
         """Function for run in thread.
@@ -575,6 +587,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 args: Input value for this operation.
                 kwargs: Input value for this operation.
             """
+            if task_state.get("name"):
+                print(f"[BUSY] {task_state['name']} is still running; wait for it before starting {label}.")
+                return
             cancel_event = threading.Event()
             monitor = TaskResourceMonitor(label)
             active_task["cancel_event"] = cancel_event
@@ -582,7 +597,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             active_task["monitor"] = monitor
             active_task["cancel_requested"] = False
             monitor.start()
-            root.after(0, lambda: begin_task(label, cancel_event, monitor))
+            # ``wrapper`` runs on Tk's event loop, so begin synchronously.  A
+            # deferred ``after`` allowed the worker to seize the CPU before the
+            # task UI was painted, which Windows presented as Not Responding.
+            begin_task(label, cancel_event, monitor)
 
             def thread_target():
                 """Function for thread target."""
@@ -1421,7 +1439,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             Result produced by the operation.
         """
         if model_name == "run_Model":
-            names = ["predictions", "nonlinear_params", "rho_phi_params", "metrics", "interpolators"]
+            names = [
+                "predictions", "nonlinear_params", "rho_phi_params", "metrics",
+                "interpolators", "diagnostics",
+            ]
         else:
             names = [
                 "predictions",
@@ -1431,6 +1452,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "metrics",
                 "orientation_selectivity",
                 "interpolators",
+                "diagnostics",
             ]
         payload = {"source": model_name, "neuron_id": neuron_id}
         if isinstance(result, tuple):
@@ -2626,9 +2648,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 try:
                     if "png" in record:
                         image = plt.imread(io.BytesIO(record["png"]), format="png")
-                        fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+                        artist_data = record.get("export_artist_data") or {}
+                        figure_size = artist_data.get("figure_size_inches", (8, 5))
+                        try:
+                            figure_size = tuple(float(value) for value in figure_size)
+                            if len(figure_size) != 2 or min(figure_size) <= 0:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            figure_size = (8, 5)
+                        fig, ax = plt.subplots(figsize=figure_size, constrained_layout=True)
                         ax.imshow(image)
                         ax.axis("off")
+                        if classify_export_record(record.get("tab"), record.get("title")) == "model_diagnostics":
+                            fig._waven_compact = True
                     else:
                         fig = pickle.loads(record["figure"])
                     if "export_payload" in record:
@@ -4374,7 +4406,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         toolbar = NavigationToolbar2Tk(canvas, section)
         toolbar.update()
 
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        canvas_widget = canvas.get_tk_widget()
+        if getattr(fig, "_waven_compact", False):
+            # Model diagnostics should remain a readable dashboard rather than
+            # stretching a small four-panel figure across the entire plot pane.
+            canvas_widget.pack(side=tk.TOP, anchor="w", padx=10, pady=(0, 2))
+        else:
+            canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         caption = getattr(fig, "_waven_caption", "")
         caption_label = ctk.CTkLabel(
             section,
@@ -4626,6 +4664,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 analysis_state.clear()
                 analysis_state.update(cached_state)
                 current_wavelet_dir[0] = cached_state.get("wavelet_dir", current_wavelet_dir[0])
+                root.after(0, _refresh_model_settings_hint)
             _render_figure_records(
                 cached.get("figures"),
                 message=f"Loaded coarse RF plots from cache: {_plot_cache_path()}",
@@ -5029,6 +5068,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             rf_train_idx=rf_split_settings["train_idx"],
             rf_correlation_path=rf_output_path,
         )
+        root.after(0, _refresh_model_settings_hint)
 
         def render_gui_plots():
             """Function for render gui plots."""
@@ -5285,7 +5325,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     )
                     refresh_figure_caption(fig2)
                     if not for_export:
-                        canvas2.draw()
+                        canvas2.draw_idle()
 
                     best_x, best_y, best_orientation, best_sigma, best_frequency = np.asarray(
                         rfs_gabor[1], dtype=int
@@ -5518,7 +5558,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         },
                     )
                     if not for_export:
-                        canvas3.draw()
+                        canvas3.draw_idle()
 
                     fig_sta.clear()
                     fig_sta.set_constrained_layout(False)
@@ -5584,7 +5624,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             },
                         )
                     if not for_export:
-                        canvas_sta.draw()
+                        canvas_sta.draw_idle()
                     if switch_tab:
                         switch_to_individual_tab(flash=True)
                 except Exception as e:
@@ -5608,9 +5648,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             fig_sta.patch.set_edgecolor("none")
                             fig_sta.patch.set_linewidth(0)
                             fig_sta.text(0.5, 0.5, f"PSTH-weighted STA unavailable\n{e}", ha="center", va="center", wrap=True)
-                            canvas2.draw()
-                            canvas3.draw()
-                            canvas_sta.draw()
+                            canvas2.draw_idle()
+                            canvas3.draw_idle()
+                            canvas_sta.draw_idle()
                         except Exception as clear_error:
                             print(f"Error clearing failed selected-neuron plots: {clear_error}")
 
@@ -5626,25 +5666,46 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     print("[PSTH STA] A selected-neuron request is already running; ignoring the extra request.")
                     return
 
+                sta_render_in_progress[0] = True
+                btn_runRF.configure(state=tk.DISABLED, text="Preparing Single Neuron...")
+                try:
+                    root.configure(cursor="watch")
+                    progress_bar.configure(mode="indeterminate")
+                    progress_bar.start(12)
+                    status_var.set(f"Inspecting neuron {neuron_id} - preparing PSTH-weighted STA")
+                    root.update_idletasks()
+                except Exception:
+                    pass
+
                 def finish(sta_result=None, sta_error=None):
-                    try:
-                        draw_individual_neuron(
-                            neuron_id,
-                            switch_tab=switch_tab,
-                            sta_result=sta_result,
-                            sta_error=sta_error,
-                        )
-                    finally:
-                        sta_render_in_progress[0] = False
-                        btn_runRF.configure(state=tk.NORMAL, text="Inspect Single Neuron")
-                        if on_complete is not None:
-                            on_complete()
+                    """Yield once so the busy state paints before plot rendering."""
+                    def render():
+                        try:
+                            status_var.set(f"Inspecting neuron {neuron_id} - rendering plots")
+                            root.update_idletasks()
+                            draw_individual_neuron(
+                                neuron_id,
+                                switch_tab=switch_tab,
+                                sta_result=sta_result,
+                                sta_error=sta_error,
+                            )
+                        finally:
+                            sta_render_in_progress[0] = False
+                            btn_runRF.configure(state=tk.NORMAL, text="Inspect Single Neuron")
+                            try:
+                                progress_bar.stop()
+                                progress_bar.configure(mode="determinate", value=0)
+                                root.configure(cursor="")
+                                status_var.set("Ready")
+                            except Exception:
+                                pass
+                            if on_complete is not None:
+                                on_complete()
+                    root.after(15, render)
 
                 if cached_sta is not None:
                     finish(sta_result=cached_sta)
                     return
-
-                sta_render_in_progress[0] = True
                 btn_runRF.configure(state=tk.DISABLED, text="Preparing Single Neuron…")
                 print(f"[PSTH STA] Preparing neuron {neuron_id} off the GUI thread")
 
@@ -5744,7 +5805,35 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 """Function for click RF."""
                 try:
                     neuron_id = _selected_neuron_id()
-                    draw_individual_neuron_async(neuron_id)
+                    include_model = bool(run_model_on_inspect_var.get())
+                    include_full = bool(run_full_model_on_inspect_var.get())
+                    _clear_model_diagnostic_figures()
+
+                    def run_requested_models():
+                        if not (include_model or include_full):
+                            return
+
+                        def run_models():
+                            failures = []
+                            for label, runner in (
+                                ("Run Model", plot_run_model_outputs if include_model else None),
+                                ("Run Full Model", plot_run_full_model_outputs if include_full else None),
+                            ):
+                                if runner is None:
+                                    continue
+                                try:
+                                    runner()
+                                except Exception as exc:
+                                    failures.append(f"{label}: {exc}")
+                                    print(f"[MODEL] {label} did not complete for neuron {neuron_id}: {exc}")
+                                    traceback.print_exc()
+                            if failures:
+                                raise RuntimeError("; ".join(failures))
+                            return True
+
+                        run_in_thread(run_models, "Inspect neuron model diagnostics")()
+
+                    draw_individual_neuron_async(neuron_id, on_complete=run_requested_models)
                 except Exception as e:
                     print(f"Failed to plot RF: {e}")
 
@@ -5844,9 +5933,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         text = str(value).strip()
         if text.lower() in {"", "auto"}:
             if train_indices is None:
-                defaults = [0, 2]
-                indices = [idx for idx in defaults if idx < n_trials]
-                return indices or [0]
+                # Alternating trials gives an automatically valid, roughly
+                # balanced split for any trial count, including two/three-trial
+                # recordings.  The former fixed [0, 2] default silently left
+                # later even-numbered trials unused.
+                return list(range(0, n_trials, 2)) or [0]
             train_set = set(int(idx) for idx in train_indices)
             indices = [idx for idx in range(n_trials) if idx not in train_set]
             if not indices:
@@ -5870,6 +5961,68 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 f"available trials are 0 through {n_trials - 1}."
             )
         return indices
+
+    def _model_fit_minutes(state):
+        """Parse the user-facing fitting duration once for both model paths."""
+        raw_value = param_entries["Model Fit Minutes"].get()
+        try:
+            parsed = parse_literal(raw_value, "Model Fit Minutes")
+            minutes = int(parsed)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Model Fit Minutes must be a positive whole number.") from exc
+        if minutes <= 0 or float(parsed) != float(minutes):
+            raise ValueError("Model Fit Minutes must be a positive whole number.")
+        return minutes
+
+    def _refresh_model_settings_hint(_event=None):
+        """Explain the live trial split without waiting for a model failure."""
+        if model_settings_hint is None:
+            return
+        try:
+            state = analysis_state
+            spikes = state.get("spks")
+            if spikes is None and state.get("neural_cache_dir"):
+                # Restored plot caches keep only lightweight state.  Opening the
+                # disk-backed neural header here makes the trial guidance just
+                # as useful after a restart without materialising neural data.
+                spikes, _positions, _spike_path, _position_path = load_neural_cache_pair(
+                    Path(state["neural_cache_dir"]), mmap_mode="r",
+                )
+            if spikes is None:
+                model_settings_hint.configure(
+                    text=(
+                        "Trial count will be checked after Coarse RF loads the neural cache. "
+                        "Use zero-based trial indices; 'auto' alternates train trials and holds out the rest."
+                    ),
+                    text_color=muted_text,
+                )
+                return
+            n_trials = int(spikes.shape[0])
+            if n_trials < 2:
+                raise ValueError("Detected 1 trial; the models need at least 2 trials.")
+            train_idx = _parse_trial_indices_entry(
+                param_entries["Train Trial Indices"].get(), n_trials, "Train Trial Indices",
+            )
+            test_idx = _parse_trial_indices_entry(
+                param_entries["Test Trial Indices"].get(), n_trials, "Test Trial Indices", train_idx,
+            )
+            duplicates = sorted({idx for idx in train_idx + test_idx if (train_idx + test_idx).count(idx) > 1})
+            if duplicates:
+                raise ValueError(f"Trial indices must be unique; duplicate(s): {duplicates}.")
+            overlap = sorted(set(train_idx) & set(test_idx))
+            if overlap:
+                raise ValueError(f"Train and test trials overlap: {overlap}.")
+            minutes = _model_fit_minutes(state)
+            model_settings_hint.configure(
+                text=(
+                    f"Detected {n_trials} trial(s), indexed 0â€“{n_trials - 1}. "
+                    f"Fit: {train_idx}; holdout: {test_idx}; duration: {minutes} minute(s). "
+                    "Changing the fit trials requires a new Coarse RF Analysis."
+                ),
+                text_color="#047857",
+            )
+        except Exception as exc:
+            model_settings_hint.configure(text=f"Model settings need attention: {exc}", text_color="#B91C1C")
 
     def _model_split_settings(state):
         """Function for model split settings.
@@ -5897,6 +6050,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         overlap = sorted(set(train_idx) & set(test_idx))
         if overlap:
             raise ValueError(f"Train and test trial indices overlap: {overlap}")
+        all_indices = train_idx + test_idx
+        duplicates = sorted({idx for idx in all_indices if all_indices.count(idx) > 1})
+        if duplicates:
+            raise ValueError(f"Trial indices must be unique; duplicate(s): {duplicates}")
         return {
             "train_idx": train_idx,
             "test_idx": test_idx,
@@ -5962,11 +6119,33 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             embed_captured_figures(figures, frame_plot_individual, title_prefix)
         root.after(0, render)
 
+    def _clear_model_diagnostic_figures():
+        """Remove stale optional-model panels before inspecting another neuron."""
+        retained = []
+        for record in figure_export_records:
+            title = str(record.get("title") or "")
+            is_model_diagnostic = (
+                record.get("tab") == "Individual neuron"
+                and (
+                    classify_export_record(record.get("tab"), title) == "model_diagnostics"
+                    or "run_model" in title.casefold()
+                    or "run full model" in title.casefold()
+                )
+            )
+            if not is_model_diagnostic:
+                retained.append(record)
+                continue
+            try:
+                record.get("section").destroy()
+            except Exception:
+                pass
+        figure_export_records[:] = retained
+
     def _model_summary_figure(model_name, payload):
         """Create a backend-neutral model summary for safe main-thread embedding."""
         from matplotlib.figure import Figure
 
-        figure = Figure(figsize=(7.2, 4.2), constrained_layout=True)
+        figure = Figure(figsize=(5.6, 2.9), dpi=95, constrained_layout=True)
         axis = figure.add_subplot(111)
         raw_metrics = payload.get("metrics", [])
         try:
@@ -5999,6 +6178,74 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             axis.set_axis_off()
         axis.set_title(f"{model_name} summary — neuron {payload.get('neuron_id')}")
         figure._waven_caption = "Numerical fitting ran in a worker; this summary is rendered safely in the GUI thread."
+        figure._waven_compact = True
+        return figure
+
+    def _model_diagnostic_figure(model_name, payload):
+        """Render compact worker-produced diagnostics on Tk's main thread."""
+        diagnostics = payload.get("diagnostics")
+        if isinstance(diagnostics, (list, tuple)):
+            diagnostics = diagnostics[0] if diagnostics else None
+        if not isinstance(diagnostics, dict):
+            return None
+        required = ("frame", "amplitude", "phase", "drift", "prediction", "observed")
+        if any(key not in diagnostics for key in required):
+            return None
+        try:
+            traces = {key: np.asarray(diagnostics[key], dtype=float).reshape(-1) for key in required}
+            count = min(values.size for values in traces.values())
+        except (TypeError, ValueError):
+            return None
+        if count < 2:
+            return None
+        from matplotlib.figure import Figure
+
+        figure = Figure(figsize=(6.2, 5.0), dpi=95, constrained_layout=True)
+        axes = figure.subplots(2, 2, sharex=True)
+        frame = traces["frame"][:count]
+        panels = (
+            (axes[0, 0], "Amplitude", "Amplitude (rho)", traces["amplitude"][:count], "#2563EB"),
+            (axes[0, 1], "Phase", "Phase (rad)", traces["phase"][:count], "#7C3AED"),
+            (
+                axes[1, 0], "Drift", f"Drift ({diagnostics.get('drift_units', 'rad/frame')})",
+                traces["drift"][:count], "#D97706",
+            ),
+        )
+        for axis, title, ylabel, values, color in panels:
+            axis.plot(frame, values, color=color, linewidth=0.85)
+            axis.set_title(title, fontsize=10)
+            axis.set_ylabel(ylabel, fontsize=8)
+            axis.grid(alpha=0.18, linewidth=0.5)
+        prediction_axis = axes[1, 1]
+        prediction_axis.plot(frame, traces["observed"][:count], color="#374151", linewidth=0.8, label="held-out mean")
+        prediction_axis.plot(frame, traces["prediction"][:count], color="#DC2626", linewidth=0.85, label="model")
+        prediction_axis.set_title("Held-out prediction", fontsize=10)
+        prediction_axis.set_ylabel("Activity (a.u.)", fontsize=8)
+        prediction_axis.legend(fontsize=7, frameon=False, loc="best")
+        prediction_axis.grid(alpha=0.18, linewidth=0.5)
+        for axis in axes[1, :]:
+            axis.set_xlabel("Frame", fontsize=8)
+        raw_metrics = np.asarray(payload.get("metrics", []), dtype=object).ravel()
+        scalar_metrics = []
+        for value in raw_metrics:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(numeric):
+                scalar_metrics.append(numeric)
+        metric_labels = ("FEVE", "Explained variance", "Test r", "Train r", "Last-minute r")
+        metric_text = ", ".join(
+            f"{metric_labels[index] if index < len(metric_labels) else f'Metric {index + 1}'}={value:.3g}"
+            for index, value in enumerate(scalar_metrics)
+        ) or "No scalar fit metrics returned"
+        figure.suptitle(f"{model_name} diagnostics â€” neuron {payload.get('neuron_id')}", fontsize=11)
+        figure._waven_caption = (
+            f"Amplitude, phase, and drift are the selected quadrature-wavelet feature. "
+            f"Prediction is compared with the mean of {diagnostics.get('held_out_trial_count', 0)} held-out trial(s). "
+            f"{metric_text}"
+        )
+        figure._waven_compact = True
         return figure
 
     def plot_run_model_outputs():
@@ -6012,6 +6259,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         neuron_id = _selected_neuron_id()
         spks = _model_spikes_from_state(state)
         split_settings = _model_split_settings(state)
+        fit_minutes = _model_fit_minutes(state)
         if state.get("rf_train_idx") is not None and list(state["rf_train_idx"]) != list(split_settings["train_idx"]):
             raise ValueError(
                 "Coarse RF features were selected with a different training split. "
@@ -6020,10 +6268,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         cache_extra = {
             "model": "run_Model",
             "neuron": neuron_id,
+            "diagnostic_schema": 2,
             "phase_bank": _coarse_model_phase_provenance(
                 state["coarse_nx"], state["coarse_ny"], state["sigmas"],
                 _gabor_phase_offsets_radians(),
             ),
+            "fit_minutes": fit_minutes,
             **split_settings,
         }
         cached = _get_cached_entry("run_model", neuron_id=neuron_id, extra=cache_extra)
@@ -6118,7 +6368,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 w_i,
                 w_r,
                 dt1=dt1,
-                n_min=5,
+                n_min=fit_minutes,
                 double_wavelet_model=False,
                 train_idx=split_settings["train_idx"],
                 test_idx=split_settings["test_idx"],
@@ -6128,6 +6378,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 # result is cached and rendered by the GUI afterwards.
                 plotting=False,
                 frames_per_minute=frames_per_minute,
+                return_diagnostics=True,
             )
 
         # ``call_model`` deliberately runs without plotting in this worker.
@@ -6138,20 +6389,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         gc.collect()
         model_payload = _model_result_payload("run_Model", result, neuron_id)
         if not figures:
-            figures = [_model_summary_figure("Run Model", model_payload)]
+            figures = [
+                _model_diagnostic_figure("Run Model", model_payload)
+                or _model_summary_figure("Run Model", model_payload)
+            ]
         for fig in figures:
             _set_figure_export_payload(fig, model_payload)
         _put_cached_entry(
             "run_model",
             {
                 "figures": _figure_records(
-                    [("individual", f"run_Model neuron {neuron_id} {i}", fig) for i, fig in enumerate(figures, start=1)]
+                    [("individual", f"Run Model diagnostics neuron {neuron_id} {i}", fig) for i, fig in enumerate(figures, start=1)]
                 )
             },
             neuron_id=neuron_id,
             extra=cache_extra,
         )
-        _append_model_figures(figures, f"run_Model neuron {neuron_id}")
+        _append_model_figures(figures, f"Run Model diagnostics neuron {neuron_id}")
 
     def plot_run_full_model_outputs():
         """Function for plot run full model outputs.
@@ -6164,6 +6418,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         neuron_id = _selected_neuron_id()
         spks = _model_spikes_from_state(state)
         split_settings = _model_split_settings(state)
+        fit_minutes = _model_fit_minutes(state)
         if state.get("rf_train_idx") is not None and list(state["rf_train_idx"]) != list(split_settings["train_idx"]):
             raise ValueError(
                 "Coarse RF features were selected with a different training split. "
@@ -6172,6 +6427,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         cache_extra = {
             "model": "run_Full_Model",
             "neuron": neuron_id,
+            "diagnostic_schema": 2,
+            "fit_minutes": fit_minutes,
             **split_settings,
         }
         cached = _get_cached_entry("run_full_model", neuron_id=neuron_id, extra=cache_extra)
@@ -6250,7 +6507,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 state["neuron_pos"],
                 wavelet_path=gui_trailing_sep(wavelet_path),
                 savepath=gui_trailing_sep(save_path),
-                n_min=5,
+                n_min=fit_minutes,
                 tt=[0, min(movie_metadata["frames"], state["nb_frames"], spks.shape[1])],
                 memmapping=True,
                 train_idx=split_settings["train_idx"],
@@ -6263,26 +6520,30 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 frames_per_minute=frames_per_minute,
                 coarse_shape=(state["coarse_nx"], state["coarse_ny"]),
                 hz=movie_metadata["fps"],
+                return_diagnostics=True,
             )
 
         # See Run Model above: avoid pyplot inspection from the worker thread.
         result, figures = call_full_model(), []
         model_payload = _model_result_payload("run_Full_Model", result, neuron_id)
         if not figures:
-            figures = [_model_summary_figure("Run Full Model", model_payload)]
+            figures = [
+                _model_diagnostic_figure("Run Full Model", model_payload)
+                or _model_summary_figure("Run Full Model", model_payload)
+            ]
         for fig in figures:
             _set_figure_export_payload(fig, model_payload)
         _put_cached_entry(
             "run_full_model",
             {
                 "figures": _figure_records(
-                    [("individual", f"run_Full_Model neuron {neuron_id} {i}", fig) for i, fig in enumerate(figures, start=1)]
+                    [("individual", f"Run Full Model diagnostics neuron {neuron_id} {i}", fig) for i, fig in enumerate(figures, start=1)]
                 )
             },
             neuron_id=neuron_id,
             extra=cache_extra,
         )
-        _append_model_figures(figures, f"run_Full_Model neuron {neuron_id}")
+        _append_model_figures(figures, f"Run Full Model diagnostics neuron {neuron_id}")
 
     def plot_selected_model_outputs():
         """Run the model plotter that matches the selected analysis scale."""
@@ -8042,6 +8303,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_params.columnconfigure(1, weight=1)
 
     param_entries = {}
+    # These analysis-stage controls are created after the session form but must
+    # survive a workflow switch/re-render of that form.
+    model_settings_hint = None
     PARAMETER_GROUPS = {
         "Data Input": [
             "Project Root",
@@ -8050,9 +8314,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "Acquisition & Timing": [
             "Number of Planes",
             "Sampling Rate (samples / sec)",
-            "Train Trial Indices",
-            "Test Trial Indices",
-            "Use Last Minute Holdout",
             "Block End",
         ],
         "Spatial & Wavelet": [
@@ -8072,7 +8333,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         external_param_keys = {
             "Neuron ID", "Dir", "Spks Path", "Movie Path", "Path Directory",
             "Full Model Wavelet Path", "Full Model Save Path", "Plot Cache Path",
-            "Recovery Cache Directory",
+            "Recovery Cache Directory", "Sigmas Full Model", "Train Trial Indices",
+            "Test Trial Indices", "Use Last Minute Holdout", "Model Fit Minutes",
         }
         existing_values = {}
         if preserve_values:
@@ -8122,10 +8384,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     full_wavelet_path_row = add_config_row(
         wavelet_paths_frame, "Full Model Wavelet Path", param_defaults.get("Full Model Wavelet Path", ""),
         param_entries, 1, frame_color, ANALYSIS_LABELS,
-    )
-    full_sigmas_row = add_config_row(
-        wavelet_paths_frame, "Sigmas Full Model", param_defaults.get("Sigmas Full Model", ""),
-        param_entries, 2, frame_color, ANALYSIS_LABELS,
     )
     refresh_size_estimates()
 
@@ -8497,6 +8755,42 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     ttk.Separator(frame_analysis, orient="horizontal").pack(fill=tk.X, pady=8)
 
+    model_settings_frame = ttk.LabelFrame(frame_analysis, text="Model Evaluation Settings", padding=(10, 8))
+    model_settings_frame.pack(fill=tk.X, pady=(0, 10))
+    model_settings_frame.columnconfigure(1, weight=1)
+    ctk.CTkLabel(
+        model_settings_frame,
+        text=(
+            "These settings control the selected neuron's Run Model and Run Full Model fit. "
+            "Full-model filter sizes change the Full Model cache; trial settings only change fitting/evaluation."
+        ),
+        text_color=muted_text,
+        justify="left",
+        wraplength=680,
+    ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+    for row, key in enumerate(
+        ("Sigmas Full Model", "Model Fit Minutes", "Train Trial Indices", "Test Trial Indices", "Use Last Minute Holdout"),
+        start=1,
+    ):
+        add_config_row(
+            model_settings_frame, key, param_defaults.get(key, ""), param_entries,
+            row, frame_color, ANALYSIS_LABELS,
+        )
+    model_settings_hint = ctk.CTkLabel(
+        model_settings_frame,
+        text=(
+            "Trial count will be checked after Coarse RF loads the neural cache. "
+            "Use zero-based trial indices; 'auto' alternates train trials and holds out the rest."
+        ),
+        text_color=muted_text,
+        justify="left",
+        wraplength=680,
+    )
+    model_settings_hint.grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
+    for key in ("Model Fit Minutes", "Train Trial Indices", "Test Trial Indices", "Use Last Minute Holdout"):
+        param_entries[key].bind("<KeyRelease>", _refresh_model_settings_hint)
+        param_entries[key].bind("<FocusOut>", _refresh_model_settings_hint)
+
     rf_wrap = ttk.Frame(frame_analysis, style="TFrame")
     rf_wrap.pack(fill=tk.X, pady=(0, 10))
     rf_wrap.columnconfigure(1, weight=1)
@@ -8524,27 +8818,40 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     btn_runRF.pack(fill=tk.X)
 
-    btn_run_model_plots = ctk.CTkButton(
-        frame_analysis,
-        text="Run Model (Coarse RF)",
-        height=34,
-        corner_radius=6,
-        fg_color="#374151",
-        hover_color="#111827",
-        command=run_in_thread(plot_run_model_outputs, "Run Model"),
-    )
-    btn_run_model_plots.pack(fill=tk.X, pady=(8, 0))
-
-    btn_run_full_model_plots = ctk.CTkButton(
-        frame_analysis,
-        text="Run Full Model",
-        height=34,
-        corner_radius=6,
-        fg_color="#374151",
-        hover_color="#111827",
-        command=run_in_thread(plot_run_full_model_outputs, "Run Full Model"),
-    )
-    btn_run_full_model_plots.pack(fill=tk.X, pady=(8, 0))
+    run_model_on_inspect_var = tk.BooleanVar(value=False)
+    run_full_model_on_inspect_var = tk.BooleanVar(value=False)
+    inspect_model_options = ctk.CTkFrame(frame_analysis, fg_color="transparent")
+    inspect_model_options.pack(fill=tk.X, pady=(6, 0))
+    ctk.CTkCheckBox(
+        inspect_model_options,
+        text="Also run Run Model diagnostics (coarse phase cache)",
+        variable=run_model_on_inspect_var,
+        onvalue=True,
+        offvalue=False,
+        text_color=text_color,
+        checkbox_width=18,
+        checkbox_height=18,
+    ).pack(anchor="w", pady=2)
+    ctk.CTkCheckBox(
+        inspect_model_options,
+        text="Also run Run Full Model diagnostics (full phase cache)",
+        variable=run_full_model_on_inspect_var,
+        onvalue=True,
+        offvalue=False,
+        text_color=text_color,
+        checkbox_width=18,
+        checkbox_height=18,
+    ).pack(anchor="w", pady=2)
+    ctk.CTkLabel(
+        inspect_model_options,
+        text=(
+            "Selected diagnostics are added to the Individual Neuron plots and become exportable only after they are generated. "
+            "Both models require Coarse RF; Full Model also requires the Full Model cache."
+        ),
+        text_color=muted_text,
+        justify="left",
+        wraplength=680,
+    ).pack(anchor="w", pady=(2, 0))
 
     # --- Export ---
     frame_export = ttk.LabelFrame(stage_export, text="Export", padding=15)
@@ -8762,8 +9069,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         btn_submit_wavelet,
         btn_submit_plot,
         btn_runRF,
-        btn_run_model_plots,
-        btn_run_full_model_plots,
         btn_export_all_results,
         btn_export_all_neurons,
         btn_export_individual_neuron,
@@ -8787,12 +9092,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             _set_grid_row_visible(row_widgets, visible)
         _set_grid_row_visible(coarse_wavelet_path_row, True)
         _set_grid_row_visible(full_wavelet_path_row, True)
-        _set_grid_row_visible(full_sigmas_row, True)
         _set_grid_row_visible(output_path_rows["Full Model Save Path"], True)
         # The selector must remain visible whenever decomposition is available.
         format_frame_wavelet.pack(anchor="w", pady=(10, 0), before=wavelet_size_label)
 
     refresh_scale_controls()
+    root.after(0, _refresh_model_settings_hint)
 
     for section in (frame_session, stage_tabs, frame_controls):
         section.pack_forget()

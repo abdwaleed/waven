@@ -48,6 +48,7 @@ ANALYSIS_FIELD_LABELS: Dict[str, str] = {
     "Train Trial Indices": "Train Trials",
     "Test Trial Indices": "Test Trials",
     "Use Last Minute Holdout": "Last-Minute Holdout",
+    "Model Fit Minutes": "Model Fit Duration (minutes)",
     "Neuron ID": "Neuron Index",
 }
 
@@ -74,6 +75,7 @@ INPUT_HINTS: Dict[str, str] = {
     "Train Trial Indices": "'auto' or zero-based list, e.g. [0, 2]",
     "Test Trial Indices": "'auto' or zero-based list, e.g. [1]",
     "Use Last Minute Holdout": "Boolean: True or False",
+    "Model Fit Minutes": "Positive whole number of stimulus minutes used for fitting, e.g. 5",
     "Block End": "Integer acquisition block index, e.g. 0",
     "Resolution": "Micrometers per pixel, e.g. 1.3671",
     "Visual Coverage": "[left, right, top, bottom] in degrees",

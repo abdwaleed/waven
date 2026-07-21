@@ -43,6 +43,49 @@ def test_run_model_converts_scalar_correlation_metrics(monkeypatch):
     np.testing.assert_allclose(metrics[0], [0.1, 0.2, 0.3])
 
 
+def test_run_model_can_return_bounded_worker_safe_diagnostics(monkeypatch):
+    """The GUI receives numerical traces without requesting worker pyplot figures."""
+
+    def fake_single_neuron(*_args, **_kwargs):
+        return (
+            np.array([0.0, 1.0, 2.0]),
+            np.array([1.0]),
+            np.array([2.0]),
+            [0.1, 0.2, 0.3],
+            object(),
+            {
+                "frame": np.array([0, 1, 2]),
+                "amplitude": np.array([1.0, 2.0, 3.0]),
+                "phase": np.array([0.0, 0.1, 0.2]),
+                "drift": np.array([0.0, 0.1, 0.1]),
+                "prediction": np.array([0.0, 1.0, 2.0]),
+                "observed": np.array([0.1, 1.1, 2.1]),
+            },
+        )
+
+    monkeypatch.setattr(model_runs, "_process_single_neuron", fake_single_neuron)
+    phase = np.zeros((3, 1, 1, 1, 1), dtype=np.float32)
+    spikes = np.zeros((2, 3, 1), dtype=np.float32)
+    best = np.zeros((4, 1), dtype=int)
+
+    *_legacy, diagnostics = model_runs.run_Model(
+        best,
+        best,
+        spikes,
+        phase,
+        phase,
+        dt1=3,
+        n_min=1,
+        train_idx=[0],
+        test_idx=[1],
+        frames_per_minute=1,
+        return_diagnostics=True,
+    )
+
+    assert len(diagnostics) == 1
+    np.testing.assert_array_equal(diagnostics[0]["frame"], [0, 1, 2])
+
+
 def test_rf_preferred_feature_honours_absolute_flag():
     """Signed RF selection must not silently choose the strongest negative feature."""
 

@@ -15,6 +15,7 @@ def test_current_display_records_are_classified_for_checkbox_selection():
     assert classify_export_record("Individual neuron", "Spike Train") == "spike_train"
     assert classify_export_record("Individual neuron", "Selected Neuron Tuning") == "tuning_dashboard"
     assert classify_export_record("Individual neuron", "PSTH-weighted Spike-Triggered Averages") == "sta"
+    assert classify_export_record("Individual neuron", "Run Full Model diagnostics neuron 7") == "model_diagnostics"
 
 
 def test_batch_axis_classification_keeps_dashboard_graphs_separate():

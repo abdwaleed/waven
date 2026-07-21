@@ -57,9 +57,12 @@ DEFAULT_COMMON_PARAMS: Dict[str, str] = {
     "Full Model Save Path": "your_experiment/output/models",
     "Plot Cache Path": "",
     "Recovery Cache Directory": "",
-    "Train Trial Indices": "[0, 2]",
+    # Alternating automatic splits remain valid for every session with at
+    # least two trials; fixed [0, 2] did not work for two-trial recordings.
+    "Train Trial Indices": "auto",
     "Test Trial Indices": "auto",
     "Use Last Minute Holdout": "False",
+    "Model Fit Minutes": "5",
 }
 
 DEFAULT_TWO_PHOTON_PARAMS: Dict[str, str] = {
@@ -491,6 +494,7 @@ class AnalysisConfig:
     train_trial_indices: str
     test_trial_indices: str
     use_last_minute_holdout: bool
+    model_fit_minutes: int
     movie_path: Path
     library_path: Path
     resolution: Optional[float] = None
@@ -534,6 +538,13 @@ class AnalysisConfig:
         )
         if len(visual_coverage) != 4 or len(analysis_coverage) != 4:
             raise ValueError("Coverage values must contain four numbers")
+
+        model_fit_minutes = _as_int(
+            _get(mapping, "Model Fit Minutes", DEFAULT_COMMON_PARAMS["Model Fit Minutes"]),
+            "Model Fit Minutes",
+        )
+        if model_fit_minutes <= 0:
+            raise ValueError("Model Fit Minutes must be a positive whole number")
 
         resolution: Optional[float] = None
         n_planes: Optional[int] = None
@@ -596,6 +607,7 @@ class AnalysisConfig:
                 _get(mapping, "Use Last Minute Holdout"),
                 "Use Last Minute Holdout",
             ),
+            model_fit_minutes=model_fit_minutes,
             movie_path=parse_path(_get(mapping, "Movie Path"), "Movie Path"),
             library_path=parse_path(_get(mapping, "Library Path"), "Library Path"),
             spks_path=parse_optional_path(_get(mapping, "Spks Path")),
@@ -746,6 +758,10 @@ class AnalysisConfig:
             "Hz": str(self.hz),
             "Number of Frames": str(self.nb_frames),
             "Number of Trials to Keep": str(self.n_trials_to_keep),
+            "Train Trial Indices": self.train_trial_indices,
+            "Test Trial Indices": self.test_trial_indices,
+            "Use Last Minute Holdout": str(self.use_last_minute_holdout),
+            "Model Fit Minutes": str(self.model_fit_minutes),
             "Movie Path": str(self.movie_path),
             "Library Path": str(self.library_path),
             "Spks Path": _path_to_gui(self.spks_path),

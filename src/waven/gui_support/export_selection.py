@@ -21,6 +21,7 @@ CURRENT_INDIVIDUAL_GRAPH_OPTIONS = (
     ("spike_train", "Spike train"),
     ("tuning_dashboard", "Tuning dashboard"),
     ("sta", "PSTH-weighted STA lag maps"),
+    ("model_diagnostics", "Run Model / Full Model diagnostics (when generated)"),
     ("other", "Other individual-neuron graphs"),
 )
 
@@ -56,6 +57,8 @@ def classify_export_record(tab: str, title: str) -> str:
         return "spike_train"
     if "tuning" in title:
         return "tuning_dashboard"
+    if "model diagnostic" in title or "run model diagnostic" in title or "run full model diagnostic" in title:
+        return "model_diagnostics"
     return "other"
 
 
@@ -105,6 +108,9 @@ _PAYLOAD_KEYS = {
     "sta": (
         "sta_maps", "sta_lag_frames", "sta_lag_ms", "sta_variances",
         "sta_peak_lag_frame", "sta_peak_lag_ms", "sta_peak_variance",
+    ),
+    "model_diagnostics": (
+        "diagnostics", "metrics", "predictions", "nonlinear_params", "rho_phi_params",
     ),
 }
 

@@ -131,7 +131,71 @@ def _set_sem_caption(fig, n_trials):
         fig._waven_caption = f"Error bars represent SEM over {n_trials} trials."
 
 
-def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, lastmin=False, show_sem_errorbars=False):
+def _compact_model_diagnostics(
+    rho,
+    phi,
+    dphi,
+    prediction,
+    spks,
+    neuron_index,
+    test_idx,
+    *,
+    frame_start=0,
+    maximum_points=1800,
+    drift_units="rad/frame",
+):
+    """Return a bounded, backend-neutral diagnostic trace for one fitted neuron.
+
+    Legacy model plotting constructed several pyplot figures in the caller's
+    thread.  That is not safe for a Tk worker, and retaining full movie-length
+    arrays just to redraw those figures makes plot caching unnecessarily large.
+    This helper preserves the scientifically useful amplitude, phase, drift,
+    prediction, and held-out response traces as small numerical arrays.  The GUI
+    can then render them safely on its main thread and export them with the
+    figure.
+    """
+    rho = np.asarray(rho, dtype=np.float32).reshape(-1)
+    phi = np.asarray(phi, dtype=np.float32).reshape(-1)
+    dphi = np.asarray(dphi, dtype=np.float32).reshape(-1)
+    prediction = np.asarray(prediction, dtype=np.float32).reshape(-1)
+    total = min(rho.size, phi.size, dphi.size, prediction.size)
+    if total <= 0:
+        return None
+
+    held_out = np.asarray(
+        read_first_axis_indices(
+            spks,
+            test_idx,
+            slice(int(frame_start), int(frame_start) + total),
+            int(neuron_index),
+        ),
+        dtype=np.float32,
+    )
+    if held_out.ndim == 1:
+        observed = held_out
+    else:
+        observed = np.nanmean(held_out, axis=0, dtype=np.float32)
+    total = min(total, observed.size)
+    if total <= 0:
+        return None
+
+    # Preserve the time span, but cap transfer/caching and main-thread drawing
+    # work for long movies.  Integer linspace avoids a duplicate final point.
+    point_count = min(int(maximum_points), total)
+    sample = np.linspace(0, total - 1, point_count, dtype=np.intp)
+    return {
+        "frame": (sample + int(frame_start)).astype(np.int32, copy=False),
+        "amplitude": rho[:total][sample],
+        "phase": phi[:total][sample],
+        "drift": dphi[:total][sample],
+        "prediction": prediction[:total][sample],
+        "observed": observed[:total][sample],
+        "held_out_trial_count": int(len(test_idx)),
+        "drift_units": str(drift_units),
+    }
+
+
+def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, lastmin=False, show_sem_errorbars=False, return_diagnostics=False):
     """Function for process single neuron.
 
     Args:
@@ -255,12 +319,24 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
                                                                                           lastmin=lastmin, func=relu, sigma=15,
                                                                                           plotting=False,
                                                                                           frames_per_minute=frames_per_minute)
-    return vis_resp, nonlinparams, rhophiparams, a, interp
+    diagnostics = None
+    if return_diagnostics:
+        diagnostics = _compact_model_diagnostics(
+            rho,
+            phi,
+            dphi,
+            vis_resp,
+            spks,
+            idx,
+            test_idx,
+            drift_units="rad/frame",
+        )
+    return vis_resp, nonlinparams, rhophiparams, a, interp, diagnostics
 
 def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
-              n_min=5, double_wavelet_model=True, train_idx=[0, 2],
-              test_idx=[1, 3], lastmin=False, plotting=False, frames_per_minute=None,
-              show_sem_errorbars=False):
+               n_min=5, double_wavelet_model=True, train_idx=[0, 2],
+               test_idx=[1, 3], lastmin=False, plotting=False, frames_per_minute=None,
+               show_sem_errorbars=False, return_diagnostics=False):
     """Fit the coarse nonlinear Gabor-wavelet model for one or more neurons.
 
     Args:
@@ -281,6 +357,8 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         plotting: Enable legacy diagnostic figures. GUI workers leave this false.
         frames_per_minute: Required movie FPS multiplied by 60.
         show_sem_errorbars: Compatibility argument for legacy plot callers.
+        return_diagnostics: Return bounded numerical amplitude/phase/drift
+            traces suitable for safe rendering by a GUI main thread.
 
     Returns:
         tuple: Predictions, nonlinear parameters, rho/phi parameters, scalar
@@ -362,7 +440,8 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
             _process_single_neuron(
                 idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
                 double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
-                lastmin=lastmin, show_sem_errorbars=show_sem_errorbars
+                lastmin=lastmin, show_sem_errorbars=show_sem_errorbars,
+                return_diagnostics=return_diagnostics,
             )
             for idx in range(num_neurons)
         ]
@@ -375,11 +454,12 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
                 delayed(_process_single_neuron)(
                     idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
                     double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
-                    lastmin=lastmin, show_sem_errorbars=show_sem_errorbars
+                    lastmin=lastmin, show_sem_errorbars=show_sem_errorbars,
+                    return_diagnostics=return_diagnostics,
                 ) for idx in range(num_neurons)
             )
 
-    Predictions, nonlinParams, RhoPhiParams, Metrics, interpolators = [], [], [], [], []
+    Predictions, nonlinParams, RhoPhiParams, Metrics, interpolators, diagnostics = [], [], [], [], [], []
 
     for res in parallel_results:
         Predictions.append(res[0])
@@ -387,10 +467,18 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         RhoPhiParams.append(res[2])
         Metrics.append([res[3][0], res[3][1], res[3][2]])
         interpolators.append(res[4])
+        if return_diagnostics:
+            diagnostics.append(res[5] if len(res) > 5 else None)
 
     del parallel_results
 
-    return np.array(Predictions), np.array(nonlinParams), np.array(RhoPhiParams), np.array(Metrics), interpolators
+    result = (
+        np.array(Predictions), np.array(nonlinParams), np.array(RhoPhiParams),
+        np.array(Metrics), interpolators,
+    )
+    if return_diagnostics:
+        return result + (diagnostics,)
+    return result
 
 
 def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visual_coverage, neuron_pos,
@@ -398,7 +486,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                    savepath='outputs', n_min=5, tt=None,
                    memmapping=True, train_idx=None, test_idx=None, double_wavelet_model=False, lastmin=False,
                    plotting=False, frames_per_minute=None, coarse_shape=None,
-                   hz=None, show_sem_errorbars=False):
+                   hz=None, show_sem_errorbars=False, return_diagnostics=False):
     """Refine coarse RF seeds against full-model real/imaginary wavelets.
 
     Args:
@@ -428,6 +516,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         coarse_shape: Expected coarse `(x, y)` grid for validating seed indices.
         hz: Movie frame rate, used when ``frames_per_minute`` is omitted.
         show_sem_errorbars: Compatibility argument for legacy figure callers.
+        return_diagnostics: Return bounded numerical amplitude/phase/drift
+            traces suitable for safe rendering by a GUI main thread.
 
     Returns:
         tuple: Full-model predictions, refined preferred parameters, nonlinear
@@ -517,6 +607,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     OS = []
     xM, xm, yM, ym = visual_coverage
     interpolators = []
+    diagnostics = []
 
     if memmapping:
         print(f"[INFO] Run Full Model: loading full wavelets from {wavelet_path}")
@@ -1023,7 +1114,22 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                                                                                               lastmin=lastmin,
                                                                                               func=relu, sigma=15,
                                                                                               plotting=False,
-                                                                                              frames_per_minute=frames_per_minute)
+                                                                                               frames_per_minute=frames_per_minute)
+
+        if return_diagnostics:
+            diagnostics.append(
+                _compact_model_diagnostics(
+                    rho,
+                    phi,
+                    dphi,
+                    vis_resp,
+                    spks,
+                    idx,
+                    test_idx,
+                    frame_start=int(tt[0]),
+                    drift_units="rad/s",
+                )
+            )
 
         if plotting:
             ncut = 20
@@ -1143,7 +1249,10 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     np.save(os.path.join(full_path , f'RPdp_params_{model_tag}_noneigh_c_smoothpos_{n_min}.npy'), np.array(Params))
     with open(os.path.join(full_path ,  "interpolators_" + str(n_min) + '.pkl'), "wb") as f:
         pickle.dump(interpolators, f)
-    return Predictions, Params, nonlinParams, RhoPhiParams, Metrics, OS, interpolators
+    result = Predictions, Params, nonlinParams, RhoPhiParams, Metrics, OS, interpolators
+    if return_diagnostics:
+        return result + (diagnostics,)
+    return result
 
 
 def plotNeuralRaster(spks):
