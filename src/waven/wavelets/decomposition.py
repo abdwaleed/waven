@@ -279,17 +279,20 @@ def _full_convolution_zarr_layout(
 ):
     """Choose full-model Zarr chunks that match its grouped write pattern.
 
-    Full-model convolution writes one sigma/frequency result at a time, but the
-    response payload holds every combination in the active group.  Spatial
-    chunks therefore cover the whole grouped payload budget while sigma and
-    frequency chunks remain one, avoiding read/modify/recompress work for each
-    individual result.
+    Full-model convolution writes one sigma/frequency result at a time.  Sigma
+    and frequency chunks must therefore remain one, avoiding a read,
+    decompression, and recompression of every other filter result on each
+    assignment.  Spatial chunks use the remaining payload budget.
     """
     num_frames, nx, ny, n_orientations, _n_sigmas, _n_frequencies = (
         int(value) for value in final_shape
     )
     time_chunk = min(num_frames, max(1, int(frame_chunk_size)))
-    group_size = max(1, int(filter_group_size))
+    # A group can contain several independent writes, but no Zarr chunk contains
+    # more than one sigma/frequency result.  Size each physical chunk from one
+    # such result rather than making all chunks needlessly smaller for a larger
+    # GPU filter group.
+    group_size = 1
     bytes_per_pixel = max(
         1,
         time_chunk * n_orientations * group_size * np.dtype(np.float32).itemsize,
@@ -589,16 +592,47 @@ class _ConvolutionProgress:
             pass
 
 
-def _open_resumable_zarr(zarr_module, save_path, shape, chunks, compressor, progress):
-    """Open a matching interrupted Zarr cache, or start a fresh one safely."""
+def _open_resumable_zarr(
+    zarr_module,
+    save_path,
+    shape,
+    chunks,
+    compressor,
+    progress,
+    required_chunk_axes=(),
+):
+    """Open a matching interrupted Zarr cache, or start a fresh one safely.
+
+    ``required_chunk_axes`` names axes whose chunking is part of the write
+    contract.  Time tiles may safely adapt to current VRAM on resume, while the
+    Full Model's orientation/sigma/frequency axes must remain aligned with its
+    per-combination writer.
+    """
+    requested_chunks = tuple(int(value) for value in chunks)
+    required_chunk_axes = tuple(int(axis) for axis in required_chunk_axes)
     if progress.reusable and os.path.exists(save_path):
         try:
             existing = _open_zarr_array(zarr_module, save_path, mode="a")
-            if tuple(existing.shape) == tuple(shape):
+            existing_chunks = tuple(int(value) for value in (getattr(existing, "chunks", ()) or ()))
+            layout_matches = (
+                len(existing_chunks) == len(requested_chunks)
+                and all(existing_chunks[axis] == requested_chunks[axis] for axis in required_chunk_axes)
+            )
+            if tuple(existing.shape) == tuple(shape) and layout_matches:
                 print(f"Resuming interrupted convolution cache: {save_path} ({len(progress.completed)} saved tiles)")
                 return existing
+            print(
+                "Restarting incomplete convolution cache because its required Zarr layout changed: "
+                f"expected shape/chunks {tuple(shape)}/{requested_chunks}, got "
+                f"{tuple(existing.shape)}/{existing_chunks}; required axes={required_chunk_axes}."
+            )
         except Exception:
             pass
+    elif os.path.exists(save_path):
+        print(
+            "Restarting incomplete convolution cache because its saved progress does not "
+            "match the current cache layout."
+        )
     progress.completed.clear()
     progress.reusable = False
     progress._pending = 1
@@ -2321,6 +2355,7 @@ def waveletPowerDecompositionConv(
     progress_signature=None, rf_neuron_count=None, frequencies=None,
     coupled_frequencies=None, phase_output_stems=None,
     phase_coupled_frequencies=None,
+    write_power=True,
 ):
     """Write coarse wavelet power, optionally retaining its phase pair.
 
@@ -2331,7 +2366,9 @@ def waveletPowerDecompositionConv(
     convolution also persists the quadrature responses needed by ``run_Model``.
     With an independent power frequency axis, ``phase_coupled_frequencies``
     selects one frequency per sigma for the compact phase pair; every selected
-    value must be present in the power frequency list.
+    value must be present in the power frequency list.  Set ``write_power`` to
+    ``False`` with ``phase_output_stems`` to write only the Run Model real and
+    imaginary pair in one convolution pass.
     """
     try:
         import zarr
@@ -2352,8 +2389,11 @@ def waveletPowerDecompositionConv(
     )
     independent_frequencies = bool(frequencies.size)
     phase_output_stems = tuple(phase_output_stems or ())
+    write_power = bool(write_power)
     if phase_output_stems and len(phase_output_stems) != 2:
         raise ValueError("phase_output_stems must contain real and imaginary output stems.")
+    if not write_power and not phase_output_stems:
+        raise ValueError("Phase-only convolution requires real and imaginary output stems.")
     phase_frequency_indices = None
     if phase_output_stems and independent_frequencies:
         if phase_coupled_frequencies.shape != sigmas.shape or np.any(phase_coupled_frequencies <= 0):
@@ -2390,17 +2430,21 @@ def waveletPowerDecompositionConv(
     if independent_frequencies:
         final_shape += (n_frequencies,)
     phase_final_shape = final_shape[:-1] if independent_frequencies else final_shape
-    logical_cache_bytes = _array_bytes(final_shape, np.float32) + (
+    logical_cache_bytes = (_array_bytes(final_shape, np.float32) if write_power else 0) + (
         2 * _array_bytes(phase_final_shape, np.float32) if phase_output_stems else 0
     )
     # A Zarr cache is compressed on disk.  Monitor its measured footprint rather
     # than reserving an additional uncompressed 400+ GiB array up front.
     capacity_guard = _prepare_compressed_cache_capacity(
         folder_path, logical_cache_bytes,
-        "coarse RF power and phase caches" if phase_output_stems else "coarse RF power cache",
+        "coarse RF power and phase caches"
+        if write_power and phase_output_stems
+        else "Run Model phase caches"
+        if phase_output_stems
+        else "coarse RF power cache",
     )
     kernel_shape = tuple(kernel_cache.shape[-2:]) if kernel_cache is not None else None
-    output_channel_multiplier = 3 if phase_output_stems else 1
+    output_channel_multiplier = 3 if write_power and phase_output_stems else 2 if phase_output_stems else 1
     frame_chunk_was_auto = frame_chunk_size is None
     if frame_chunk_was_auto:
         frame_chunk_size = _conv_frame_chunk_size(
@@ -2443,40 +2487,45 @@ def waveletPowerDecompositionConv(
             kernel_shape=kernel_shape,
             output_buffer_count=2,
         )
+    primary_shape = final_shape if write_power else phase_final_shape
     if zarr_chunks is None:
         zarr_chunks = _coarse_power_zarr_layout(
-            final_shape,
+            primary_shape,
             frame_chunk_size,
             filter_group_size,
             rf_neuron_count=rf_neuron_count,
         )
-    zarr_chunks = tuple(min(int(dim), max(1, int(chunk))) for dim, chunk in zip(final_shape, zarr_chunks))
-    save_path = os.path.join(folder_path, f"{output_stem}.zarr")
+    zarr_chunks = tuple(min(int(dim), max(1, int(chunk))) for dim, chunk in zip(primary_shape, zarr_chunks))
+    output_stem = output_stem or ("coarse_rf_power" if write_power else None)
+    save_path = os.path.join(folder_path, f"{output_stem}.zarr") if output_stem else None
     # The regular artifact metadata is intentionally written only after every
     # tile completes.  Include the caller's input fingerprint in the separate
     # progress sidecar so a cancelled cache can safely resume, but never be
     # reused after its stimulus/crop parameters changed.
-    progress_kind = json.dumps(
-        {"product": "coarse_rf_power", "sigmas": sigmas.tolist(),
-          "orientations": int(n_orientations), "frequencies": frequencies.tolist(),
-           "coupled_frequencies": coupled_frequencies.tolist(),
-          "phase_coupled_frequencies": phase_coupled_frequencies.tolist(),
-          "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
-          "phase_outputs": list(phase_output_stems),
-          "resume_signature": progress_signature},
-        sort_keys=True,
-    )
-    progress = _ConvolutionProgress(save_path, final_shape, progress_kind)
-    compressor, compressor_description = _coarse_power_compressor(Blosc)
     phase_paths = tuple(
         os.path.join(folder_path, f"{stem}.zarr") for stem in phase_output_stems
     )
+    primary_path = save_path if write_power else phase_paths[0]
+    phase_zarr_chunks = zarr_chunks[:-1] if independent_frequencies and write_power else zarr_chunks
+    progress_kind = json.dumps(
+        {"product": "coarse_rf_power" if write_power else "coarse_phase_pair_v2", "sigmas": sigmas.tolist(),
+           "orientations": int(n_orientations), "frequencies": frequencies.tolist(),
+           "coupled_frequencies": coupled_frequencies.tolist(),
+           "phase_coupled_frequencies": phase_coupled_frequencies.tolist(),
+           "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
+           "phase_outputs": list(phase_output_stems),
+           "resume_signature": progress_signature},
+        sort_keys=True,
+    )
+    progress = _ConvolutionProgress(primary_path, primary_shape, progress_kind)
+    compressor, compressor_description = _coarse_power_compressor(Blosc)
     if phase_paths and progress.reusable:
         try:
-            phase_resume_ready = all(
-                tuple(_open_zarr_array(zarr, path, mode="r").shape) == tuple(phase_final_shape)
-                for path in phase_paths
-            )
+            def phase_matches(path):
+                phase_array = _open_zarr_array(zarr, path, mode="r")
+                return tuple(phase_array.shape) == tuple(phase_final_shape)
+
+            phase_resume_ready = all(phase_matches(path) for path in phase_paths)
         except Exception:
             phase_resume_ready = False
         if not phase_resume_ready:
@@ -2487,10 +2536,11 @@ def waveletPowerDecompositionConv(
             progress.reusable = False
             progress._pending = 1
             progress.flush()
-    power = _open_resumable_zarr(
-        zarr, save_path, final_shape, zarr_chunks,
+    primary_output = _open_resumable_zarr(
+        zarr, primary_path, primary_shape, zarr_chunks,
         compressor, progress,
     )
+    power = primary_output if write_power else None
     phase_outputs = ()
     if phase_paths:
         phase_mode = "a" if progress.reusable else "w"
@@ -2498,20 +2548,26 @@ def waveletPowerDecompositionConv(
         if phase_mode == "w":
             phase_open_kwargs.update(
                 shape=phase_final_shape,
-                chunks=zarr_chunks[:-1] if independent_frequencies else zarr_chunks,
+                chunks=phase_zarr_chunks,
                 dtype=np.float32,
                 compressor=compressor,
             )
-        phase_outputs = tuple(
-            _open_zarr_array(zarr, path, **phase_open_kwargs)
-            for path in phase_paths
-        )
+        if write_power:
+            phase_outputs = tuple(
+                _open_zarr_array(zarr, path, **phase_open_kwargs)
+                for path in phase_paths
+            )
+        else:
+            phase_outputs = (
+                primary_output,
+                _open_zarr_array(zarr, phase_paths[1], **phase_open_kwargs),
+            )
     # An interrupted run can be restarted when free VRAM differs. Keep an old
     # *smaller* time tile to retain write alignment, but never restore an old
     # larger tile that the current parameter-aware planner has declared unsafe.
     # The latter would recreate the same OOM on every resume.
-    persisted_chunks = tuple(int(value) for value in getattr(power, "chunks", ()) or ())
-    if progress.reusable and len(persisted_chunks) == len(final_shape):
+    persisted_chunks = tuple(int(value) for value in getattr(primary_output, "chunks", ()) or ())
+    if progress.reusable and len(persisted_chunks) == len(primary_shape):
         persisted_time_chunk = max(1, persisted_chunks[0])
         if persisted_time_chunk < int(frame_chunk_size):
             print(
@@ -2527,7 +2583,7 @@ def waveletPowerDecompositionConv(
             )
         # Keep a smaller-or-equal old sigma tile for resumability.  Never grow
         # a resumed group above the current safe VRAM-derived estimate.
-        persisted_sigma_chunk = max(1, persisted_chunks[-2 if independent_frequencies else -1])
+        persisted_sigma_chunk = max(1, persisted_chunks[-2 if independent_frequencies and write_power else -1])
         if persisted_sigma_chunk <= int(filter_group_size):
             filter_group_size = persisted_sigma_chunk
         zarr_chunks = persisted_chunks
@@ -2539,7 +2595,8 @@ def waveletPowerDecompositionConv(
         else "legacy sigma-coupled"
     )
     print(
-        f"Direct coarse RF power{' + phase pair' if phase_outputs else ''} | "
+        f"Direct {'coarse RF power' if write_power else 'Run Model phase pair'}"
+        f"{' + phase pair' if write_power and phase_outputs else ''} | "
         f"device={device}, frame chunk={frame_chunk_size}, "
         f"sigma group={filter_group_size}, frequency mode={frequency_mode}"
     )
@@ -2549,7 +2606,7 @@ def waveletPowerDecompositionConv(
             "independent Coarse RF frequency list."
         )
     print(
-        f"Direct coarse RF power cache layout | chunks={zarr_chunks}; "
+        f"Direct {'coarse RF power' if write_power else 'Run Model phase'} cache layout | chunks={zarr_chunks}; "
         f"compressor={compressor_description}"
         + (f"; Blosc threads={codec_threads}" if codec_threads is not None else "")
     )
@@ -2597,15 +2654,19 @@ def waveletPowerDecompositionConv(
                 if phase_frequency_indices is not None else ()
             ),
         ):
-            """Square/sum real and imaginary responses before crossing PCIe."""
+            """Prepare only the requested coarse products before PCIe transfer."""
             shaped = values.reshape(
                 values.shape[0], 2, group_size, n_frequencies, int(n_orientations), values.shape[2], values.shape[3]
             )
-            power_response = shaped[:, 0].square() + shaped[:, 1].square()
             if independent_frequencies:
-                power_response = power_response.permute(0, 5, 4, 3, 1, 2).contiguous()
+                if write_power:
+                    power_response = (
+                        shaped[:, 0].square() + shaped[:, 1].square()
+                    ).permute(0, 5, 4, 3, 1, 2).contiguous()
+                    if not phase_outputs:
+                        return power_response
                 if not phase_outputs:
-                    return power_response
+                    raise RuntimeError("Phase-only convolution requires real and imaginary output stores.")
                 real_response = torch.stack(
                     [shaped[:, 0, sigma_index, frequency_index] for sigma_index, frequency_index in enumerate(phase_indices)],
                     dim=1,
@@ -2614,13 +2675,16 @@ def waveletPowerDecompositionConv(
                     [shaped[:, 1, sigma_index, frequency_index] for sigma_index, frequency_index in enumerate(phase_indices)],
                     dim=1,
                 ).permute(0, 4, 3, 2, 1).contiguous()
-                return power_response, real_response, imag_response
-            power_response = power_response[:, :, 0].permute(0, 4, 3, 2, 1).contiguous()
-            if not phase_outputs:
-                return power_response
+                return (power_response, real_response, imag_response) if write_power else (real_response, imag_response)
+            if write_power:
+                power_response = (
+                    shaped[:, 0].square() + shaped[:, 1].square()
+                )[:, :, 0].permute(0, 4, 3, 2, 1).contiguous()
+                if not phase_outputs:
+                    return power_response
             real_response = shaped[:, 0, :, 0].permute(0, 4, 3, 2, 1).contiguous()
             imag_response = shaped[:, 1, :, 0].permute(0, 4, 3, 2, 1).contiguous()
-            return power_response, real_response, imag_response
+            return (power_response, real_response, imag_response) if write_power else (real_response, imag_response)
 
         group_records.append(
             ((group_number, group_start, group_end), list(real_kernels) + list(imag_kernels), fused_power_response)
@@ -2655,13 +2719,17 @@ def waveletPowerDecompositionConv(
         payload_bytes = _convolution_output_bytes(payload)
         def write_power(values, t0=start, t1=end, s0=group_start, s1=group_end):
             if phase_outputs:
-                values, real_values, imag_values = values
+                if write_power:
+                    values, real_values, imag_values = values
+                else:
+                    real_values, imag_values = values
                 phase_outputs[0][t0:t1, :, :, :, s0:s1] = real_values
                 phase_outputs[1][t0:t1, :, :, :, s0:s1] = imag_values
-            if independent_frequencies:
-                power[t0:t1, :, :, :, s0:s1, :] = values
-            else:
-                power[t0:t1, :, :, :, s0:s1] = values
+            if write_power:
+                if independent_frequencies:
+                    power[t0:t1, :, :, :, s0:s1, :] = values
+                else:
+                    power[t0:t1, :, :, :, s0:s1] = values
         def mark_completed(tile_key_value=key, byte_count=payload_bytes):
             progress.mark(tile_key_value)
             capacity_guard.record_completed_write(byte_count)
@@ -2737,9 +2805,12 @@ def waveletPowerDecompositionConv(
             raise writer_error
     del power, phase_outputs
     progress.discard()
-    print(f"Success! Saved direct coarse RF power Zarr array to {save_path}")
+    if write_power:
+        print(f"Success! Saved direct coarse RF power Zarr array to {save_path}")
+    else:
+        print(f"Success! Saved direct Run Model phase Zarr pair to {phase_paths[0]} and {phase_paths[1]}")
     telemetry.report()
-    return save_path
+    return save_path if write_power else phase_paths[0]
 
 
 def waveletDecompositionFullConv(
@@ -2757,6 +2828,7 @@ def waveletDecompositionFullConv(
     filter_group_size=None,
     cancel_event=None,
     library_sigmas=None,
+    progress_signature=None,
 ):
     """Decompose full-model wavelets with compact Gabor kernels and ``conv2d``.
 
@@ -2848,6 +2920,7 @@ def waveletDecompositionFullConv(
                 "Install project requirements or select 'npy' as the full-model format."
             ) from exc
         os.makedirs(folder_path, exist_ok=True)
+        codec_threads = configure_zarr_codec_threads()
         compressor = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
         capacity_guard = _prepare_compressed_cache_capacity(
             folder_path, required_bytes, f"convolution full-model phase {phase}"
@@ -2861,17 +2934,25 @@ def waveletDecompositionFullConv(
             for dim, chunk in zip(final_shape, zarr_chunks)
         )
         progress_kind = json.dumps(
-            {"product": "full_phase_v2", "phase": int(phase), "sigmas": sigmas.tolist(),
+            {"product": "full_phase_v3", "phase": int(phase), "sigmas": sigmas.tolist(),
              "frequencies": frequencies.tolist(), "orientations": int(n_orientations),
-             "phase_offsets": list(phase_offsets) if phase_offsets is not None else []},
+             "phase_offsets": list(phase_offsets) if phase_offsets is not None else [],
+             "resume_signature": progress_signature},
             sort_keys=True,
         )
         progress = _ConvolutionProgress(save_path, final_shape, progress_kind)
         wt_final = _open_resumable_zarr(
             zarr, save_path, final_shape, zarr_chunks, compressor, progress,
+            required_chunk_axes=(3, 4, 5),
         )
         use_mmap = False
         print(f"Writing convolution full-model phase {phase} directly to Zarr: {save_path}")
+        print(
+            "Full Model convolution cache layout | "
+            f"chunks={zarr_chunks}; sigma/frequency chunks=1/1; "
+            "compressor=zstd level 3"
+            + (f"; Blosc threads={codec_threads}" if codec_threads is not None else "")
+        )
     elif has_enough_ram(required_bytes, safety_margin=1.20):
         wt_final = np.zeros(final_shape, dtype=np.float32)
         use_mmap = False

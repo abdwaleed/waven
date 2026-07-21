@@ -80,6 +80,53 @@ def test_full_convolution_layout_avoids_one_pixel_zarr_writes():
     assert chunks[1] * chunks[2] > 1
 
 
+def test_full_convolution_layout_is_not_shrunk_by_independent_filter_groups():
+    """Each full-model Zarr chunk holds one sigma/frequency write only."""
+
+    shape = (18_000, 141, 114, 8, 7, 3)
+    one_at_a_time = _full_convolution_zarr_layout(
+        shape, frame_chunk_size=1857, filter_group_size=1,
+    )
+    grouped = _full_convolution_zarr_layout(
+        shape, frame_chunk_size=1857, filter_group_size=6,
+    )
+
+    assert one_at_a_time == grouped
+    assert one_at_a_time[-2:] == (1, 1)
+
+
+def test_phase_only_run_model_cache_writes_quadrature_pair_without_power(tmp_path, monkeypatch):
+    """A separate Run Model cache still reads/convolves the movie once."""
+
+    pytest.importorskip("zarr")
+    movie = np.random.default_rng(23).normal(size=(5, 7, 6)).astype(np.float32)
+    common = dict(
+        videodata=movie,
+        sigmas=np.array([1.0, 1.5]),
+        folder_path=str(tmp_path),
+        n_orientations=2,
+        phase_offsets=(0.0, np.pi / 2),
+        frame_chunk_size=2,
+        filter_group_size=1,
+    )
+    monkeypatch.setenv("WAVEN_AMP", "0")
+    monkeypatch.setenv("WAVEN_TORCH_COMPILE", "0")
+    monkeypatch.setenv("WAVEN_MULTI_GPU", "0")
+
+    phase_path = waveletPowerDecompositionConv(
+        phase_output_stems=("model_real", "model_imag"),
+        coupled_frequencies=[0.5, 0.25],
+        write_power=False,
+        **common,
+    )
+
+    real = np.asarray(load_array(tmp_path / "model_real.zarr", mmap_mode="r"))
+    imaginary = np.asarray(load_array(tmp_path / "model_imag.zarr", mmap_mode="r"))
+    assert phase_path.endswith("model_real.zarr")
+    assert real.shape == imaginary.shape == (5, 6, 7, 2, 2)
+    assert not (tmp_path / "coarse_rf_power.zarr").exists()
+
+
 def test_time_major_coarse_power_ignores_legacy_disable_flag(tmp_path, monkeypatch, capsys):
     """Time-major scheduling remains active even with an inherited old flag."""
     pytest.importorskip("zarr")

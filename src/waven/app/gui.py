@@ -3828,23 +3828,31 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             del power, real, imag
             gc.collect()
 
-        def _prepare_model_phase_cache(phase, phase_path, phase_fingerprint, videodata):
-            """Write one compact sigma-coupled Run Model phase cache."""
-            phase_name = "real" if int(phase) == 0 else "imaginary"
-            if _artifact_ready(
-                phase_path, coarse_phase_shape, phase_fingerprint,
+        def _prepare_model_phase_pair_cache(real_fingerprint, imag_fingerprint, videodata):
+            """Write the compact Run Model quadrature pair in one streamed pass."""
+            real_ready = _artifact_ready(
+                model_real_path, coarse_phase_shape, real_fingerprint,
                 kind="coarse_model_phase",
-            ):
-                print(f"Resume: found completed Run Model {phase_name} phase, reusing {phase_path}")
+            )
+            imag_ready = _artifact_ready(
+                model_imag_path, coarse_phase_shape, imag_fingerprint,
+                kind="coarse_model_phase",
+            )
+            if real_ready and imag_ready:
+                print("Resume: found completed Run Model real/imaginary phase pair, reusing it.")
                 return
-            _register_cancel_cleanup_path(phase_path, preserve_on_cancel=True)
             if backend != "convolution":
                 raise ValueError(
                     "Run Model sigma-coupled phase caches require the Convolution backend."
                 )
-            waveletDecompositionConv(
+            # A partial pair must be regenerated together: their shared progress
+            # marker proves matching frame tiles only when both stores were
+            # produced by the same fused real/imaginary convolution.
+            _register_cancel_cleanup_path(model_real_path, preserve_on_cancel=True)
+            _register_cancel_cleanup_path(model_imag_path, preserve_on_cancel=True)
+            print("Writing the Run Model real/imaginary phase pair in one convolution pass.")
+            waveletPowerDecompositionConv(
                 videodata,
-                phase,
                 sigmas,
                 wavelet_folder,
                 n_orientations=n_thetas,
@@ -3857,26 +3865,37 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     model_phase_coupled_frequencies
                     if model_phase_coupled_frequencies.size else None
                 ),
-                output_format="zarr",
-                output_stem=os.path.splitext(os.path.basename(phase_path))[0],
+                phase_output_stems=(
+                    os.path.splitext(os.path.basename(model_real_path))[0],
+                    os.path.splitext(os.path.basename(model_imag_path))[0],
+                ),
+                write_power=False,
+                progress_signature=_cache_fingerprint(
+                    {"real": real_fingerprint, "imaginary": imag_fingerprint}
+                ),
                 cancel_event=_current_cancel_event(),
             )
-            if not _artifact_matches(phase_path, coarse_phase_shape):
-                raise ValueError(
-                    f"Run Model {phase_name} phase cache has an unexpected shape: {phase_path}"
+            phase_cache_params = {
+                "crop": crop_params,
+                "wavelet": _coarse_model_phase_provenance(
+                    coarse_nx, coarse_ny, sigmas, phase_offsets,
+                ),
+            }
+            for phase_name, phase_path, fingerprint in (
+                ("real", model_real_path, real_fingerprint),
+                ("imaginary", model_imag_path, imag_fingerprint),
+            ):
+                if not _artifact_matches(phase_path, coarse_phase_shape):
+                    raise ValueError(
+                        f"Run Model {phase_name} phase cache has an unexpected shape: {phase_path}"
+                    )
+                _write_artifact_metadata(
+                    phase_path,
+                    "coarse_model_phase",
+                    coarse_phase_shape,
+                    fingerprint,
+                    params=phase_cache_params,
                 )
-            _write_artifact_metadata(
-                phase_path,
-                "coarse_model_phase",
-                coarse_phase_shape,
-                phase_fingerprint,
-                params={
-                    "crop": crop_params,
-                    "wavelet": _coarse_model_phase_provenance(
-                        coarse_nx, coarse_ny, sigmas, phase_offsets,
-                    ),
-                },
-            )
 
         if scale == "coarse":
             current_wavelet_dir[0] = wavelet_folder
@@ -4003,11 +4022,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                 "Run Model's sigma-coupled phase frequencies are not in the independent "
                                 "Coarse RF list; writing the compact phase pair in a separate pass."
                             )
-                            _prepare_model_phase_cache(
-                                0, model_real_path, real_phase_fingerprint, videodata,
-                            )
-                            _prepare_model_phase_cache(
-                                1, model_imag_path, imag_phase_fingerprint, videodata,
+                            _prepare_model_phase_pair_cache(
+                                real_phase_fingerprint, imag_phase_fingerprint, videodata,
                             )
                         _write_recovery_step("coarse_model_cache_complete", real=model_real_path, imag=model_imag_path)
                     _write_recovery_step("coarse_rf_power_complete", path=coarse_power_path)
@@ -4021,11 +4037,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     # the independent Coarse RF sweep.
                     real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
                     imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
-                    _prepare_model_phase_cache(
-                        0, model_real_path, real_phase_fingerprint, videodata,
-                    )
-                    _prepare_model_phase_cache(
-                        1, model_imag_path, imag_phase_fingerprint, videodata,
+                    _prepare_model_phase_pair_cache(
+                        real_phase_fingerprint, imag_phase_fingerprint, videodata,
                     )
                     _write_recovery_step("coarse_model_cache_complete", real=model_real_path, imag=model_imag_path)
                     update_progress(100, "Coarse wavelet decomposition", "Run Model phase caches ready")
@@ -4237,7 +4250,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             len(sigmas_full),
             max(1, len(frequencies)),
         )
-        zarr_chunks = (
+        legacy_zarr_chunks = (
             min(expected_frames, 128),
             min(full_nx, 16),
             min(full_ny, 16),
@@ -4245,18 +4258,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             len(sigmas_full),
             max(1, len(frequencies)),
         )
-        full_phase_fingerprint = _cache_fingerprint(
-            {
-                "artifact": "full_wavelet_phase",
-                "backend": backend,
-                "shape": full_model_shape,
-                "downsample": full_downsample_fingerprint,
-                "output_format": output_format,
-                "scientific_parameters": _full_wavelet_provenance(
-                    full_nx, full_ny, sigmas_full, frequencies, phase_offsets,
-                ),
-            }
+        # The convolution writer chooses its own layout after it knows the
+        # hardware-safe frame/filter group.  Its sigma/frequency chunks are one
+        # by one, matching its per-combination writes and avoiding Zarr
+        # read/modify/recompress stalls.  Legacy keeps its established layout.
+        full_storage_layout = (
+            "convolution-sigma-frequency-chunked-v1"
+            if backend == "convolution" and is_zarr_wavelet
+            else None
         )
+        full_phase_identity = {
+            "artifact": "full_wavelet_phase",
+            "backend": backend,
+            "shape": full_model_shape,
+            "downsample": full_downsample_fingerprint,
+            "output_format": output_format,
+            "scientific_parameters": _full_wavelet_provenance(
+                full_nx, full_ny, sigmas_full, frequencies, phase_offsets,
+            ),
+        }
+        if full_storage_layout:
+            full_phase_identity["storage_layout"] = full_storage_layout
+        full_phase_fingerprint = _cache_fingerprint(full_phase_identity)
         for phase in (0, 1):
             suffix = "_r" if phase == 0 else "_i"
             target_ext = ".zarr" if is_zarr_wavelet else ".npy"
@@ -4278,12 +4301,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     n_orientations=n_thetas,
                     phase_offsets=phase_offsets,
                     output_format=output_format,
-                    zarr_chunks=zarr_chunks if is_zarr_wavelet else None,
+                    zarr_chunks=None,
                     kernel_cache_path=fine_kernel_cache_path,
                     # The fine kernel cache holds the coarse/full sigma union,
                     # just like the legacy fine Gabor library.  The convolution
                     # writer selects only the Full Model sigma axis for output.
                     library_sigmas=fine_library_sigmas,
+                    progress_signature=phase_fingerprint,
                     cancel_event=_current_cancel_event(),
                 )
             else:
@@ -4296,7 +4320,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     fine_lib_path,
                     library_sigmas=fine_library_sigmas,
                     output_format=output_format,
-                    zarr_chunks=zarr_chunks if is_zarr_wavelet else None,
+                    zarr_chunks=legacy_zarr_chunks if is_zarr_wavelet else None,
                     cancel_event=_current_cancel_event(),
                 )
             if not _artifact_matches(target, full_model_shape):
@@ -4311,6 +4335,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "wavelet": _full_wavelet_provenance(
                         full_nx, full_ny, sigmas_full, frequencies, phase_offsets,
                     ),
+                    **({"storage_layout": full_storage_layout} if full_storage_layout else {}),
                 },
             )
             _write_recovery_step(f"full_model_phase_{phase}_complete", path=target)
@@ -6173,6 +6198,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 full_nx, full_ny, sigmas_full, frequencies, _gabor_phase_offsets_radians(),
             ),
         }
+        if _selected_wavelet_backend() == "convolution" and _selected_wavelet_format() == "zarr":
+            expected_full_params["storage_layout"] = "convolution-sigma-frequency-chunked-v1"
         for phase_path in (
             os.path.join(wavelet_path, "dwt_videodata2_r.zarr"),
             os.path.join(wavelet_path, "dwt_videodata2_i.zarr"),
