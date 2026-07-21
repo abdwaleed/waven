@@ -1232,6 +1232,84 @@ def approx_Matrix2(X, smoothing_factor=0.75, plotting=False):
 
     X_approx = np.einsum('i,j,k -> ijk', U1, U2, U3)
     return X_approx,  (U1, U2, U3)
+
+
+def paper_response_marginals(response_surface, amplitude_centers, phase_centers, drift_centers):
+    """Return the paper's direct 1-D marginals of ``R(A, phi, phi')``.
+
+    The published model visualises the fitted three-dimensional response surface
+    by marginalising it across the other two feature axes.  These curves are not
+    CP/tensor factors: they retain the actual response surface used by the
+    lookup model and therefore make no separability assumption.
+
+    Args:
+        response_surface: Finite response tensor with axes amplitude, phase,
+            and phase drift.
+        amplitude_centers: Bin centres for amplitude.
+        phase_centers: Bin centres for phase in radians.
+        drift_centers: Bin centres for phase drift in Hz.
+
+    Returns:
+        Mapping containing the three paper-aligned curves and their exact bin
+        centres.  Curves are finite float32 arrays so they can be sent safely
+        through the model/GUI cache boundary.
+    """
+    surface = np.asarray(response_surface, dtype=np.float64)
+    if surface.ndim != 3:
+        raise ValueError(
+            "paper_response_marginals expects a 3-D (amplitude, phase, drift) "
+            f"response surface, got {surface.shape}."
+        )
+    expected_shape = (len(amplitude_centers), len(phase_centers), len(drift_centers))
+    if surface.shape != expected_shape:
+        raise ValueError(
+            "Response-surface shape does not match its marginal axes: "
+            f"surface {surface.shape}, axes {expected_shape}."
+        )
+
+    # ``Z`` is occupancy-normalised before it reaches this helper.  Averaging
+    # across the remaining axes is therefore the direct marginalisation stated
+    # in the paper, rather than a count-weighted re-estimation from raw frames.
+    surface = np.where(np.isfinite(surface), surface, np.nan)
+
+    def marginal(values, axes):
+        curve = np.nanmean(values, axis=axes)
+        return np.nan_to_num(curve, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+    return {
+        "schema": "paper-response-marginals-v1",
+        "amplitude": {
+            "x": np.asarray(amplitude_centers, dtype=np.float32),
+            "y": marginal(surface, (1, 2)),
+            "x_label": "Amplitude (a.u.)",
+        },
+        "phase": {
+            "x": np.asarray(phase_centers, dtype=np.float32),
+            "y": marginal(surface, (0, 2)),
+            "x_label": "Phase (rad)",
+        },
+        "drift": {
+            "x": np.asarray(drift_centers, dtype=np.float32),
+            "y": marginal(surface, (0, 1)),
+            "x_label": "Drift (Hz)",
+        },
+    }
+
+
+def _half_maximum_center(centers, curve):
+    """Return the centre closest to half the finite marginal maximum."""
+    centers = np.asarray(centers, dtype=float).reshape(-1)
+    curve = np.asarray(curve, dtype=float).reshape(-1)
+    if centers.size == 0 or curve.size == 0:
+        return np.nan
+    count = min(centers.size, curve.size)
+    centers, curve = centers[:count], curve[:count]
+    finite = np.isfinite(curve)
+    if not np.any(finite):
+        return np.nan
+    target = float(np.nanmax(curve[finite])) / 2.0
+    valid_indices = np.flatnonzero(finite)
+    return float(centers[valid_indices[np.argmin(np.abs(curve[finite] - target))]])
     
 
 def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, plotting=True, sigma=7):
@@ -1241,7 +1319,7 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
         spk: Trial-by-frame neural responses with shape ``(trials, frames)``.
         w_i: Imaginary selected-wavelet trace, ``(frames,)`` or ``(frames, 1)``.
         w_r: Real selected-wavelet trace with the same frame axis as ``w_i``.
-        dphi: Instantaneous phase-drift trace in radians per frame.
+        dphi: Instantaneous phase-drift trace in cycles per second (Hz).
         w_i_inhib: Imaginary inhibitory-wavelet trace.
         w_r_inhib: Real inhibitory-wavelet trace.
         dphi_inhib: Inhibitory phase-drift trace.
@@ -1250,22 +1328,24 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
         sigma: Histogram-smoothing width in bins.
 
     Returns:
-        tuple: Smoothed response surfaces, bin centers, histogram data, and
-        interpolation helpers consumed by the nonlinear model. Empty histogram
+        tuple: Interpolation helpers, response-surface summary values, and
+        direct paper-style amplitude/phase/drift marginals. Empty histogram
         cells are represented safely as zero response rather than NaN.
     """
     sin = w_i.reshape(-1, 1)
     cos = w_r.reshape(-1, 1)
     dphi = dphi.reshape(-1, 1)
-    rho, phi = getpolar(sin, cos)
+    # A real/cosine Gabor response is phase 0 and an imaginary/sine response
+    # is phase pi/2.  Keep this ordering explicit: the prior reversed call
+    # rotated the phase axis by pi/2 relative to the paper's definition.
+    rho, phi = getpolar(cos, sin)
 
     sin_h = w_i_inhib.reshape(-1, 1)
     cos_h = w_r_inhib.reshape(-1, 1)
     dphi_h = dphi_inhib.reshape(-1, 1)
-    rho_h, phi_h = getpolar(sin_h, cos_h)
+    rho_h, phi_h = getpolar(cos_h, sin_h)
 
     a = abs(max(rho.min(), rho.max()))
-    c = abs(max(phi.min(), phi.max()))
     if a == 0:
         a = 0.3
     b = abs(max(dphi.min(), dphi.max()))
@@ -1275,7 +1355,14 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     if b == 0:
         b = 1.0
         
-    E = [np.linspace(0, a, ncut + 1), np.linspace(0, c, ncut + 1), np.linspace(-b, b, ncut + 1)]
+    # Phase is circular and the paper's model has a stable 0--2pi phase axis.
+    # Using only the observed maximum silently changed bin locations between
+    # neurons and made marginal phase plots incomparable.
+    E = [
+        np.linspace(0, a, ncut + 1),
+        np.linspace(0, 2 * np.pi, ncut + 1),
+        np.linspace(-b, b, ncut + 1),
+    ]
     Ecs = [np.linspace(-d, d, ncut + 1), np.linspace(-d, d, ncut + 1)]
     
     # ---------------------------------------------------------
@@ -1347,17 +1434,16 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     indices = np.indices(Z.shape)
     indices = np.stack([xcenters[indices[0]], ycenters[indices[1]], zcenters[indices[2]]])
     filled_data0 = interp(*indices)
-    filled_data2, plot = approx_Matrix2(filled_data0, None, plotting=plotting)
-    plots = [plot[0], np.append(plot[1], plot[1][0]), plot[2]]
+    plots = paper_response_marginals(filled_data0, xcenters, ycenters, zcenters)
 
-    filled_data = np.concatenate((filled_data0, filled_data0, filled_data0), axis=1)
-
-    d_val = zcenters[np.argmax(plot[2])]
-    pp = plot[1]
-    rr = plot[0]
-    HMP = xcenters[np.argmin(abs(rr - (np.max(rr)/2)))]
-    cv = circular_variance(np.linspace(0, 360, 20), pp.reshape(-1, 1))
-    complexity = 1 - cv[1][0]
+    d_val = float(zcenters[np.argmax(plots["drift"]["y"])])
+    pp = plots["phase"]["y"]
+    HMP = _half_maximum_center(xcenters, plots["amplitude"]["y"])
+    if np.any(np.isfinite(pp)) and np.nansum(pp) > 0:
+        cv = circular_variance(np.rad2deg(ycenters), pp.reshape(-1, 1))
+        complexity = 1 - cv[1][0]
+    else:
+        complexity = np.nan
 
     if plotting:
         fig = plt.figure(figsize=(16, 6))
@@ -1389,7 +1475,7 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
             ax1_0.scatter(rho[i - 1:i + 1], phi[i - 1:i + 1], dphi[i - 1:i + 1], s=10, color=color)
             ax1_0.set_xlabel('Amplitude (a.u)')
             ax1_0.set_ylabel('Phase (rad)')
-            ax1_0.set_zlabel('Drift (rad/s)')
+            ax1_0.set_zlabel('Drift (Hz)')
             ax1_0.set_title('Firing rate trajectory')
         fig.colorbar(m, ax=ax1_0)
 
@@ -1471,13 +1557,16 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
         plt.show()
 
     a = abs(max(rho_h.min(), rho_h.max()))
-    c = abs(max(phi_h.min(), phi_h.max()))
     if a == 0:
         a = 0.3
     b = abs(max(dphi_h.min(), dphi_h.max()))
     if b == 0:
         b = 1
-    E = [np.linspace(0, a, ncut + 1), np.linspace(0, c, ncut + 1), np.linspace(-b, b, ncut + 1)]
+    E = [
+        np.linspace(0, a, ncut + 1),
+        np.linspace(0, 2 * np.pi, ncut + 1),
+        np.linspace(-b, b, ncut + 1),
+    ]
     
     # ---------------------------------------------------------
     # OPTIMIZATION 2: Multithreaded histogram loop 2
@@ -1527,19 +1616,23 @@ def getPhiRho(spk, w_i, w_r, dphi, w_i_inhib, w_r_inhib, dphi_inhib, ncut=20, pl
     interp_h = NearestNDInterpolator(np.transpose((xcenters[mask[0]], ycenters[mask[1]], zcenters[mask[2]])), Z[mask])
     indices = np.indices(Z.shape)
     indices = np.stack([xcenters[indices[0]], ycenters[indices[1]], zcenters[indices[2]]])
-    filled_data = interp_h(*indices)
-    filled_data, plot_h = approx_Matrix2(filled_data, plotting=plotting)
+    filled_data_h = interp_h(*indices)
+    plot_h = paper_response_marginals(filled_data_h, xcenters, ycenters, zcenters)
 
-    d_h = zcenters[np.argmax(plot[2])] 
+    d_h = float(zcenters[np.argmax(plot_h["drift"]["y"])])
+    pp = plot_h["phase"]["y"]
+    HMP_f = _half_maximum_center(xcenters, plot_h["amplitude"]["y"])
+    if np.any(np.isfinite(pp)) and np.nansum(pp) > 0:
+        cv = circular_variance(np.rad2deg(ycenters), pp.reshape(-1, 1))
+        complexity_f = 1 - cv[1][0]
+    else:
+        complexity_f = np.nan
 
-    pp = plot_h[1]
-    rr = plot_h[0]
-    HMP_f = xcenters[np.argmin(abs(rr - (np.max(rr)/2)))]
-    cv = circular_variance(np.linspace(0, 360, 20), pp.reshape(-1, 1))
-    complexity_f = 1 - cv[1][0]
 
-
-    return interp, interp_h, d_val, d_h, complexity, complexity_f, HMP, HMP_f, [plots, plot_h]
+    return interp, interp_h, d_val, d_h, complexity, complexity_f, HMP, HMP_f, {
+        "excitatory": plots,
+        "inhibitory": plot_h,
+    }
 
 
 def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
@@ -1602,7 +1695,7 @@ def GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib, w_r_inhib, dphi, dphi_inhib,
         dt1 = min(int(dt1), signal_len)
     y_train = spks[train_idx, :dt1, idx]
     y_test = spks[test_idx, :dt1, idx]
-    rho, phi = getpolar(w_i, w_r)  # [:dt1]
+    rho, phi = getpolar(w_r, w_i)  # [:dt1]
     f, f_h, d, d_h, c, c_h, hmp, hmp_h, plot= getPhiRho(y_train[:, :dt1], w_i[:dt1], w_r[:dt1], dphi[:dt1], w_i_inhib[:dt1], w_r_inhib[:dt1], dphi_inhib[:dt1], plotting=plotting, sigma=sigma)
 
 

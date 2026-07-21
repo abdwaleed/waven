@@ -627,7 +627,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     _finish_recovery_checkpoint(success, cancelled=cancelled)
                     root.after(0, lambda: end_task(success=success, cancelled=cancelled, metrics=metrics))
 
-            threading.Thread(target=thread_target, daemon=True).start()
+            # Return to Tk once after showing the busy state.  Letting a
+            # cache/model worker seize CPU in this same event-loop turn is what
+            # makes Windows briefly label the otherwise healthy app as
+            # "Not Responding" on busy machines.
+            worker = threading.Thread(target=thread_target, daemon=True)
+            root.after(25, worker.start)
 
         return wrapper
     
@@ -1491,6 +1496,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "current_individual": {},
         "all_individual": {},
     }
+    export_selection_widgets = {
+        "current_all": {},
+        "current_individual": {},
+        "all_individual": {},
+    }
+    model_tuning_export_kinds = {"model_amplitude", "model_phase", "model_drift"}
+    model_tuning_export_availability = {kind: False for kind in model_tuning_export_kinds}
     export_file_vars = {}
     export_packaging_var = None
     export_profile_var = None
@@ -1655,6 +1667,29 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Return graph kinds ticked in one Export-tab checkbox group."""
         variables = export_selection_vars.get(selection_name, {})
         return {kind for kind, variable in variables.items() if bool(variable.get())}
+
+    def _refresh_model_tuning_export_options():
+        """Enable each model-tuning export choice only after that plot exists."""
+        available = {
+            classify_export_record(record.get("tab"), record.get("title"))
+            for record in figure_export_records
+            if record.get("tab") == "Individual neuron"
+        }
+        variables = export_selection_vars.get("current_individual", {})
+        widgets = export_selection_widgets.get("current_individual", {})
+        for kind in model_tuning_export_kinds:
+            exists = kind in available
+            previous = bool(model_tuning_export_availability.get(kind, False))
+            variable = variables.get(kind)
+            widget = widgets.get(kind)
+            if variable is not None:
+                if exists and not previous:
+                    variable.set(True)
+                elif not exists:
+                    variable.set(False)
+            if widget is not None:
+                widget.configure(state=tk.NORMAL if exists else tk.DISABLED)
+            model_tuning_export_availability[kind] = exists
 
     def _filter_export_records(records, selection_name):
         """Keep current-display figures whose graph category is selected."""
@@ -2659,7 +2694,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         fig, ax = plt.subplots(figsize=figure_size, constrained_layout=True)
                         ax.imshow(image)
                         ax.axis("off")
-                        if classify_export_record(record.get("tab"), record.get("title")) == "model_diagnostics":
+                        if classify_export_record(record.get("tab"), record.get("title")) in model_tuning_export_kinds:
                             fig._waven_compact = True
                     else:
                         fig = pickle.loads(record["figure"])
@@ -4432,6 +4467,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "caption_widget": caption_label,
         }
         figure_export_records.append(record)
+        _refresh_model_tuning_export_options()
         ctk.CTkButton(
             header,
             text=f"Export {graph_title}",
@@ -4469,6 +4505,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             record for record in figure_export_records
             if record.get("tab") != tab_name
         ]
+        _refresh_model_tuning_export_options()
 
     def switch_to_individual_tab(flash=True):
         """Function for switch to individual tab.
@@ -5718,11 +5755,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     else:
                         root.after(0, lambda: finish(sta_result=result))
 
-                threading.Thread(
+                worker = threading.Thread(
                     target=prepare_sta,
                     name=f"waven-sta-neuron-{neuron_id}",
                     daemon=True,
-                ).start()
+                )
+                # Give Windows one real event-loop turn to paint the busy
+                # cursor/status before the STA worker begins reading frames.
+                root.after(25, worker.start)
 
             def onpick(event):
                 """Function for onpick.
@@ -5808,6 +5848,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     include_model = bool(run_model_on_inspect_var.get())
                     include_full = bool(run_full_model_on_inspect_var.get())
                     _clear_model_diagnostic_figures()
+                    queued_models = [
+                        label for enabled, label in (
+                            (include_model, "Run Model"),
+                            (include_full, "Run Full Model"),
+                        ) if enabled
+                    ]
+                    if queued_models:
+                        queued_text = " + ".join(queued_models)
+                        status_var.set(
+                            f"Inspecting neuron {neuron_id}; {queued_text} amplitude, phase, and drift graphs are queued"
+                        )
+                        print(
+                            f"[INSPECT] Neuron {neuron_id}: {queued_text} tuning graphs are queued after the "
+                            "Individual Neuron plots finish rendering."
+                        )
+                        root.update_idletasks()
 
                     def run_requested_models():
                         if not (include_model or include_full):
@@ -5815,14 +5871,29 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
                         def run_models():
                             failures = []
-                            for label, runner in (
-                                ("Run Model", plot_run_model_outputs if include_model else None),
-                                ("Run Full Model", plot_run_full_model_outputs if include_full else None),
-                            ):
-                                if runner is None:
-                                    continue
+                            runners = [
+                                ("Run Model", plot_run_model_outputs) if include_model else None,
+                                ("Run Full Model", plot_run_full_model_outputs) if include_full else None,
+                            ]
+                            runners = [entry for entry in runners if entry is not None]
+                            total = len(runners)
+                            for current, (label, runner) in enumerate(runners, start=1):
                                 try:
+                                    update_progress(
+                                        100.0 * (current - 1) / max(1, total),
+                                        f"Inspecting neuron {neuron_id}",
+                                        f"{label}: fitting paper-aligned amplitude, phase, and drift curves ({current}/{total})",
+                                    )
+                                    print(
+                                        f"[INSPECT] {label} graphs underway for neuron {neuron_id}: "
+                                        "building the 3-D response surface and direct marginals."
+                                    )
                                     runner()
+                                    update_progress(
+                                        100.0 * current / max(1, total),
+                                        f"Inspecting neuron {neuron_id}",
+                                        f"{label}: amplitude, phase, and drift graphs ready ({current}/{total})",
+                                    )
                                 except Exception as exc:
                                     failures.append(f"{label}: {exc}")
                                     print(f"[MODEL] {label} did not complete for neuron {neuron_id}: {exc}")
@@ -5831,7 +5902,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                 raise RuntimeError("; ".join(failures))
                             return True
 
-                        run_in_thread(run_models, "Inspect neuron model diagnostics")()
+                        run_in_thread(
+                            run_models,
+                            f"Inspect neuron {neuron_id} model tuning curves",
+                        )()
 
                     draw_individual_neuron_async(neuron_id, on_complete=run_requested_models)
                 except Exception as e:
@@ -6106,18 +6180,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return np.asarray(state["rfs_gabor"][1])
         raise RuntimeError("Coarse RF preferred-feature indices are unavailable; rerun Coarse RF Analysis.")
 
-    def _append_model_figures(figures, title_prefix):
-        """Function for append model figures.
+    def _append_model_figures(titled_figures):
+        """Add one small model marginal per UI turn to keep Tk responsive."""
+        figures = list(titled_figures or [])
 
-        Args:
-            figures: Input value for this operation.
-            title_prefix: Input value for this operation.
-        """
-        def render():
-            """Function for render."""
-            switch_to_individual_tab(flash=True)
-            embed_captured_figures(figures, frame_plot_individual, title_prefix)
-        root.after(0, render)
+        def render_next(index=0):
+            if index == 0:
+                switch_to_individual_tab(flash=True)
+            if index >= len(figures):
+                _refresh_model_tuning_export_options()
+                return
+            title, figure = figures[index]
+            embed_interactive_figure(figure, frame_plot_individual, title)
+            # Canvas creation is the only remaining UI work.  Yield before the
+            # next graph so Windows continues to paint the busy/progress state.
+            root.after_idle(lambda: render_next(index + 1))
+
+        root.after(0, render_next)
 
     def _clear_model_diagnostic_figures():
         """Remove stale optional-model panels before inspecting another neuron."""
@@ -6127,8 +6206,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             is_model_diagnostic = (
                 record.get("tab") == "Individual neuron"
                 and (
-                    classify_export_record(record.get("tab"), title) == "model_diagnostics"
-                    or "run_model" in title.casefold()
+                    classify_export_record(record.get("tab"), title)
+                    in {"model_amplitude", "model_phase", "model_drift"}
+                    or "run model" in title.casefold()
                     or "run full model" in title.casefold()
                 )
             )
@@ -6140,6 +6220,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             except Exception:
                 pass
         figure_export_records[:] = retained
+        _refresh_model_tuning_export_options()
 
     def _model_summary_figure(model_name, payload):
         """Create a backend-neutral model summary for safe main-thread embedding."""
@@ -6248,6 +6329,78 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         figure._waven_compact = True
         return figure
 
+    def _paper_model_tuning_figures(model_name, payload):
+        """Render exactly the paper's Figure-4g-style marginal tuning curves."""
+        diagnostics = payload.get("diagnostics")
+        if isinstance(diagnostics, (list, tuple)):
+            diagnostics = diagnostics[0] if diagnostics else None
+        if not isinstance(diagnostics, dict):
+            raise ValueError(f"{model_name} did not return paper-aligned tuning curves.")
+        if diagnostics.get("schema") != "paper-response-marginals-v1":
+            raise ValueError(
+                f"{model_name} returned an obsolete diagnostics payload. Run the model again to create "
+                "paper-aligned amplitude, phase, and drift curves."
+            )
+
+        from matplotlib.figure import Figure
+
+        specification = (
+            ("amplitude", "Amplitude tuning", "#2563EB"),
+            ("phase", "Phase tuning", "#7C3AED"),
+            ("drift", "Drift tuning", "#D97706"),
+        )
+        figures = []
+        for feature, title, color in specification:
+            curve = diagnostics.get(feature)
+            if not isinstance(curve, dict):
+                raise ValueError(f"{model_name} is missing its {feature} marginal.")
+            try:
+                x = np.asarray(curve["x"], dtype=float).reshape(-1)
+                y = np.asarray(curve["y"], dtype=float).reshape(-1)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"{model_name} returned an invalid {feature} marginal.") from exc
+            count = min(x.size, y.size)
+            if count < 2:
+                raise ValueError(f"{model_name} returned too few {feature} bins to plot.")
+            x, y = x[:count], y[:count]
+
+            figure = Figure(figsize=(4.6, 2.8), dpi=95, constrained_layout=True)
+            axis = figure.add_subplot(111)
+            axis.plot(x, y, color=color, linewidth=1.6)
+            axis.set_title(f"{model_name} {title} - neuron {payload.get('neuron_id')}", fontsize=10)
+            axis.set_xlabel(str(curve.get("x_label") or feature.title()), fontsize=8)
+            axis.set_ylabel("Firing rate / response (a.u.)", fontsize=8)
+            axis.grid(alpha=0.18, linewidth=0.5)
+            if feature == "phase":
+                axis.set_xlim(0.0, 2.0 * np.pi)
+                axis.set_xticks([0.0, np.pi, 2.0 * np.pi])
+                axis.set_xticklabels(["0", "pi", "2pi"])
+            elif feature == "drift":
+                axis.axvline(0.0, color="#94A3B8", linewidth=0.7, zorder=0)
+            figure._waven_caption = (
+                "Direct marginal of the occupancy-normalized response surface R(A, phi, phi'). "
+                "This is the paper's Figure-4g operation, not a tensor-factor approximation."
+            )
+            figure._waven_compact = True
+            figures.append((feature, figure))
+        return figures
+
+    def _model_tuning_export_payload(payload, feature):
+        """Keep each exported tuning graph self-contained and sibling-free."""
+        diagnostics = payload.get("diagnostics")
+        if isinstance(diagnostics, (list, tuple)):
+            diagnostics = diagnostics[0] if diagnostics else None
+        curve = diagnostics.get(feature) if isinstance(diagnostics, dict) else None
+        return {
+            "source": payload.get("source"),
+            "neuron_id": payload.get("neuron_id"),
+            "paper_tuning": {
+                "schema": "paper-response-marginals-v1",
+                "feature": feature,
+                "curve": curve,
+            },
+        }
+
     def plot_run_model_outputs():
         """Function for plot run model outputs.
 
@@ -6268,7 +6421,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         cache_extra = {
             "model": "run_Model",
             "neuron": neuron_id,
-            "diagnostic_schema": 2,
+            "diagnostic_schema": 3,
             "phase_bank": _coarse_model_phase_provenance(
                 state["coarse_nx"], state["coarse_ny"], state["sigmas"],
                 _gabor_phase_offsets_radians(),
@@ -6382,30 +6535,32 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
 
         # ``call_model`` deliberately runs without plotting in this worker.
-        # Do not touch pyplot here; Tk/Matplotlib state belongs to the main UI
-        # thread.  A backend-neutral summary figure is created below instead.
-        result, figures = call_model(), []
+        # It returns only three 20-bin numerical marginals; the lightweight
+        # Matplotlib figures are embedded on the Tk event loop afterwards.
+        result = call_model()
         del w_r, w_i
         gc.collect()
         model_payload = _model_result_payload("run_Model", result, neuron_id)
-        if not figures:
-            figures = [
-                _model_diagnostic_figure("Run Model", model_payload)
-                or _model_summary_figure("Run Model", model_payload)
-            ]
-        for fig in figures:
-            _set_figure_export_payload(fig, model_payload)
+        tuning_figures = _paper_model_tuning_figures("Run Model", model_payload)
+        figures = [figure for _feature, figure in tuning_figures]
+        for feature, fig in tuning_figures:
+            _set_figure_export_payload(fig, _model_tuning_export_payload(model_payload, feature))
         _put_cached_entry(
             "run_model",
             {
                 "figures": _figure_records(
-                    [("individual", f"Run Model diagnostics neuron {neuron_id} {i}", fig) for i, fig in enumerate(figures, start=1)]
+                    [
+                        ("individual", f"Run Model {feature} tuning neuron {neuron_id}", fig)
+                        for feature, fig in tuning_figures
+                    ]
                 )
             },
             neuron_id=neuron_id,
             extra=cache_extra,
         )
-        _append_model_figures(figures, f"Run Model diagnostics neuron {neuron_id}")
+        _append_model_figures(
+            [(f"Run Model {feature} tuning neuron {neuron_id}", fig) for feature, fig in tuning_figures]
+        )
 
     def plot_run_full_model_outputs():
         """Function for plot run full model outputs.
@@ -6427,7 +6582,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         cache_extra = {
             "model": "run_Full_Model",
             "neuron": neuron_id,
-            "diagnostic_schema": 2,
+            "diagnostic_schema": 3,
             "fit_minutes": fit_minutes,
             **split_settings,
         }
@@ -6523,27 +6678,30 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 return_diagnostics=True,
             )
 
-        # See Run Model above: avoid pyplot inspection from the worker thread.
-        result, figures = call_full_model(), []
+        # See Run Model above: only compact numerical marginals cross the model
+        # boundary; all Tk work remains on the main event loop.
+        result = call_full_model()
         model_payload = _model_result_payload("run_Full_Model", result, neuron_id)
-        if not figures:
-            figures = [
-                _model_diagnostic_figure("Run Full Model", model_payload)
-                or _model_summary_figure("Run Full Model", model_payload)
-            ]
-        for fig in figures:
-            _set_figure_export_payload(fig, model_payload)
+        tuning_figures = _paper_model_tuning_figures("Run Full Model", model_payload)
+        figures = [figure for _feature, figure in tuning_figures]
+        for feature, fig in tuning_figures:
+            _set_figure_export_payload(fig, _model_tuning_export_payload(model_payload, feature))
         _put_cached_entry(
             "run_full_model",
             {
                 "figures": _figure_records(
-                    [("individual", f"Run Full Model diagnostics neuron {neuron_id} {i}", fig) for i, fig in enumerate(figures, start=1)]
+                    [
+                        ("individual", f"Run Full Model {feature} tuning neuron {neuron_id}", fig)
+                        for feature, fig in tuning_figures
+                    ]
                 )
             },
             neuron_id=neuron_id,
             extra=cache_extra,
         )
-        _append_model_figures(figures, f"Run Full Model diagnostics neuron {neuron_id}")
+        _append_model_figures(
+            [(f"Run Full Model {feature} tuning neuron {neuron_id}", fig) for feature, fig in tuning_figures]
+        )
 
     def plot_selected_model_outputs():
         """Run the model plotter that matches the selected analysis scale."""
@@ -8824,7 +8982,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     inspect_model_options.pack(fill=tk.X, pady=(6, 0))
     ctk.CTkCheckBox(
         inspect_model_options,
-        text="Also run Run Model diagnostics (coarse phase cache)",
+        text="Also create Run Model amplitude, phase, and drift tuning curves (coarse phase cache)",
         variable=run_model_on_inspect_var,
         onvalue=True,
         offvalue=False,
@@ -8834,7 +8992,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ).pack(anchor="w", pady=2)
     ctk.CTkCheckBox(
         inspect_model_options,
-        text="Also run Run Full Model diagnostics (full phase cache)",
+        text="Also create Run Full Model amplitude, phase, and drift tuning curves (full phase cache)",
         variable=run_full_model_on_inspect_var,
         onvalue=True,
         offvalue=False,
@@ -8845,7 +9003,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.CTkLabel(
         inspect_model_options,
         text=(
-            "Selected diagnostics are added to the Individual Neuron plots and become exportable only after they are generated. "
+            "Selected paper-aligned tuning curves are added to Individual Neuron and their export choices unlock only after generation. "
             "Both models require Coarse RF; Full Model also requires the Full Model cache."
         ),
         text_color=muted_text,
@@ -8974,9 +9132,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         options_frame.pack(fill=tk.X)
         variables = export_selection_vars[selection_name]
         for index, (kind, label) in enumerate(options):
-            variable = tk.BooleanVar(value=True)
+            is_model_tuning = selection_name == "current_individual" and kind in model_tuning_export_kinds
+            variable = tk.BooleanVar(value=not is_model_tuning)
             variables[kind] = variable
-            ctk.CTkCheckBox(
+            checkbox = ctk.CTkCheckBox(
                 options_frame,
                 text=label,
                 variable=variable,
@@ -8984,14 +9143,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 offvalue=False,
                 text_color=text_color,
                 height=24,
-            ).grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 18), pady=2)
+            )
+            checkbox.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 18), pady=2)
+            export_selection_widgets[selection_name][kind] = checkbox
+            if is_model_tuning:
+                checkbox.configure(state=tk.DISABLED)
         for column in range(2):
             options_frame.columnconfigure(column, weight=1)
         actions = ctk.CTkFrame(group, fg_color="transparent")
         actions.pack(fill=tk.X, pady=(4, 0))
+
+        def select_available():
+            for kind, variable in variables.items():
+                if (
+                    selection_name != "current_individual"
+                    or kind not in model_tuning_export_kinds
+                    or model_tuning_export_availability.get(kind, False)
+                ):
+                    variable.set(True)
+
         ctk.CTkButton(
             actions, text="Select all", width=86, height=24, corner_radius=5,
-            command=lambda: [variable.set(True) for variable in variables.values()],
+            command=select_available,
         ).pack(side=tk.LEFT)
         ctk.CTkButton(
             actions, text="Clear all", width=86, height=24, corner_radius=5,
@@ -9013,6 +9186,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         frame_export, "Current individual-neuron graphs to include", "current_individual",
         CURRENT_INDIVIDUAL_GRAPH_OPTIONS,
     )
+    _refresh_model_tuning_export_options()
     btn_export_all_results = ctk.CTkButton(
         frame_export,
         text="Export Current GUI: All + Individual",

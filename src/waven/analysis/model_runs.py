@@ -131,68 +131,57 @@ def _set_sem_caption(fig, n_trials):
         fig._waven_caption = f"Error bars represent SEM over {n_trials} trials."
 
 
-def _compact_model_diagnostics(
-    rho,
-    phi,
-    dphi,
-    prediction,
-    spks,
-    neuron_index,
-    test_idx,
-    *,
-    frame_start=0,
-    maximum_points=1800,
-    drift_units="rad/frame",
-):
-    """Return a bounded, backend-neutral diagnostic trace for one fitted neuron.
+def _phase_drift_hz(phi, hz):
+    """Return the paper's phase derivative in cycles per second (Hz)."""
+    hz = float(hz)
+    if not np.isfinite(hz) or hz <= 0:
+        raise ValueError(f"Phase drift requires a positive finite frame rate, got {hz!r}.")
+    phase = np.asarray(phi, dtype=float).reshape(-1)
+    if phase.size == 0:
+        return np.empty(0, dtype=np.float32)
+    drift = np.diff(phase, prepend=phase[0]) * (hz / (2.0 * np.pi))
+    finite = np.isfinite(drift)
+    if not np.all(finite):
+        if np.any(finite):
+            indices = np.arange(drift.size)
+            drift[~finite] = np.interp(indices[~finite], indices[finite], drift[finite])
+        else:
+            drift.fill(0.0)
+    return drift.astype(np.float32, copy=False)
 
-    Legacy model plotting constructed several pyplot figures in the caller's
-    thread.  That is not safe for a Tk worker, and retaining full movie-length
-    arrays just to redraw those figures makes plot caching unnecessarily large.
-    This helper preserves the scientifically useful amplitude, phase, drift,
-    prediction, and held-out response traces as small numerical arrays.  The GUI
-    can then render them safely on its main thread and export them with the
-    figure.
+
+def _paper_model_diagnostics(response_tuning):
+    """Return only the three Figure-4g marginal tuning curves for GUI output.
+
+    The numerical model has already built its occupancy-normalised response
+    surface.  Passing these 20-bin curves instead of frame traces keeps worker
+    results tiny and guarantees that the Individual Neuron tab contains only
+    amplitude, phase, and drift graphs.
     """
-    rho = np.asarray(rho, dtype=np.float32).reshape(-1)
-    phi = np.asarray(phi, dtype=np.float32).reshape(-1)
-    dphi = np.asarray(dphi, dtype=np.float32).reshape(-1)
-    prediction = np.asarray(prediction, dtype=np.float32).reshape(-1)
-    total = min(rho.size, phi.size, dphi.size, prediction.size)
-    if total <= 0:
+    if not isinstance(response_tuning, dict):
         return None
-
-    held_out = np.asarray(
-        read_first_axis_indices(
-            spks,
-            test_idx,
-            slice(int(frame_start), int(frame_start) + total),
-            int(neuron_index),
-        ),
-        dtype=np.float32,
-    )
-    if held_out.ndim == 1:
-        observed = held_out
-    else:
-        observed = np.nanmean(held_out, axis=0, dtype=np.float32)
-    total = min(total, observed.size)
-    if total <= 0:
+    tuning = response_tuning.get("excitatory", response_tuning)
+    if not isinstance(tuning, dict):
         return None
-
-    # Preserve the time span, but cap transfer/caching and main-thread drawing
-    # work for long movies.  Integer linspace avoids a duplicate final point.
-    point_count = min(int(maximum_points), total)
-    sample = np.linspace(0, total - 1, point_count, dtype=np.intp)
-    return {
-        "frame": (sample + int(frame_start)).astype(np.int32, copy=False),
-        "amplitude": rho[:total][sample],
-        "phase": phi[:total][sample],
-        "drift": dphi[:total][sample],
-        "prediction": prediction[:total][sample],
-        "observed": observed[:total][sample],
-        "held_out_trial_count": int(len(test_idx)),
-        "drift_units": str(drift_units),
-    }
+    diagnostics = {"schema": "paper-response-marginals-v1"}
+    for feature in ("amplitude", "phase", "drift"):
+        curve = tuning.get(feature)
+        if not isinstance(curve, dict):
+            return None
+        try:
+            x = np.asarray(curve["x"], dtype=np.float32).reshape(-1)
+            y = np.asarray(curve["y"], dtype=np.float32).reshape(-1)
+        except (KeyError, TypeError, ValueError):
+            return None
+        count = min(x.size, y.size)
+        if count < 2:
+            return None
+        diagnostics[feature] = {
+            "x": x[:count],
+            "y": y[:count],
+            "x_label": str(curve.get("x_label") or feature.title()),
+        }
+    return diagnostics
 
 
 def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, lastmin=False, show_sem_errorbars=False, return_diagnostics=False):
@@ -240,19 +229,14 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
     rho = np.hypot(w_r.ravel(), w_i.ravel())
     phi = np.arctan2(w_i.ravel(), w_r.ravel())
     phi = np.unwrap(phi)
-    # The first sample has no preceding frame, so its instantaneous phase drift
-    # is zero. Prepending literal zero instead spuriously injected ``phi[0]``.
-    dphi = np.diff(phi, prepend=phi[0])
-    dphi[abs(dphi) >= 3] = np.nan
-    nans, x_val = nan_helper(dphi)
-    dphi[nans] = np.interp(x_val(nans), x_val(~nans), dphi[~nans])
+    # The paper defines drift as d(phi)/dt and plots it in Hz.  Use one shared
+    # conversion for coarse and full paths so fitting and Figure-4g marginals
+    # have comparable units.
+    dphi = _phase_drift_hz(phi, float(frames_per_minute) / 60.0)
 
     rho_inhib = np.hypot(w_r_inhib.ravel(), w_i_inhib.ravel())
     phi_inhib = np.unwrap(np.arctan2(w_i_inhib.ravel(), w_r_inhib.ravel()))
-    dphi_inhib = np.diff(phi_inhib, prepend=phi_inhib[0])
-    dphi_inhib[abs(dphi_inhib) >= 3] = np.nan
-    nans, x_val = nan_helper(dphi_inhib)
-    dphi_inhib[nans] = np.interp(x_val(nans), x_val(~nans), dphi_inhib[~nans])
+    dphi_inhib = _phase_drift_hz(phi_inhib, float(frames_per_minute) / 60.0)
 
     if not double_wavelet_model:
         w_i_inhib=np.zeros(w_i.shape)
@@ -286,7 +270,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
             ("Sine wavelet", "Wavelet value (a.u.)"),
             ("Amplitude", "rho (a.u.)"),
             ("Phase", "phi (rad)"),
-            ("Drift", "dphi (rad/frame)"),
+            ("Drift", "dphi (Hz)"),
         ]
         for axis, (title, ylabel) in zip(ax, labels):
             axis.set_title(title)
@@ -305,7 +289,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
         ax.set_title("Wavelet trajectory colored by spike activity")
         ax.set_xlabel("Amplitude rho (a.u.)")
         ax.set_ylabel("Phase phi (rad)")
-        ax.set_zlabel("Drift dphi (rad/frame)")
+        ax.set_zlabel("Drift dphi (Hz)")
 
     vis_resp, a, nonlinparams, rhophiparams, plots, unrectified, w, interp = GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib,
                                                                                           w_r_inhib,
@@ -321,16 +305,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
                                                                                           frames_per_minute=frames_per_minute)
     diagnostics = None
     if return_diagnostics:
-        diagnostics = _compact_model_diagnostics(
-            rho,
-            phi,
-            dphi,
-            vis_resp,
-            spks,
-            idx,
-            test_idx,
-            drift_units="rad/frame",
-        )
+        diagnostics = _paper_model_diagnostics(plots)
     return vis_resp, nonlinparams, rhophiparams, a, interp, diagnostics
 
 def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
@@ -357,8 +332,8 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
         plotting: Enable legacy diagnostic figures. GUI workers leave this false.
         frames_per_minute: Required movie FPS multiplied by 60.
         show_sem_errorbars: Compatibility argument for legacy plot callers.
-        return_diagnostics: Return bounded numerical amplitude/phase/drift
-            traces suitable for safe rendering by a GUI main thread.
+        return_diagnostics: Return paper-aligned amplitude, phase, and drift
+            marginals suitable for safe rendering by a GUI main thread.
 
     Returns:
         tuple: Predictions, nonlinear parameters, rho/phi parameters, scalar
@@ -516,8 +491,8 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         coarse_shape: Expected coarse `(x, y)` grid for validating seed indices.
         hz: Movie frame rate, used when ``frames_per_minute`` is omitted.
         show_sem_errorbars: Compatibility argument for legacy figure callers.
-        return_diagnostics: Return bounded numerical amplitude/phase/drift
-            traces suitable for safe rendering by a GUI main thread.
+        return_diagnostics: Return paper-aligned amplitude, phase, and drift
+            marginals suitable for safe rendering by a GUI main thread.
 
     Returns:
         tuple: Full-model predictions, refined preferred parameters, nonlinear
@@ -1085,19 +1060,13 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         rho = np.hypot(w_r.flatten(), w_i.flatten())
         phi = np.arctan2(w_i.flatten(), w_r.flatten())
         phi = np.unwrap(phi)
-        dphi = np.diff(phi, prepend=phi[0]) * hz
-        dphi = np.clip(dphi, -2 * np.pi, 2 * np.pi)
-        nans, dx = nan_helper(dphi)
-        dphi[nans] = np.interp(dx(nans), dx(~nans), dphi[~nans])
+        dphi = _phase_drift_hz(phi, hz)
 
         # Vectorized polar coordinate calculation (100x faster, zero unnecessary RAM)
         rho_inhib = np.hypot(w_r_inhib.flatten(), w_i_inhib.flatten())
         phi_inhib = np.arctan2(w_i_inhib.flatten(), w_r_inhib.flatten())
         phi_inhib = np.unwrap(phi_inhib)
-        dphi_inhib = np.diff(phi_inhib, prepend=phi_inhib[0]) * hz
-        dphi_inhib = np.clip(dphi_inhib, -2 * np.pi, 2 * np.pi)
-        nans, dx = nan_helper(dphi_inhib)
-        dphi_inhib[nans] = np.interp(dx(nans), dx(~nans), dphi_inhib[~nans])
+        dphi_inhib = _phase_drift_hz(phi_inhib, hz)
 
         dphi_ortho = np.zeros(dphi_inhib.shape)
         vis_resp, a, nonlinparams, rhophiparams, plots, unrectified, w,interp = GetNeuronVisresponse(idx, w_i, w_r,
@@ -1117,38 +1086,27 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                                                                                                frames_per_minute=frames_per_minute)
 
         if return_diagnostics:
-            diagnostics.append(
-                _compact_model_diagnostics(
-                    rho,
-                    phi,
-                    dphi,
-                    vis_resp,
-                    spks,
-                    idx,
-                    test_idx,
-                    frame_start=int(tt[0]),
-                    drift_units="rad/s",
-                )
-            )
+            diagnostics.append(_paper_model_diagnostics(plots))
 
         if plotting:
             ncut = 20
 
-            a = abs(max(rho.min(), rho.max()))
-            a_x = np.linspace(0, a, ncut)
-            plot = plots[0]
-            ax[5].plot(a_x, plot[0], c='k')
-            ax[5].set_ylim(bottom=0, top=np.max(plot[0]))
+            plot = plots["excitatory"]
+            a_x = plot["amplitude"]["x"]
+            a_y = plot["amplitude"]["y"]
+            ax[5].plot(a_x, a_y, c='k')
+            ax[5].set_ylim(bottom=0, top=np.max(a_y))
             ax[5].spines["top"].set_visible(False)
             ax[5].spines["right"].set_visible(False)
-            ax[5].set_xticks([0, a / 2, a])
+            ax[5].set_xticks([a_x[0], a_x[len(a_x) // 2], a_x[-1]])
             ax[5].set_title('Amplitude (a.u.)')
             ax[5].set_xlabel("Amplitude rho (a.u.)")
             ax[5].set_ylabel("Response gain (a.u.)")
 
-            b_x = np.linspace(0, 2 * np.pi, ncut + 1)
-            ax[6].plot(b_x, plot[1], c='k')
-            ax[6].set_ylim(bottom=0, top=np.max(plot[1]))
+            b_x = plot["phase"]["x"]
+            b_y = plot["phase"]["y"]
+            ax[6].plot(b_x, b_y, c='k')
+            ax[6].set_ylim(bottom=0, top=np.max(b_y))
             ax[6].spines["top"].set_visible(False)
             ax[6].spines["right"].set_visible(False)
             ax[6].set_xticks([0, np.pi, 2 * np.pi])
@@ -1157,18 +1115,19 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             ax[6].set_xlabel("Phase phi (rad)")
             ax[6].set_ylabel("Response gain (a.u.)")
 
-            c_x = np.linspace(-1, 1, ncut)
-            ax[7].plot(c_x, plot[2], c='k')
-            ax[7].set_ylim(bottom=0, top=np.max(plot[2]))
+            c_x = plot["drift"]["x"]
+            c_y = plot["drift"]["y"]
+            ax[7].plot(c_x, c_y, c='k')
+            ax[7].set_ylim(bottom=0, top=np.max(c_y))
             ax[7].spines["top"].set_visible(False)
             ax[7].spines["right"].set_visible(False)
-            ax[7].set_xticks([-1, 0, 1])
-            ax[7].set_title('Drift (a.u.)')
-            ax[7].set_xlabel("Drift dphi (a.u.)")
+            ax[7].set_xticks([c_x[0], c_x[len(c_x) // 2], c_x[-1]])
+            ax[7].set_title('Drift (Hz)')
+            ax[7].set_xlabel("Drift dphi (Hz)")
             ax[7].set_ylabel("Response gain (a.u.)")
             ax[8].axis("off")
 
-            pref_phase = b_x[np.argmax(plot[1])]
+            pref_phase = b_x[np.argmax(b_y)]
             pref_ori = thetas[o] * 180 / np.pi
             pref_size = sigmas[s]
 
@@ -1213,9 +1172,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             dphi_segment = dphi_smooth[star:stop]
             ax[5].plot(x_trace[:len(dphi_segment)], dphi_segment)
             ax[5].set_title("Drift")
-            ax[5].set_ylabel("dphi (rad/s)")
-            ax[5].yaxis.set_major_locator(ticker.MultipleLocator(base=2 * np.pi))
-            ax[5].yaxis.set_major_formatter(FuncFormatter(pi_formatter))
+            ax[5].set_ylabel("dphi (Hz)")
             ax[6].plot(x_trace, vis_resp[star:stop], c='r')
             ax[6].set_title("Model prediction")
             ax[6].set_xlabel("Frame index")

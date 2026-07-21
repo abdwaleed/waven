@@ -15,7 +15,9 @@ def test_current_display_records_are_classified_for_checkbox_selection():
     assert classify_export_record("Individual neuron", "Spike Train") == "spike_train"
     assert classify_export_record("Individual neuron", "Selected Neuron Tuning") == "tuning_dashboard"
     assert classify_export_record("Individual neuron", "PSTH-weighted Spike-Triggered Averages") == "sta"
-    assert classify_export_record("Individual neuron", "Run Full Model diagnostics neuron 7") == "model_diagnostics"
+    assert classify_export_record("Individual neuron", "Run Full Model Amplitude tuning neuron 7") == "model_amplitude"
+    assert classify_export_record("Individual neuron", "Run Model Phase tuning neuron 7") == "model_phase"
+    assert classify_export_record("Individual neuron", "Run Full Model Drift tuning neuron 7") == "model_drift"
 
 
 def test_batch_axis_classification_keeps_dashboard_graphs_separate():
@@ -52,6 +54,21 @@ def test_single_graph_payload_excludes_sibling_dashboard_arrays():
     assert graph["azimuth_correlation_tuning"] == [1, 2]
     assert "rf2d" not in graph
     assert "elevation_correlation_tuning" not in graph
+
+
+def test_model_tuning_payload_contains_only_the_created_curve():
+    curve = {"x": [0.1, 0.2], "y": [1.0, 2.0]}
+    payload = {
+        "source": "run_Model",
+        "neuron_id": 4,
+        "paper_tuning": {"feature": "amplitude", "curve": curve},
+        "metrics": [0.1, 0.2],
+    }
+
+    graph = graph_payload(payload, "model_amplitude")
+
+    assert graph["paper_tuning"]["curve"] == curve
+    assert "metrics" not in graph
 
 
 def test_orientation_axis_payload_uses_its_precomputed_reference_like_record():

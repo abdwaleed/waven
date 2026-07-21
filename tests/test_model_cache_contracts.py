@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from waven.analysis import model_runs
+from waven.analysis.nonlinear_models import paper_response_marginals
 from waven.analysis.receptive_fields import PearsonCorrelationPinkNoise
 
 
@@ -43,8 +44,8 @@ def test_run_model_converts_scalar_correlation_metrics(monkeypatch):
     np.testing.assert_allclose(metrics[0], [0.1, 0.2, 0.3])
 
 
-def test_run_model_can_return_bounded_worker_safe_diagnostics(monkeypatch):
-    """The GUI receives numerical traces without requesting worker pyplot figures."""
+def test_run_model_can_return_paper_marginal_diagnostics(monkeypatch):
+    """The GUI receives only Figure-4g-style curves without worker pyplot figures."""
 
     def fake_single_neuron(*_args, **_kwargs):
         return (
@@ -54,12 +55,10 @@ def test_run_model_can_return_bounded_worker_safe_diagnostics(monkeypatch):
             [0.1, 0.2, 0.3],
             object(),
             {
-                "frame": np.array([0, 1, 2]),
-                "amplitude": np.array([1.0, 2.0, 3.0]),
-                "phase": np.array([0.0, 0.1, 0.2]),
-                "drift": np.array([0.0, 0.1, 0.1]),
-                "prediction": np.array([0.0, 1.0, 2.0]),
-                "observed": np.array([0.1, 1.1, 2.1]),
+                "schema": "paper-response-marginals-v1",
+                "amplitude": {"x": np.array([0.1, 0.3]), "y": np.array([1.0, 2.0])},
+                "phase": {"x": np.array([0.2, 0.4]), "y": np.array([2.0, 3.0])},
+                "drift": {"x": np.array([-0.5, 0.5]), "y": np.array([3.0, 4.0])},
             },
         )
 
@@ -83,7 +82,31 @@ def test_run_model_can_return_bounded_worker_safe_diagnostics(monkeypatch):
     )
 
     assert len(diagnostics) == 1
-    np.testing.assert_array_equal(diagnostics[0]["frame"], [0, 1, 2])
+    assert diagnostics[0]["schema"] == "paper-response-marginals-v1"
+    np.testing.assert_array_equal(diagnostics[0]["phase"]["x"], [0.2, 0.4])
+
+
+def test_phase_drift_is_reported_in_hz():
+    """A one-cycle phase advance per second must be a 1 Hz drift value."""
+    phase = np.array([0.0, np.pi, 2.0 * np.pi])
+    drift = model_runs._phase_drift_hz(phase, hz=2.0)
+
+    np.testing.assert_allclose(drift, [0.0, 1.0, 1.0])
+
+
+def test_paper_response_marginals_are_direct_surface_means():
+    """Figure-4g curves must not be CP/tensor factors."""
+    surface = np.arange(24, dtype=float).reshape(2, 3, 4)
+    result = paper_response_marginals(
+        surface,
+        amplitude_centers=[0.25, 0.75],
+        phase_centers=[0.1, 0.2, 0.3],
+        drift_centers=[-1.5, -0.5, 0.5, 1.5],
+    )
+
+    np.testing.assert_allclose(result["amplitude"]["y"], surface.mean(axis=(1, 2)))
+    np.testing.assert_allclose(result["phase"]["y"], surface.mean(axis=(0, 2)))
+    np.testing.assert_allclose(result["drift"]["y"], surface.mean(axis=(0, 1)))
 
 
 def test_rf_preferred_feature_honours_absolute_flag():
