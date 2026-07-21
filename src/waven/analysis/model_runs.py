@@ -9,7 +9,7 @@ from .nonlinear_models import *
 from .trial_stats import *
 from .rf_correlation import streaming_cross_correlation
 from ..runtime.performance import cpu_inner_thread_count
-from ..storage.array_store import load_array_with_ram_acceleration
+from ..storage.array_store import load_array_with_ram_acceleration, read_first_axis_indices
 from joblib import parallel_config
 
 SECONDS_PER_MINUTE = 60
@@ -717,7 +717,10 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         t_end = min(t_start + nmin * frames_per_minute, wavelets_r.shape[0], spks.shape[1])
         if t_end - t_start <= 1:
             raise ValueError("Fine refinement needs at least two training frames.")
-        spk_train = np.mean(spks[train_idx, t_start:t_end, idx], axis=0)
+        spk_train = np.mean(
+            read_first_axis_indices(spks, train_idx, slice(t_start, t_end), int(idx)),
+            axis=0,
+        )
         x_start, x_end, y_start, y_end = _window_bounds(x0, y0, w)
         wavelets_r_ = _WaveletWindow(wavelets_r, t_start, t_end, x_start, x_end, y_start, y_end)
         wavelets_i_ = _WaveletWindow(wavelets_i, t_start, t_end, x_start, x_end, y_start, y_end)
@@ -855,7 +858,19 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
 
         train_frames = wc.shape[0]
         wc_tensor = torch.as_tensor(wc.reshape(train_frames, -1).T, device=compute_device, dtype=torch.float32)
-        spks_tensor = torch.as_tensor(np.mean(spks[train_idx, train_start:train_stop, idx], axis=0).reshape(1, -1), device=compute_device, dtype=torch.float32)
+        spks_tensor = torch.as_tensor(
+            np.mean(
+                read_first_axis_indices(
+                    spks,
+                    train_idx,
+                    slice(train_start, train_stop),
+                    int(idx),
+                ),
+                axis=0,
+            ).reshape(1, -1),
+            device=compute_device,
+            dtype=torch.float32,
+        )
         
         cc_f_1_o = torch.corrcoef(torch.cat((wc_tensor, spks_tensor), dim=0)).cpu().numpy()[-1:, :-1]
         cc_f_1_o = cc_f_1_o.reshape(corr_shape)

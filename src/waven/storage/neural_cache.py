@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -166,22 +167,33 @@ def save_aligned_neural_cache(
         _save_zarr_array(pos_path, neuron_pos)
         _save_zarr_array(spikes_path, spikes)
     result = {"pos": pos_path, "spikes": spikes_path}
+    n_neurons = int(np.asarray(neuron_pos).shape[0])
     if unit_ids is not None:
         unit_ids_path = output_dir / "unit_ids.json"
         values = [value.item() if isinstance(value, np.generic) else value for value in unit_ids]
+        if len(values) != n_neurons:
+            raise ValueError(
+                "unit_ids must contain one identifier for every neuron in the neural cache."
+            )
         with unit_ids_path.open("w", encoding="utf-8") as handle:
             json.dump(values, handle, indent=2, default=str)
         result["unit_ids"] = unit_ids_path
+    else:
+        # A cache rebuilt from sources without acquisition identifiers must not
+        # inherit labels from a previous experiment with a different unit set.
+        (output_dir / "unit_ids.json").unlink(missing_ok=True)
     if unit_info is not None:
         unit_info_path = output_dir / "unit_info.json"
         values = list(unit_info)
-        if len(values) != int(np.asarray(neuron_pos).shape[0]):
+        if len(values) != n_neurons:
             raise ValueError(
                 "unit_info must contain one entry for every neuron in the neural cache."
             )
         with unit_info_path.open("w", encoding="utf-8") as handle:
             json.dump({"version": 1, "units": values}, handle, indent=2, default=str)
         result["unit_info"] = unit_info_path
+    else:
+        (output_dir / "unit_info.json").unlink(missing_ok=True)
     return result
 
 
@@ -193,17 +205,39 @@ def load_unit_ids(directory: Path, n_neurons: Optional[int] = None) -> Optional[
         n_neurons: Optional expected number of identifiers.
 
     Returns:
-        One identifier per neuron, or ``None`` for an older cache without IDs.
+        One identifier per neuron, or ``None`` when the optional sidecar is
+        absent or belongs to a different neural cache.
     """
     path = Path(directory) / "unit_ids.json"
     if not path.exists():
         return None
-    with path.open("r", encoding="utf-8") as handle:
-        values = np.asarray(json.load(handle), dtype=object)
-    if n_neurons is not None and values.size != int(n_neurons):
-        raise ValueError(
-            f"unit_ids.json contains {values.size} IDs but the neural cache has {n_neurons} neurons."
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        warnings.warn(
+            f"Ignoring unreadable unit_ids.json ({exc}). Unit labels will fall back to indices.",
+            RuntimeWarning,
+            stacklevel=2,
         )
+        return None
+    if not isinstance(payload, list):
+        warnings.warn(
+            "Ignoring invalid unit_ids.json: expected a list of identifiers. "
+            "Unit labels will fall back to indices.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
+    values = np.asarray(payload, dtype=object)
+    if n_neurons is not None and values.size != int(n_neurons):
+        warnings.warn(
+            f"Ignoring stale unit_ids.json: it contains {values.size} IDs but the active "
+            f"neural cache has {n_neurons} neurons. Unit labels will fall back to indices.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
     return values
 
 
@@ -217,15 +251,32 @@ def load_unit_info(directory: Path, n_neurons: Optional[int] = None) -> Optional
     path = Path(directory) / "unit_info.json"
     if not path.exists():
         return None
-    with path.open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        warnings.warn(
+            f"Ignoring unreadable unit_info.json ({exc}).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
     values = payload.get("units") if isinstance(payload, dict) else payload
     if not isinstance(values, list) or not all(isinstance(value, dict) for value in values):
-        raise ValueError("unit_info.json must contain a list of per-neuron metadata objects.")
-    if n_neurons is not None and len(values) != int(n_neurons):
-        raise ValueError(
-            f"unit_info.json contains {len(values)} records but the neural cache has {n_neurons} neurons."
+        warnings.warn(
+            "Ignoring invalid unit_info.json: expected a list of per-neuron metadata objects.",
+            RuntimeWarning,
+            stacklevel=2,
         )
+        return None
+    if n_neurons is not None and len(values) != int(n_neurons):
+        warnings.warn(
+            f"Ignoring stale unit_info.json: it contains {len(values)} records but the active "
+            f"neural cache has {n_neurons} neurons.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
     return values
 
 

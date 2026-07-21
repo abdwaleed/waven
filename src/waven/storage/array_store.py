@@ -159,6 +159,46 @@ def load_array_with_memory_fallback(
         )
 
 
+def read_first_axis_indices(array: Any, indices: Any, *tail_indexers: Any) -> np.ndarray:
+    """Read selected first-axis entries from NumPy or Zarr as a NumPy array.
+
+    NumPy accepts a Python list as a first-axis advanced index, whereas Zarr's
+    ordinary ``__getitem__`` deliberately supports only basic integer/slice
+    indexing.  Analysis code commonly selects a small list of trials from a
+    disk-backed neural cache, so that NumPy-only spelling must not be used on a
+    Zarr array.  This helper keeps the returned subset small and resident while
+    leaving the large source array disk-backed.
+
+    ``oindex`` is used when a backend provides it.  The per-row fallback is
+    intentionally limited to the small trial selections used by analysis and
+    works with Zarr implementations that expose only basic indexing.
+    """
+    first_axis = np.asarray(indices, dtype=np.intp)
+    if first_axis.ndim != 1:
+        raise ValueError("indices must be a one-dimensional sequence for the first array axis.")
+    if first_axis.size == 0:
+        raise ValueError("indices must contain at least one first-axis entry.")
+
+    selection = (first_axis, *tail_indexers)
+    oindex = getattr(array, "oindex", None)
+    if oindex is not None:
+        try:
+            return np.asarray(oindex[selection])
+        except (IndexError, NotImplementedError, TypeError):
+            # Older Zarr releases can expose ``oindex`` while rejecting mixed
+            # advanced/basic selections.  Read the few requested trials with
+            # universally supported integer-and-slice indexing instead.
+            pass
+
+    try:
+        return np.asarray(array[selection])
+    except (IndexError, NotImplementedError, TypeError):
+        return np.stack(
+            [np.asarray(array[(int(index), *tail_indexers)]) for index in first_axis],
+            axis=0,
+        )
+
+
 def _ram_acceleration_enabled() -> bool:
     """Return whether the optional later-analysis RAM cache is enabled."""
     # Keep ``array_store`` importable in small utility/test environments where

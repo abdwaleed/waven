@@ -89,6 +89,7 @@ from ..storage.neural_cache import (
     load_unit_info,
     load_unit_ids,
 )
+from ..storage.array_store import read_first_axis_indices
 from ..stimulus.metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
 from ..stimulus.sampling import (
     sampling_plan_from_degrees_per_pixel,
@@ -4854,8 +4855,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         # streams spatial-feature blocks; flattening this Zarr selection here would
         # allocate the entire coarse cache (several GiB for long recordings).
         rf_split_settings = _model_split_settings({"spks": spks})
+        # Materialize only the requested training trials.  Zarr deliberately
+        # rejects NumPy's ``spks[[0, 2], ...]`` shorthand, which previously
+        # made Coarse RF fail whenever the neural cache remained disk-backed.
+        training_response = np.mean(
+            read_first_axis_indices(
+                spks,
+                rf_split_settings["train_idx"],
+                slice(0, n_frames),
+                slice(None),
+            ),
+            axis=0,
+        )
         rfs_gabor = PearsonCorrelationPinkNoise(w_c_downsampled,
-                                                np.mean(spks[rf_split_settings["train_idx"], :n_frames], axis=0),
+                                                training_response,
                                                  neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
                                                   n_orientations=n_orientations,
                                                   plotting=False,
@@ -5919,6 +5932,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         state["spks"] = spks
         return spks
 
+    def _single_neuron_model_spikes(spikes, neuron_id):
+        """Return a compact NumPy spike tensor for one Run Model neuron."""
+        return read_first_axis_indices(
+            spikes,
+            np.arange(int(spikes.shape[0]), dtype=np.intp),
+            slice(None),
+            slice(int(neuron_id), int(neuron_id) + 1),
+        )
+
     def _rf_best_params_from_state(state):
         """Return small preferred-feature indices without materialising RF data."""
         if "rf_best_params" in state:
@@ -6092,7 +6114,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return run_Model(
                 model_smoothed_best_params[:, [neuron_id]],
                 model_raw_best_params[:, [neuron_id]],
-                spks[:, :, [neuron_id]],
+                _single_neuron_model_spikes(spks, neuron_id),
                 w_i,
                 w_r,
                 dt1=dt1,
