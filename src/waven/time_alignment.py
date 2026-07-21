@@ -65,11 +65,16 @@ def load_two_photon_spikes(
     correct_positions: bool = True,
     save_dir: Optional[Path] = None,
     output_format: str = "npy",
+    stimulus_duration: Optional[float] = None,
 ) -> AlignedNeuralData:
     """Load and time-align two-photon (suite2p) spike data.
 
     When ``spks_path`` is set, reads pre-aligned ``spikes`` and sibling ``pos``
     caches in either NPY or Zarr format and skips suite2p alignment.
+
+    ``stimulus_duration`` is accepted to keep the shared alignment dispatcher
+    interface consistent with electrophysiology.  Two-photon alignment derives
+    its timing from the recorded TTL/frame data, so it is not used here.
     """
     from .data import neural as neural_io
 

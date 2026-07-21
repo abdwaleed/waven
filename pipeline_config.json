@@ -15,7 +15,7 @@
       "prefetch": true,
       "async_writer": true,
       "rf_gpu": true,
-      "multi_gpu": false
+      "multi_gpu": true
     }
   },
   "gabor_param": {
