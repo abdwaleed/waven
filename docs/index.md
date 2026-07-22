@@ -14,7 +14,9 @@ every downstream stage.
 3. **Gabor** — create legacy libraries or convolution kernel caches.
 4. **Wavelet Products** — make only the named Zarr product required by Coarse
    RF, Run Model, or Run Full Model.
-5. **Analysis** — run coarse RF, then either model path.
+5. **Analysis** — run Coarse RF, then use **Inspect Single Neuron**. Run
+   Model curves are added automatically when their coarse phase pair is ready;
+   Run Full Model remains an opt-in inspection refinement.
 
 ## Core data model
 

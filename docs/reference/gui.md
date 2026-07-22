@@ -45,6 +45,8 @@ checkboxes, used by the combined and scope-specific current-display actions.
 **Section B — Every Analyzed Neuron** exports only the selected graph axes for
 every cell or unit: its spike train, RF map, profiles, and tuning curves are
 separate folders with separate data bundles rather than a multi-panel figure.
+Its Run Model and Run Full Model amplitude, phase, and drift choices fit the
+selected model for each neuron before exporting those single-graph bundles.
 
 ## Conditional inputs
 
@@ -144,7 +146,9 @@ Workers report progress and completion through a main-thread callback queue;
 they do not call Tk/Tcl directly. This keeps the window interactive during
 cache creation and avoids the Windows minimize/restore deadlock caused by
 cross-thread Tk calls. The task status, terminal view, Cancel button, and
-normal window minimize/restore controls remain usable while processing.
+normal window minimize/restore controls remain usable while processing. The
+terminal toolbar's circular activity marker shows that work is still active;
+Waven intentionally does not replace the normal operating-system mouse cursor.
 
 | GUI action | Durable resume point |
 | --- | --- |
@@ -155,7 +159,7 @@ normal window minimize/restore controls remain usable while processing.
 | prepare Run Model phase caches | `coarse_model_real.zarr` and `coarse_model_imag.zarr` |
 | prepare Run Full Model phase caches | `dwt_videodata2_r.zarr` and `dwt_videodata2_i.zarr` |
 | run RF analysis | plot cache and RF payload |
-| run model plots | selected coarse `run_Model` or full `run_Full_Model` plot cache |
+| inspect single neuron | selected-neuron plots; current Run Model cache when its coarse phase pair is available; optional Full Model cache |
 | export figures | image files plus numeric metadata bundle |
 
 Status text should reflect the currently running stage. If a stage completed
@@ -163,11 +167,15 @@ successfully before interruption, rerunning the button should skip that valid
 artifact and continue with the next missing one.
 
 Completion is tracked per product, not by a coarse/full session selector.
-Preparing RF power unlocks Coarse RF analysis; preparing model phases unlocks
-Run Model; preparing full-model phases unlocks Run Full Model. Coarse RF
-analysis remains the common prerequisite because both model paths use its
-preferred feature locations as seeds. Editing a consumed movie, percentage,
-coverage, filter, or neural input relocks only dependent products.
+Preparing RF power unlocks Coarse RF analysis; preparing Run Model phases
+makes its tuning curves automatic during **Inspect Single Neuron**; preparing
+full-model phases makes the optional **Run Full Model** inspection checkbox
+available. Coarse RF analysis remains the common prerequisite because both
+model paths use its preferred feature locations as seeds. The automatic Run
+Model evaluates the compact coarse phase bank, whereas the opt-in Full Model
+uses the much larger full-resolution sigma/frequency phase bank. Editing a
+consumed movie, percentage, coverage, filter, or neural input relocks only
+dependent products.
 
 At startup and after loading a configuration, the GUI also scans compatible
 stimulus, neural, Gabor, and wavelet artifacts. A validated existing product
@@ -190,6 +198,14 @@ the prepared coarse stimulus movie; it computes one standard STA map per valid
 lag and marks the map with the greatest pixel variance. See
 [PSTH-weighted Spike-Triggered Averaging](psth-spike-triggered-averaging.md)
 for the method and exported arrays.
+
+**Inspect Single Neuron** always renders the selected neuron's RF and STA
+views. When `coarse_model_real.zarr` and `coarse_model_imag.zarr` are prepared
+for the current session, it also fits and adds the routine Run Model amplitude,
+phase, and drift curves automatically. The one inspection checkbox is **Run
+Full Model**: select it only when you need the more expensive refinement using
+the full-resolution real/imaginary phase pair with full sigma and frequency
+axes.
 The `Stimulus & Metadata` section controls movie downsampling before neural
 alignment and Gabor projection. Its only spatial control is a percentage slider that scales
 dimensions read from the movie:

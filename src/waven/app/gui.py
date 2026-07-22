@@ -335,7 +335,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ("prepare_full_model_cache", prepare_full_model_cache_var),
             ("prepare_run_model_cache", prepare_run_model_cache_var),
             ("run_full_model_on_inspect", run_full_model_on_inspect_var),
-            ("run_model_on_inspect", run_model_on_inspect_var),
             ("sampling_mode", sampling_mode_var),
             ("suite2p_output_dir", suite2p_output_dir_var),
             ("suite2p_subject_dirs", suite2p_subject_dirs_var),
@@ -457,9 +456,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         detail = task_state.get("detail") or "working"
         try:
             terminal_metrics_var.set(f"elapsed {elapsed} | {detail}")
+            _set_terminal_activity(True, "Working")
         except NameError:
             return
         root.after(1000, _refresh_task_heartbeat)
+
+    def _set_terminal_activity(active, label=None):
+        """Show task activity in the terminal without changing the OS cursor."""
+        try:
+            if active:
+                task_state["spinner_index"] = task_state.get("spinner_index", 0) + 1
+                glyph = ("◐", "◓", "◑", "◒")[task_state["spinner_index"] % 4]
+                terminal_activity_var.set(f"{glyph} {label or 'Working'}")
+            else:
+                terminal_activity_var.set("○ Idle")
+        except NameError:
+            # The terminal widgets are created after the task helpers.  Tasks
+            # cannot start before the UI is assembled, but this keeps startup
+            # and shutdown defensive.
+            pass
 
     def request_cancel_current_task():
         """Function for request cancel current task."""
@@ -601,10 +616,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         active_task["cancel_requested"] = False
         show_terminal_half()
         update_progress(None, f"Running: {task_name}")
-        try:
-            root.configure(cursor="watch")
-        except Exception:
-            pass
+        _set_terminal_activity(True, "Working")
         for btn in all_buttons:
             btn.configure(state=tk.DISABLED)
         try:
@@ -650,12 +662,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             btn_cancel_terminal.configure(state=tk.DISABLED, text="Cancel")
         except NameError:
             pass
+        _set_terminal_activity(False)
         for btn in all_buttons:
             btn.configure(state=tk.NORMAL)
-        try:
-            root.configure(cursor="")
-        except Exception:
-            pass
 
     def run_in_thread(func, task_name=None):
         """Function for run in thread.
@@ -1586,7 +1595,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "current_individual": {},
         "all_individual": {},
     }
-    model_tuning_export_kinds = {"model_amplitude", "model_phase", "model_drift"}
+    run_model_tuning_export_kinds = {
+        "run_model_amplitude", "run_model_phase", "run_model_drift",
+    }
+    run_full_model_tuning_export_kinds = {
+        "run_full_model_amplitude", "run_full_model_phase", "run_full_model_drift",
+    }
+    model_tuning_export_kinds = run_model_tuning_export_kinds | run_full_model_tuning_export_kinds
     model_tuning_export_availability = {kind: False for kind in model_tuning_export_kinds}
     export_file_vars = {}
     export_packaging_var = None
@@ -2533,6 +2548,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if rf_count <= 0:
             messagebox.showinfo("No Results", "Run Coarse RF Analysis before exporting individual graph types.")
             return
+        export_run_model = bool(selected_kinds & run_model_tuning_export_kinds)
+        export_run_full_model = bool(selected_kinds & run_full_model_tuning_export_kinds)
+        if export_run_model and not _run_model_phase_caches_present():
+            messagebox.showinfo(
+                "Run Model Caches Needed",
+                "The selected Run Model graphs require coarse_model_real.zarr and coarse_model_imag.zarr. "
+                "Select 'Prepare Run Model Phase Caches' in Prepare Analysis Caches and create them first.",
+            )
+            return
+        if export_run_full_model and not _run_full_model_phase_caches_present():
+            messagebox.showinfo(
+                "Run Full Model Caches Needed",
+                "The selected Run Full Model graphs require dwt_videodata2_r.zarr and dwt_videodata2_i.zarr. "
+                "Select 'Prepare Run Full Model Phase Caches' in Prepare Analysis Caches and create them first.",
+            )
+            return
         selected_dir = filedialog.askdirectory(title="Select Folder for Single-Graph Export for Every Analyzed Neuron")
         if not selected_dir:
             return
@@ -2553,6 +2584,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             btn_export_all_individual_graph_types.configure(state=tk.DISABLED)
         except NameError:
             pass
+        _set_terminal_activity(True, "Exporting")
+        batch_entry_values, batch_variable_values = _capture_worker_ui_values()
         try:
             batch_array_format = _worker_var_value("export_array_format", export_array_format_var, "npy")
         except (NameError, RuntimeError):
@@ -2576,6 +2609,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "failures": [],
             "sta_results": {},
             "sta_loading": False,
+            "model_snapshots": {},
+            "model_loading": False,
             "pending": {},
             "finished": 0,
             "finalizing": False,
@@ -2647,6 +2682,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
                         except NameError:
                             pass
+                        _set_terminal_activity(False)
                         messagebox.showerror(
                             "Export Packaging Failed", f"The files were written, but packaging failed: {error}\n\n{export_root}"
                         )
@@ -2658,6 +2694,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         btn_export_all_individual_graph_types.configure(state=tk.NORMAL)
                     except NameError:
                         pass
+                    _set_terminal_activity(False)
                     completed = total_neurons - len(state["failures"])
                     elapsed = time.perf_counter() - export_started
                     print(
@@ -2693,6 +2730,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 state["job"] += 1
                 state["neuron_id"] = 0
                 state["sta_results"].clear()
+                state["model_snapshots"].clear()
                 root.after(1, export_next_graph_type)
                 return
             if len(state["pending"]) >= batch_queue_limit:
@@ -2736,12 +2774,71 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         threading.Thread(target=compute_sta_batch, daemon=True).start()
                         return
                     sta_result = state["sta_results"].pop(neuron_id, None)
+                model_snapshots = state["model_snapshots"].pop(neuron_id, None)
+                if (export_run_model or export_run_full_model) and model_snapshots is None:
+                    if state["model_loading"]:
+                        return
+                    state["model_loading"] = True
+
+                    def compute_model_graphs(neuron=neuron_id):
+                        """Fit requested model curves without touching Tk widgets."""
+                        previous_entries = getattr(worker_ui_values, "entries", None)
+                        previous_variables = getattr(worker_ui_values, "variables", None)
+                        worker_ui_values.entries = batch_entry_values
+                        worker_ui_values.variables = batch_variable_values
+                        try:
+                            titled_figures = []
+                            if export_run_model:
+                                titled_figures.extend(
+                                    plot_run_model_outputs(neuron, render=False, reuse_cache=False)
+                                )
+                            if export_run_full_model:
+                                titled_figures.extend(
+                                    plot_run_full_model_outputs(neuron, render=False, reuse_cache=False)
+                                )
+                            snapshots = _model_tuning_export_snapshots(
+                                titled_figures,
+                                array_format=batch_array_format,
+                                file_options=batch_file_options,
+                            )
+                        except Exception as exc:
+                            def record_model_failure(error=str(exc), failed_neuron=neuron):
+                                state["model_loading"] = False
+                                state["failures"].append(
+                                    {"kind": kind, "neuron_id": failed_neuron, "error": error}
+                                )
+                                print(f"[EXPORT] Skipped {kind} neuron {failed_neuron}: {error}")
+                                state["finished"] += 1
+                                report_finished(kind, 0)
+                                state["neuron_id"] += 1
+                                root.after(1, export_next_graph_type)
+                            schedule_on_ui(record_model_failure)
+                        else:
+                            def use_model_graphs(finished_neuron=neuron, results=snapshots):
+                                state["model_loading"] = False
+                                state["model_snapshots"][finished_neuron] = results
+                                print(
+                                    f"[EXPORT] Prepared requested model tuning curves for neuron {finished_neuron}."
+                                )
+                                root.after(1, export_next_graph_type)
+                            schedule_on_ui(use_model_graphs)
+                        finally:
+                            worker_ui_values.entries = previous_entries
+                            worker_ui_values.variables = previous_variables
+
+                    threading.Thread(target=compute_model_graphs, daemon=True).start()
+                    return
                 # Export does not need Tk canvas redraws; the exporter draws
                 # only the figures it writes, below.
                 draw(neuron_id, switch_tab=False, sta_result=sta_result, for_export=True)
                 neuron_dir = os.path.join(export_root, "rf", f"n{neuron_id:05d}")
                 os.makedirs(neuron_dir, exist_ok=True)
-                snapshots = _snapshot_export_records(_active_export_records(tab_name))
+                base_records = [
+                    record for record in _active_export_records(tab_name)
+                    if classify_export_record(record.get("tab"), record.get("title")) not in model_tuning_export_kinds
+                ]
+                snapshots = _snapshot_export_records(base_records)
+                snapshots.extend(model_snapshots or [])
                 future = state["writer_pool"].submit(
                     _export_individual_axes,
                     snapshots, neuron_dir, selected_kinds,
@@ -5839,10 +5936,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 sta_render_in_progress[0] = True
                 btn_runRF.configure(state=tk.DISABLED, text="Preparing Single Neuron...")
                 try:
-                    root.configure(cursor="watch")
                     progress_bar.configure(mode="indeterminate")
                     progress_bar.start(12)
                     status_var.set(f"Inspecting neuron {neuron_id} - preparing PSTH-weighted STA")
+                    _set_terminal_activity(True, "Inspecting neuron")
                     root.update_idletasks()
                 except Exception:
                     pass
@@ -5865,8 +5962,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             try:
                                 progress_bar.stop()
                                 progress_bar.configure(mode="determinate", value=0)
-                                root.configure(cursor="")
                                 status_var.set("Ready")
+                                _set_terminal_activity(False)
                             except Exception:
                                 pass
                             if on_complete is not None:
@@ -5978,12 +6075,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 """Function for click RF."""
                 try:
                     neuron_id = _selected_neuron_id()
-                    include_model = bool(_worker_var_value("run_model_on_inspect", run_model_on_inspect_var, False))
+                    include_model = _run_model_phase_caches_present()
                     include_full = bool(_worker_var_value("run_full_model_on_inspect", run_full_model_on_inspect_var, False))
+                    if not include_model:
+                        print(
+                            "[INSPECT] Run Model tuning curves were not queued because the coarse model phase "
+                            "caches are not prepared. Select 'Prepare Run Model Phase Caches' and run "
+                            "Prepare Analysis Caches to add them automatically on the next inspection."
+                        )
+                    if include_full and not _run_full_model_phase_caches_present():
+                        include_full = False
+                        print(
+                            "[INSPECT] Run Full Model tuning curves were not queued because the full phase "
+                            "caches are not prepared. Select 'Prepare Run Full Model Phase Caches' and run "
+                            "Prepare Analysis Caches first."
+                        )
                     _clear_model_diagnostic_figures()
                     queued_models = [
                         label for enabled, label in (
-                            (include_model, "Run Model"),
+                            (include_model, "Run Model (automatic)"),
                             (include_full, "Run Full Model"),
                         ) if enabled
                     ]
@@ -6329,7 +6439,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # next graph so Windows continues to paint the busy/progress state.
             root.after_idle(lambda: render_next(index + 1))
 
-        root.after(0, render_next)
+        # This helper is normally called from a model worker.  Queue its first
+        # Tk operation through the central dispatcher rather than invoking
+        # ``after`` on a widget from that worker.
+        schedule_on_ui(render_next)
 
     def _clear_model_diagnostic_figures():
         """Remove stale optional-model panels before inspecting another neuron."""
@@ -6340,7 +6453,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 record.get("tab") == "Individual neuron"
                 and (
                     classify_export_record(record.get("tab"), title)
-                    in {"model_amplitude", "model_phase", "model_drift"}
+                    in model_tuning_export_kinds
                     or "run model" in title.casefold()
                     or "run full model" in title.casefold()
                 )
@@ -6534,7 +6647,43 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             },
         }
 
-    def plot_run_model_outputs():
+    def _run_model_phase_caches_present():
+        """Return whether the lightweight Run Model phase pair is available."""
+        try:
+            state = _require_rf_state()
+            wavelet_dir = state.get("wavelet_dir")
+            paths = (
+                os.path.join(wavelet_dir, "coarse_model_real.zarr"),
+                os.path.join(wavelet_dir, "coarse_model_imag.zarr"),
+            )
+        except (AttributeError, TypeError, RuntimeError):
+            return False
+        return all(os.path.exists(path) for path in paths)
+
+    def _run_full_model_phase_caches_present():
+        """Return whether the opt-in Full Model real/imaginary phase pair exists."""
+        try:
+            wavelet_dir = _wavelet_folder("full")
+            paths = (
+                os.path.join(wavelet_dir, "dwt_videodata2_r.zarr"),
+                os.path.join(wavelet_dir, "dwt_videodata2_i.zarr"),
+            )
+        except (AttributeError, TypeError, RuntimeError):
+            return False
+        return all(os.path.exists(path) for path in paths)
+
+    def _model_tuning_export_snapshots(titled_figures, array_format, file_options):
+        """Serialize model-only figures without adding them to the Tk display."""
+        return [
+            _snapshot_export_record(
+                {"tab": "Individual neuron", "title": title, "figure": figure},
+                array_format=array_format,
+                file_options=file_options,
+            )
+            for title, figure in titled_figures
+        ]
+
+    def plot_run_model_outputs(neuron_id=None, render=True, reuse_cache=True):
         """Function for plot run model outputs.
 
         Returns:
@@ -6542,7 +6691,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """
         _ensure_model_imports("run_Model plot capture")
         state = _require_rf_state()
-        neuron_id = _selected_neuron_id()
+        neuron_id = _selected_neuron_id() if neuron_id is None else int(neuron_id)
         spks = _model_spikes_from_state(state)
         split_settings = _model_split_settings(state)
         fit_minutes = _model_fit_minutes(state)
@@ -6562,14 +6711,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "fit_minutes": fit_minutes,
             **split_settings,
         }
-        cached = _get_cached_entry("run_model", neuron_id=neuron_id, extra=cache_extra)
+        cached = _get_cached_entry("run_model", neuron_id=neuron_id, extra=cache_extra) if reuse_cache else None
         if cached:
-            _render_figure_records(
-                cached.get("figures"),
-                message=f"Loaded run_Model plots for neuron {neuron_id} from cache.",
-                clear=False,
-            )
-            return
+            if render:
+                _render_figure_records(
+                    cached.get("figures"),
+                    message=f"Loaded Run Model plots for neuron {neuron_id} from cache.",
+                    clear=False,
+                )
+            return []
         wavelet_dir = state["wavelet_dir"]
         from ..storage.array_store import load_array_with_ram_acceleration
         w_r = load_array_with_ram_acceleration(
@@ -6675,27 +6825,30 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         gc.collect()
         model_payload = _model_result_payload("run_Model", result, neuron_id)
         tuning_figures = _paper_model_tuning_figures("Run Model", model_payload)
-        figures = [figure for _feature, figure in tuning_figures]
         for feature, fig in tuning_figures:
             _set_figure_export_payload(fig, _model_tuning_export_payload(model_payload, feature))
+        titled_figures = [
+            (f"Run Model {feature} tuning neuron {neuron_id}", fig)
+            for feature, fig in tuning_figures
+        ]
         _put_cached_entry(
             "run_model",
             {
                 "figures": _figure_records(
                     [
-                        ("individual", f"Run Model {feature} tuning neuron {neuron_id}", fig)
-                        for feature, fig in tuning_figures
+                        ("individual", title, fig)
+                        for title, fig in titled_figures
                     ]
                 )
             },
             neuron_id=neuron_id,
             extra=cache_extra,
         )
-        _append_model_figures(
-            [(f"Run Model {feature} tuning neuron {neuron_id}", fig) for feature, fig in tuning_figures]
-        )
+        if render:
+            _append_model_figures(titled_figures)
+        return titled_figures
 
-    def plot_run_full_model_outputs():
+    def plot_run_full_model_outputs(neuron_id=None, render=True, reuse_cache=True):
         """Function for plot run full model outputs.
 
         Returns:
@@ -6703,7 +6856,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """
         _ensure_model_imports("run_Full_Model plot capture")
         state = _require_rf_state()
-        neuron_id = _selected_neuron_id()
+        neuron_id = _selected_neuron_id() if neuron_id is None else int(neuron_id)
         spks = _model_spikes_from_state(state)
         split_settings = _model_split_settings(state)
         fit_minutes = _model_fit_minutes(state)
@@ -6719,14 +6872,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "fit_minutes": fit_minutes,
             **split_settings,
         }
-        cached = _get_cached_entry("run_full_model", neuron_id=neuron_id, extra=cache_extra)
+        cached = _get_cached_entry("run_full_model", neuron_id=neuron_id, extra=cache_extra) if reuse_cache else None
         if cached:
-            _render_figure_records(
-                cached.get("figures"),
-                message=f"Loaded run_Full_Model plots for neuron {neuron_id} from cache.",
-                clear=False,
-            )
-            return
+            if render:
+                _render_figure_records(
+                    cached.get("figures"),
+                    message=f"Loaded Run Full Model plots for neuron {neuron_id} from cache.",
+                    clear=False,
+                )
+            return []
         raw_best_params = _rf_best_params_from_state(state)
         smoothed_best_params = smooth_best_positions(
             raw_best_params,
@@ -6816,25 +6970,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         result = call_full_model()
         model_payload = _model_result_payload("run_Full_Model", result, neuron_id)
         tuning_figures = _paper_model_tuning_figures("Run Full Model", model_payload)
-        figures = [figure for _feature, figure in tuning_figures]
         for feature, fig in tuning_figures:
             _set_figure_export_payload(fig, _model_tuning_export_payload(model_payload, feature))
+        titled_figures = [
+            (f"Run Full Model {feature} tuning neuron {neuron_id}", fig)
+            for feature, fig in tuning_figures
+        ]
         _put_cached_entry(
             "run_full_model",
             {
                 "figures": _figure_records(
                     [
-                        ("individual", f"Run Full Model {feature} tuning neuron {neuron_id}", fig)
-                        for feature, fig in tuning_figures
+                        ("individual", title, fig)
+                        for title, fig in titled_figures
                     ]
                 )
             },
             neuron_id=neuron_id,
             extra=cache_extra,
         )
-        _append_model_figures(
-            [(f"Run Full Model {feature} tuning neuron {neuron_id}", fig) for feature, fig in tuning_figures]
-        )
+        if render:
+            _append_model_figures(titled_figures)
+        return titled_figures
 
     def plot_selected_model_outputs():
         """Run the model plotter that matches the selected analysis scale."""
@@ -7658,6 +7815,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     right_pane.add(frame_log, minsize=220, stretch="always")
     terminal_status_var = tk.StringVar(value="Task: idle")
     terminal_metrics_var = tk.StringVar(value="")
+    terminal_activity_var = tk.StringVar(value="○ Idle")
 
     terminal_toolbar = ctk.CTkFrame(frame_log, fg_color="transparent")
     terminal_toolbar.pack(fill=tk.X, padx=10, pady=(8, 4))
@@ -7681,6 +7839,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         font=ctk.CTkFont(size=12),
     )
     terminal_metrics_label.pack(side=tk.LEFT, padx=(14, 0))
+    terminal_activity_label = ctk.CTkLabel(
+        terminal_toolbar,
+        textvariable=terminal_activity_var,
+        text_color=primary_btn,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    )
+    terminal_activity_label.pack(side=tk.LEFT, padx=(14, 0))
     btn_cancel_terminal = ctk.CTkButton(
         terminal_toolbar,
         text="Cancel",
@@ -9156,7 +9321,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.CTkLabel(
         model_settings_frame,
         text=(
-            "These settings control the selected neuron's Run Model and Run Full Model fit. "
+            "These settings control the selected neuron's automatic Run Model fit and optional Run Full Model fit. "
             "Full-model filter sizes change the Full Model cache; trial settings only change fitting/evaluation."
         ),
         text_color=muted_text,
@@ -9213,23 +9378,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     btn_runRF.pack(fill=tk.X)
 
-    run_model_on_inspect_var = tk.BooleanVar(value=False)
     run_full_model_on_inspect_var = tk.BooleanVar(value=False)
     inspect_model_options = ctk.CTkFrame(frame_analysis, fg_color="transparent")
     inspect_model_options.pack(fill=tk.X, pady=(6, 0))
     ctk.CTkCheckBox(
         inspect_model_options,
-        text="Also create Run Model amplitude, phase, and drift tuning curves (coarse phase cache)",
-        variable=run_model_on_inspect_var,
-        onvalue=True,
-        offvalue=False,
-        text_color=text_color,
-        checkbox_width=18,
-        checkbox_height=18,
-    ).pack(anchor="w", pady=2)
-    ctk.CTkCheckBox(
-        inspect_model_options,
-        text="Also create Run Full Model amplitude, phase, and drift tuning curves (full phase cache)",
+        text="Also run Full Model and create its amplitude, phase, and drift tuning curves",
         variable=run_full_model_on_inspect_var,
         onvalue=True,
         offvalue=False,
@@ -9240,8 +9394,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.CTkLabel(
         inspect_model_options,
         text=(
-            "Selected paper-aligned tuning curves are added to Individual Neuron and their export choices unlock only after generation. "
-            "Both models require Coarse RF; Full Model also requires the Full Model cache."
+            "Inspect Single Neuron automatically adds the fast Run Model tuning curves when its coarse real/imaginary "
+            "phase caches are prepared. Run Full Model is opt-in: it refines the fit with the much larger full-resolution "
+            "phase bank (including full sigma and frequency axes), so it needs the Full Model caches and can take much longer. "
+            "Both use the Coarse RF result as their seed."
         ),
         text_color=muted_text,
         justify="left",
@@ -9369,7 +9525,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         options_frame.pack(fill=tk.X)
         variables = export_selection_vars[selection_name]
         for index, (kind, label) in enumerate(options):
-            is_model_tuning = selection_name == "current_individual" and kind in model_tuning_export_kinds
+            is_model_tuning = kind in model_tuning_export_kinds
             variable = tk.BooleanVar(value=not is_model_tuning)
             variables[kind] = variable
             checkbox = ctk.CTkCheckBox(
@@ -9383,7 +9539,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
             checkbox.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 18), pady=2)
             export_selection_widgets[selection_name][kind] = checkbox
-            if is_model_tuning:
+            if selection_name == "current_individual" and is_model_tuning:
                 checkbox.configure(state=tk.DISABLED)
         for column in range(2):
             options_frame.columnconfigure(column, weight=1)
@@ -9454,7 +9610,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ).pack(anchor="w", pady=(12, 1))
     ctk.CTkLabel(
         frame_export,
-        text="Exports one graph per folder for every neuron. A spike train, RF map, azimuth, elevation, and each tuning curve are never combined into one graph-data bundle.",
+        text=(
+            "Exports one graph per folder for every neuron. Run Model and Run Full Model amplitude, phase, and drift choices "
+            "fit that selected model separately for every neuron; Full Model uses the larger full-resolution phase cache. "
+            "A spike train, RF map, azimuth, elevation, and each tuning curve are never combined into one graph-data bundle."
+        ),
         text_color=muted_text, wraplength=650, justify="left",
     ).pack(anchor="w", pady=(0, 4))
     add_export_checkbox_group(

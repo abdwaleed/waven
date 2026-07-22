@@ -16,8 +16,8 @@ independent, Zarr-backed products for their consumers:
 | Button | Consumer | Durable artifact(s) | Shape |
 | --- | --- | --- | --- |
 | **Prepare Coarse RF Power Cache** | Run Coarse RF Analysis | `coarse_rf_power.zarr` | `(time, x, y, orientation, sigma)` |
-| **Prepare Run Model Phase Caches** | Run Model (Coarse RF) | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | `(time, x, y, orientation, sigma)` each |
-| **Prepare Run Full Model Phase Caches** | Run Full Model | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | `(time, x, y, orientation, sigma_full, frequency)` each |
+| **Prepare Run Model Phase Caches** | automatic Run Model curves in **Inspect Single Neuron** | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | `(time, x, y, orientation, sigma)` each |
+| **Prepare Run Full Model Phase Caches** | optional **Run Full Model** inspection and every-neuron exports | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | `(time, x, y, orientation, sigma_full, frequency)` each |
 
 This split is intentional. Coarse RF correlates neural activity with wavelet
 power; it does not need to keep real and imaginary model phases. Run Model

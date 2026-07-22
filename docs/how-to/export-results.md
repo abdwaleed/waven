@@ -1,15 +1,18 @@
 # Export results
 
 Export is the final, optional GUI stage. It writes files from completed
-analysis results; it does not change caches, rerun analysis, or make an
-incomplete upstream stage valid.
+analysis results and does not make an incomplete upstream stage valid. The
+every-neuron model-curve choices are the exception: they fit the selected Run
+Model or Run Full Model for each neuron before writing those requested curves.
 
 ## Before clicking Export
 
 | Input/control | Type | Required? | Effect | Output type |
 | --- | --- | --- | --- | --- |
 | completed Coarse RF result | analysis result | Yes | Supplies current population/selected-neuron plots and numerical payloads | figures plus arrays/metadata |
-| optional model result | analysis result | Only for model plots | Adds its currently displayed diagnostics to eligible exports | figures plus arrays/metadata |
+| Run Model phase pair | `coarse_model_real.zarr` + `coarse_model_imag.zarr` | Only for every-neuron Run Model curves | Fits amplitude, phase, and drift curves for each exported neuron | figures plus arrays/metadata |
+| Run Full Model phase pair | `dwt_videodata2_r.zarr` + `dwt_videodata2_i.zarr` | Only for every-neuron Run Full Model curves | Fits the full-resolution amplitude, phase, and drift curves for each exported neuron | figures plus arrays/metadata |
+| optional displayed model result | analysis result | Only for current-display model plots | Adds its currently displayed diagnostics to eligible exports | figures plus arrays/metadata |
 | graph-type checkboxes | Boolean selections | Yes for each action | Choose visible graph/data payloads to write | selected graph bundles |
 | array format | `npy`, `zarr`, or `both` | Optional; defaults shown in GUI | Format for reusable numerical arrays only | `.npy`, `.zarr`, or both |
 | export preset | Quick review, Data bundle, Full archive | Optional | Controls packaging and metadata density | folders and optional archives |
@@ -29,9 +32,12 @@ combined export includes only the checked graph types from each view.
 
 **Section B — Every Analyzed Neuron** has **Export Selected Single-Graph Files
 for Every Neuron**. Its checkboxes select spike trains, RF maps, elevation,
-azimuth, orientation/size/frequency tuning, and PSTH-weighted STA lag maps. It creates one
-folder per graph: a multi-panel tuning dashboard is never stored as a single
-graph-data bundle.
+azimuth, orientation/size/frequency tuning, PSTH-weighted STA lag maps, and
+independent Run Model and Run Full Model amplitude, phase, and drift curves.
+Selecting a model curve fits that model for every neuron; Run Full Model is
+slower because it uses the larger full-resolution sigma/frequency phase bank.
+It creates one folder per graph: a multi-panel tuning dashboard is never stored
+as a single graph-data bundle.
 
 Each exported graph can include:
 
@@ -67,12 +73,15 @@ format selector applies only to the legacy per-graph layout.
 
 For a selected STA export, Waven calculates a small RAM-bounded group of
 neurons at a time using vectorized matrix products, then writes each neuron's
-usual PNG, SVG, pickle, array, and manifest files. Batch export also avoids
-unneeded Tk canvas refreshes; the saved graph contents are unchanged. It keeps
-a bounded queue of up to four prepared neurons with two writer workers by
-default, so rendering and storage can overlap without accumulating every
-neuron in RAM. Set `WAVEN_EXPORT_WORKERS` to a value from `1` to `4` only when
-you have measured that your CPU and destination drive benefit from it.
+usual PNG, SVG, pickle, array, and manifest files. When model curves are
+selected, Waven fits Run Model and/or Run Full Model one neuron at a time before
+that neuron's export snapshot is queued; this keeps Tk responsive and avoids
+holding all model figures in RAM. Batch export avoids unneeded Tk canvas
+refreshes and keeps a bounded queue of up to four prepared neurons with two
+writer workers by default, so rendering and storage can overlap without
+accumulating every neuron in RAM. Set `WAVEN_EXPORT_WORKERS` to a value from
+`1` to `4` only when you have measured that your CPU and destination drive
+benefit from it.
 
 The terminal reports per-neuron export timings for restoring figures, drawing,
 PNG/SVG output, numeric arrays, pickles, manifests, file count, and bytes. Use

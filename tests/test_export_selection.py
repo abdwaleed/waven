@@ -15,9 +15,9 @@ def test_current_display_records_are_classified_for_checkbox_selection():
     assert classify_export_record("Individual neuron", "Spike Train") == "spike_train"
     assert classify_export_record("Individual neuron", "Selected Neuron Tuning") == "tuning_dashboard"
     assert classify_export_record("Individual neuron", "PSTH-weighted Spike-Triggered Averages") == "sta"
-    assert classify_export_record("Individual neuron", "Run Full Model Amplitude tuning neuron 7") == "model_amplitude"
-    assert classify_export_record("Individual neuron", "Run Model Phase tuning neuron 7") == "model_phase"
-    assert classify_export_record("Individual neuron", "Run Full Model Drift tuning neuron 7") == "model_drift"
+    assert classify_export_record("Individual neuron", "Run Full Model Amplitude tuning neuron 7") == "run_full_model_amplitude"
+    assert classify_export_record("Individual neuron", "Run Model Phase tuning neuron 7") == "run_model_phase"
+    assert classify_export_record("Individual neuron", "Run Full Model Drift tuning neuron 7") == "run_full_model_drift"
 
 
 def test_batch_axis_classification_keeps_dashboard_graphs_separate():
@@ -28,6 +28,12 @@ def test_batch_axis_classification_keeps_dashboard_graphs_separate():
         "Individual neuron", "Selected Neuron Tuning", "Orientation tuning from firing rate (OSI 0.4)"
     ) == "orientation_firing_rate"
     assert classify_individual_axis("Individual neuron", "PSTH-weighted STA", "STA lag 100 ms") == "sta"
+    assert classify_individual_axis(
+        "Individual neuron", "Run Model Amplitude tuning neuron 1", "Run Model Amplitude tuning - neuron 1"
+    ) == "run_model_amplitude"
+    assert classify_individual_axis(
+        "Individual neuron", "Run Full Model Drift tuning neuron 1", "Run Full Model Drift tuning - neuron 1"
+    ) == "run_full_model_drift"
 
 
 def test_export_safe_name_limits_long_titles_without_collisions():
@@ -65,7 +71,7 @@ def test_model_tuning_payload_contains_only_the_created_curve():
         "metrics": [0.1, 0.2],
     }
 
-    graph = graph_payload(payload, "model_amplitude")
+    graph = graph_payload(payload, "run_model_amplitude")
 
     assert graph["paper_tuning"]["curve"] == curve
     assert "metrics" not in graph

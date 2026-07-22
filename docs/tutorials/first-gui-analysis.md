@@ -12,7 +12,7 @@ flowchart LR
   C --> E["4. Prepare a wavelet product"]
   D --> E
   E --> F["5. Run Coarse RF Analysis"]
-  F --> G["Optional: Run Model / Run Full Model"]
+  F --> G["Inspect a neuron: automatic Run Model; optional Full Model"]
   F --> H["6. Export figures and data"]
   G --> H
 ```
@@ -137,8 +137,8 @@ Prepare only the consumer-specific wavelet product you need. These cache types a
 | Button | Output | Enables |
 | --- | --- | --- |
 | Prepare Coarse RF Power Cache | `coarse_rf_power.zarr` | **Run Coarse RF Analysis** |
-| Prepare Run Model Phase Caches | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | **Run Model (Coarse RF)** |
-| Prepare Run Full Model Phase Caches | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | **Run Full Model** |
+| Prepare Run Model Phase Caches | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | automatic Run Model curves during **Inspect Single Neuron** |
+| Prepare Run Full Model Phase Caches | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | the optional **Run Full Model** checkbox during inspection |
 
 Every analysis requires the first row. Both model actions additionally require the Coarse RF result because it seeds their later feature search.
 
@@ -149,22 +149,24 @@ Click **Run Coarse RF Analysis** first. It combines the aligned neural cache wit
 | Button | Required inputs | Result |
 | --- | --- | --- |
 | Run Coarse RF Analysis | prepared stimulus, neural cache, coarse-RF power cache | correlation RF maps, preferred features, orientation/size diagnostics, OSI/gOSI summaries |
-| Run Model (Coarse RF) | Coarse RF result + Run Model phase pair | coarse model fit and diagnostics |
-| Run Full Model | Coarse RF result + full-model phase pair | full-model refinement and diagnostics |
+| Inspect Single Neuron | Coarse RF result; Run Model phase pair is optional | RF, tuning, and PSTH/STA plots; if the Run Model pair exists, its amplitude, phase, and drift curves are added automatically |
+| Inspect Single Neuron + Run Full Model checkbox | Coarse RF result + full-model phase pair | the same inspection plus a full-resolution model refinement and its amplitude, phase, and drift curves |
 
-RF maps and preferred-feature curves are correlation-based diagnostics. OSI/gOSI are calculated separately from frame-aligned neural activity at the preferred stimulus feature. Select an individual neuron/unit to inspect its RF, tuning curves, and PSTH-weighted STA panels.
+RF maps and preferred-feature curves are correlation-based diagnostics. OSI/gOSI are calculated separately from frame-aligned neural activity at the preferred stimulus feature. Select an individual neuron/unit to inspect its RF, tuning curves, and PSTH-weighted STA panels. The automatic **Run Model** uses the compact coarse real/imaginary phase pair and is intended for routine single-neuron inspection. **Run Full Model** is deliberately opt-in because it refines the fit against the substantially larger full-resolution phase bank, including its full sigma and frequency axes.
 
 ## 6. Export
 
-Export packages computed results; it does not rerun analysis.
+Export packages computed results. The all-neuron model-curve choices are the
+exception: they fit the selected Run Model or Run Full Model for each neuron
+before writing those requested graph bundles.
 
 | Section | Scope | Control | Output |
 | --- | --- | --- | --- |
 | A — Current Display | visible all-neuron and/or selected-neuron plots | independent graph-type checkboxes | PNG/SVG plus selected numeric data and manifests |
-| B — Every Analyzed Neuron | one selected graph type for all units | graph-type checkboxes | graph/data bundle per neuron/unit; can be large |
+| B — Every Analyzed Neuron | one selected graph type for all units | graph-type checkboxes | graph/data bundle per neuron/unit; selected Run Model/Run Full Model curves are fitted for each neuron and can be large |
 | Presets | either section | Quick review, Data bundle, Full archive | controls packaging, not analysis |
 
-Choose NPY, Zarr, or both for reusable arrays; images and JSON metadata remain separate. **Quick review** is for visual QA, **Data bundle** groups each neuron’s numerical data, and **Full archive** retains detailed per-graph structure. See [Export results](../how-to/export-results.md) for file and folder details.
+Choose NPY, Zarr, or both for reusable arrays; images and JSON metadata remain separate. The all-neuron export has independent Run Model and Run Full Model amplitude, phase, and drift choices; selecting one computes that model for every exported neuron. **Quick review** is for visual QA, **Data bundle** groups each neuron’s numerical data, and **Full archive** retains detailed per-graph structure. See [Export results](../how-to/export-results.md) for file and folder details.
 
 ## Common first-run mistakes
 

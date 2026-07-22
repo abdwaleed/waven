@@ -21,9 +21,12 @@ CURRENT_INDIVIDUAL_GRAPH_OPTIONS = (
     ("spike_train", "Spike train"),
     ("tuning_dashboard", "Tuning dashboard"),
     ("sta", "PSTH-weighted STA lag maps"),
-    ("model_amplitude", "Model amplitude tuning (when generated)"),
-    ("model_phase", "Model phase tuning (when generated)"),
-    ("model_drift", "Model drift tuning (when generated)"),
+    ("run_model_amplitude", "Run Model amplitude tuning (when generated)"),
+    ("run_model_phase", "Run Model phase tuning (when generated)"),
+    ("run_model_drift", "Run Model drift tuning (when generated)"),
+    ("run_full_model_amplitude", "Run Full Model amplitude tuning (when generated)"),
+    ("run_full_model_phase", "Run Full Model phase tuning (when generated)"),
+    ("run_full_model_drift", "Run Full Model drift tuning (when generated)"),
     ("other", "Other individual-neuron graphs"),
 )
 
@@ -37,6 +40,12 @@ SINGLE_NEURON_GRAPH_OPTIONS = (
     ("size_tuning", "Size tuning"),
     ("spatial_frequency", "Spatial-frequency tuning"),
     ("sta", "PSTH-weighted STA lag maps"),
+    ("run_model_amplitude", "Run Model amplitude tuning (fit for every neuron)"),
+    ("run_model_phase", "Run Model phase tuning (fit for every neuron)"),
+    ("run_model_drift", "Run Model drift tuning (fit for every neuron)"),
+    ("run_full_model_amplitude", "Run Full Model amplitude tuning (fit for every neuron)"),
+    ("run_full_model_phase", "Run Full Model phase tuning (fit for every neuron)"),
+    ("run_full_model_drift", "Run Full Model drift tuning (fit for every neuron)"),
     ("other", "Other individual graphs"),
 )
 
@@ -57,13 +66,17 @@ def classify_export_record(tab: str, title: str) -> str:
         return "sta"
     if "spike" in title:
         return "spike_train"
-    is_model_tuning = ("run model" in title or "run full model" in title) and "tuning" in title
-    if is_model_tuning and "amplitude" in title:
-        return "model_amplitude"
-    if is_model_tuning and "phase" in title:
-        return "model_phase"
-    if is_model_tuning and "drift" in title:
-        return "model_drift"
+    model_prefix = None
+    if "run full model" in title and "tuning" in title:
+        model_prefix = "run_full_model"
+    elif "run model" in title and "tuning" in title:
+        model_prefix = "run_model"
+    if model_prefix and "amplitude" in title:
+        return f"{model_prefix}_amplitude"
+    if model_prefix and "phase" in title:
+        return f"{model_prefix}_phase"
+    if model_prefix and "drift" in title:
+        return f"{model_prefix}_drift"
     if "tuning" in title:
         return "tuning_dashboard"
     return "other"
@@ -72,6 +85,17 @@ def classify_export_record(tab: str, title: str) -> str:
 def classify_individual_axis(tab: str, figure_title: str, axis_title: str) -> str:
     """Return the category for one graph/axis in an individual-neuron figure."""
     title = str(axis_title or figure_title or "").casefold()
+    model_prefix = None
+    if "run full model" in title:
+        model_prefix = "run_full_model"
+    elif "run model" in title:
+        model_prefix = "run_model"
+    if model_prefix and "amplitude" in title:
+        return f"{model_prefix}_amplitude"
+    if model_prefix and "phase" in title:
+        return f"{model_prefix}_phase"
+    if model_prefix and "drift" in title:
+        return f"{model_prefix}_drift"
     if "sta" in title or "spike-triggered" in title:
         return "sta"
     if "spike" in title:
@@ -116,9 +140,12 @@ _PAYLOAD_KEYS = {
         "sta_maps", "sta_lag_frames", "sta_lag_ms", "sta_variances",
         "sta_peak_lag_frame", "sta_peak_lag_ms", "sta_peak_variance",
     ),
-    "model_amplitude": ("paper_tuning",),
-    "model_phase": ("paper_tuning",),
-    "model_drift": ("paper_tuning",),
+    "run_model_amplitude": ("paper_tuning",),
+    "run_model_phase": ("paper_tuning",),
+    "run_model_drift": ("paper_tuning",),
+    "run_full_model_amplitude": ("paper_tuning",),
+    "run_full_model_phase": ("paper_tuning",),
+    "run_full_model_drift": ("paper_tuning",),
 }
 
 
