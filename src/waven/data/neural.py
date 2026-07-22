@@ -6,6 +6,7 @@ Stimulus wavelet arrays are handled by :mod:`waven.stimulus`.
 """
 import os
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import matplotlib
 
@@ -27,6 +28,97 @@ from ..runtime.performance import (
     cpu_threadpool_scope,
     two_photon_io_worker_count,
 )
+
+
+def resolve_suite2p_output_dir(path, n_planes):
+    """Resolve a Suite2p output root, honoring an optional GUI override.
+
+    The loader needs the directory containing ``plane0``, ``plane1``, and so
+    on, not the folder of raw TIFF recordings.  ``WAVEN_SUITE2P_OUTPUT_DIR``
+    lets the GUI use an output folder that is separate from the timeline-data
+    root without changing the established command-line configuration contract.
+    """
+    override = os.environ.get("WAVEN_SUITE2P_OUTPUT_DIR", "").strip()
+    requested = Path(path)
+    candidates = [Path(override)] if override else []
+    candidates.append(requested)
+    # Cortex Lab Suite2p commonly stores outputs at subject/date/suite2p,
+    # while the GUI's raw experiment folder is subject/date/experiment-number.
+    # Accept both layouts without asking users to duplicate large outputs.
+    if requested.name == "suite2p" and len(requested.parents) >= 2:
+        legacy_date_root = requested.parent.parent / "suite2p"
+        if legacy_date_root not in candidates:
+            candidates.append(legacy_date_root)
+    for candidate in candidates:
+        if (candidate / "plane0").is_dir():
+            return candidate
+        if candidate.name == "plane0" and candidate.is_dir():
+            return candidate.parent
+    return candidates[0]
+
+
+def validate_suite2p_output(path, n_planes):
+    """Return a checked Suite2p output root or raise an actionable error."""
+    root = resolve_suite2p_output_dir(path, n_planes)
+    required_files = ("spks.npy", "iscell.npy", "stat.npy")
+    missing = []
+    for plane in range(int(n_planes)):
+        plane_dir = root / f"plane{plane}"
+        missing.extend(
+            str(plane_dir / filename)
+            for filename in required_files
+            if not (plane_dir / filename).is_file()
+        )
+    if missing:
+        expected = root / "plane0"
+        raise FileNotFoundError(
+            "Two-photon neural-cache creation requires completed Suite2p output, "
+            "not raw TIFF files alone. Expected each plane to contain spks.npy, "
+            "iscell.npy, and stat.npy; for example: "
+            f"{expected}. Missing: {', '.join(missing[:6])}. "
+            "Run Suite2p first, then set the optional Suite2p output folder in "
+            "Advanced 2-photon data discovery if it is not at the default location."
+        )
+
+    for plane in range(int(n_planes)):
+        plane_dir = root / f"plane{plane}"
+        spikes = np.load(plane_dir / "spks.npy", mmap_mode="r")
+        iscell = np.load(plane_dir / "iscell.npy", mmap_mode="r")
+        stat = np.load(plane_dir / "stat.npy", allow_pickle=True)
+        if spikes.ndim != 2 or iscell.ndim != 2 or iscell.shape[1] < 1:
+            raise ValueError(
+                f"Invalid Suite2p arrays in {plane_dir}: spks.npy must be 2-D and "
+                "iscell.npy must have a first (cell-classification) column."
+            )
+        if spikes.shape[0] != iscell.shape[0] or stat.shape[0] != iscell.shape[0]:
+            raise ValueError(
+                f"Suite2p ROI counts disagree in {plane_dir}: spks={spikes.shape[0]}, "
+                f"iscell={iscell.shape[0]}, stat={stat.shape[0]}. Re-run or export "
+                "this Suite2p plane consistently."
+            )
+    return root
+
+
+def validate_two_photon_timeline(exp_info, dirs):
+    """Find the Timeline file across both primary and configured data roots."""
+    search_dirs = []
+    for directory in [*dirs, *clu.expt_dirs()]:
+        directory = str(directory)
+        if directory and directory not in search_dirs:
+            search_dirs.append(directory)
+    timeline_path = clu.find_expt_file(exp_info, "timeline", dirs=search_dirs)
+    if timeline_path:
+        return timeline_path
+
+    subject, date, number = exp_info
+    relative_path = Path(subject) / date / str(number) / f"{date}_{number}_{subject}_Timeline.mat"
+    searched = ", ".join(search_dirs) if search_dirs else "(no data roots configured)"
+    raise FileNotFoundError(
+        "Two-photon neural-cache creation requires the Cortex Lab Timeline.mat "
+        "file to align neural frames with stimulus photodiode/TTL events. "
+        f"Expected relative path: {relative_path}. Searched roots: {searched}. "
+        "A standalone timestamps.npy does not contain the required stimulus events."
+    )
 
 def loadExperiment(dirs, exp_info, pathdir, block_end, n_planes=1, n_repeat=6, n_frames=18000):
     """Function for loadExperiment.
@@ -369,7 +461,7 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
 
 def _extract_timeline_sync(exp_info, dirs, threshold, methods):
     """Consolidated logic to parse timeline sync thresholds and inputs."""
-    tlfile = clu.find_expt_file(exp_info, 'timeline', dirs)
+    tlfile = validate_two_photon_timeline(exp_info, dirs)
     tl = tlu.load_timeline(tlfile)
 
     try:

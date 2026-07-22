@@ -79,10 +79,12 @@ def load_two_photon_spikes(
     from .data import neural as neural_io
 
     if spks_path is None:
+        suite2p_dir = neural_io.validate_suite2p_output(suite2p_dir, n_planes)
+        neural_io.validate_two_photon_timeline(experiment_info, data_dirs)
         spikes, aligned_spikes, neuron_pos = neural_io.loadSPKMesoscope(
             experiment_info,
             list(data_dirs),
-            suite2p_dir,
+            str(suite2p_dir),
             block_end,
             n_planes,
             nb_frames,
@@ -113,6 +115,7 @@ def align_ephys_data(
     save_dir: Optional[Path] = None,
     output_format: str = "npy",
     stimulus_duration: Optional[float] = None,
+    photodiode_port: Optional[int] = None,
     **kwargs: Any,
 ) -> AlignedNeuralData:
     
@@ -270,7 +273,7 @@ def align_ephys_data(
     #======================================
     # DIN-SPECIFIC FUNCTIONS
     #======================================
-    def get_dio_files(dio_dir):
+    def get_dio_files(dio_dir, port):
         """Function for get dio files.
 
         Args:
@@ -279,8 +282,7 @@ def align_ephys_data(
         Returns:
             Result produced by the operation.
         """
-        dio_folders = DIO.get_dio_folders(dio_dir)
-        return sorted(dio_folders, key=lambda x:x.name)
+        return DIO.get_dio_folders(dio_dir, channel_id=port)
 
     def choose_correct_din_file(dio_files, port):
         """Function for choose correct din file.
@@ -368,8 +370,17 @@ def align_ephys_data(
     if stimulus_duration is None or stimulus_duration <= 0:
         raise ValueError("Ephys alignment requires the stimulus movie duration from metadata.")
 
-    dio_files = get_dio_files(data_dir)
-    pd_time, pd_state = choose_correct_din_file(dio_files, 3)
+    if photodiode_port is None:
+        raise ValueError("Ephys alignment requires a selected Photodiode Port")
+    photodiode_port = int(photodiode_port)
+    if photodiode_port < 0:
+        raise ValueError("Photodiode Port must be a non-negative digital-input port number")
+    dio_files = get_dio_files(data_dir, photodiode_port)
+    print(
+        f"Using photodiode digital-input port {photodiode_port} from "
+        f"{len(dio_files)} discovered .dat folder(s)."
+    )
+    pd_time, pd_state = choose_correct_din_file(dio_files, photodiode_port)
     freq = get_frequency(pd_time, SAMPLING_RATE)
 
     start_times, end_times = get_possible_trial_edges(freq, pd_time) 
@@ -421,6 +432,7 @@ def load_aligned_spikes(
     nb_frames: int,
     resolution: Optional[float],
     sampling_rate: Optional[float],
+    photodiode_port: Optional[int] = None,
     spks_path: Optional[Path] = None,
     threshold: float = 1.25,
     method: str = "frame2ttl",
@@ -469,6 +481,8 @@ def load_aligned_spikes(
     if workflow == WORKFLOW_EPHYS:
         if sampling_rate is None:
             raise ValueError("Ephys workflow requires Sampling Rate (samples / sec)")
+        if photodiode_port is None:
+            raise ValueError("Ephys workflow requires a selected Photodiode Port")
         return align_ephys_data(
             data_dir,
             nb_frames,
@@ -476,6 +490,7 @@ def load_aligned_spikes(
             save_dir=cache_dir,
             output_format=output_format,
             stimulus_duration=stimulus_duration,
+            photodiode_port=photodiode_port,
             experiment_info=experiment_info,
             threshold=threshold,
             method=method,

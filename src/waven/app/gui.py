@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import tempfile
 import shutil
+import queue
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import threading
 import time
@@ -294,6 +295,97 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "monitor": None,
         "cancel_requested": False,
     }
+    ui_callback_queue = queue.Queue()
+    ui_callbacks_closed = threading.Event()
+    worker_ui_values = threading.local()
+
+    def _capture_worker_ui_values():
+        """Copy Tk-backed values before starting a background task.
+
+        Tcl/Tk widgets and ``StringVar`` objects may only be read from Tk's
+        event-loop thread.  Reading one from a worker is enough to deadlock
+        Windows while the window is minimized or being restored.  Tasks use
+        this immutable input snapshot instead, so a run also has a clear,
+        reproducible set of settings.
+        """
+        entries = {}
+        for mapping in (param_entries, gabor_entries):
+            for key, widget in mapping.items():
+                entries[(id(mapping), key)] = widget.get()
+
+        variables = {}
+        for name, variable in (
+            ("coarse_rf_frequency_mode", coarse_rf_frequency_mode_var),
+            ("downsample_format", downsample_format_var),
+            ("downsample_percent", downsample_percent_var),
+            ("export_array_format", export_array_format_var),
+            ("export_numeric_layout", export_numeric_layout_var),
+            ("export_packaging", export_packaging_var),
+            ("export_profile", export_profile_var),
+            ("filter_bank_cycles_per_sigma", filter_bank_cycles_per_sigma_var),
+            ("filter_bank_density", filter_bank_density_var),
+            ("filter_bank_maximum_cpd", filter_bank_maximum_cpd_var),
+            ("filter_bank_minimum_cpd", filter_bank_minimum_cpd_var),
+            ("force_2d_graphs", force_2d_graphs_var),
+            ("gabor_format", gabor_format_var),
+            ("maximum_spatial_frequency_cpd", maximum_spatial_frequency_cpd_var),
+            ("neural_cache_format", neural_cache_format_var),
+            ("neural_source", neural_source_var),
+            ("neural_source_display", neural_source_display_var),
+            ("prepare_full_model_cache", prepare_full_model_cache_var),
+            ("prepare_run_model_cache", prepare_run_model_cache_var),
+            ("run_full_model_on_inspect", run_full_model_on_inspect_var),
+            ("run_model_on_inspect", run_model_on_inspect_var),
+            ("sampling_mode", sampling_mode_var),
+            ("suite2p_output_dir", suite2p_output_dir_var),
+            ("suite2p_subject_dirs", suite2p_subject_dirs_var),
+            ("target_degrees_per_pixel", target_degrees_per_pixel_var),
+            ("wavelet_backend", wavelet_backend_var),
+            ("wavelet_format", wavelet_format_var),
+        ):
+            variables[name] = variable.get()
+        return entries, variables
+
+    def _worker_entry_value(entries, key, default=""):
+        """Read an entry from the active task snapshot when off the Tk thread."""
+        values = getattr(worker_ui_values, "entries", None)
+        if values is not None:
+            return values.get((id(entries), key), default)
+        entry = entries.get(key)
+        return entry.get() if entry is not None else default
+
+    def _worker_var_value(name, variable, default=None):
+        """Read a Tk variable from the active task snapshot when available."""
+        values = getattr(worker_ui_values, "variables", None)
+        if values is not None:
+            return values.get(name, default)
+        return variable.get()
+
+    def schedule_on_ui(callback):
+        """Queue UI work without calling Tcl from a background thread.
+
+        Tk is single-threaded.  In particular, calling ``root.after`` from a
+        worker can deadlock during a Windows minimize/restore transition.  All
+        workers therefore enqueue callbacks, and the Tk event loop drains them.
+        """
+        if not ui_callbacks_closed.is_set():
+            ui_callback_queue.put(callback)
+
+    def _drain_ui_callbacks():
+        """Run a bounded batch of queued callbacks on Tk's main thread."""
+        if ui_callbacks_closed.is_set():
+            return
+        for _ in range(64):
+            try:
+                callback = ui_callback_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback()
+            except Exception as exc:
+                print(f"[GUI callback] {exc}")
+        if not ui_callbacks_closed.is_set():
+            root.after(25, _drain_ui_callbacks)
 
     def _current_cancel_event():
         """Function for current cancel event.
@@ -413,10 +505,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             detail: Input value for this operation.
         """
         if threading.current_thread() is not threading.main_thread():
-            try:
-                root.after(0, lambda: update_progress(percent, message, detail))
-            except Exception:
-                pass
+            schedule_on_ui(lambda: update_progress(percent, message, detail))
             return
 
         if percent is None:
@@ -601,12 +690,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # deferred ``after`` allowed the worker to seize the CPU before the
             # task UI was painted, which Windows presented as Not Responding.
             begin_task(label, cancel_event, monitor)
+            entry_values, variable_values = _capture_worker_ui_values()
 
             def thread_target():
                 """Function for thread target."""
                 success = False
                 cancelled = False
                 metrics = None
+                worker_ui_values.entries = entry_values
+                worker_ui_values.variables = variable_values
                 _start_recovery_checkpoint(label)
                 try:
                     result = func(*args, **kwargs)
@@ -625,7 +717,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 finally:
                     metrics = monitor.stop()
                     _finish_recovery_checkpoint(success, cancelled=cancelled)
-                    root.after(0, lambda: end_task(success=success, cancelled=cancelled, metrics=metrics))
+                    worker_ui_values.entries = None
+                    worker_ui_values.variables = None
+                    schedule_on_ui(
+                        lambda: end_task(success=success, cancelled=cancelled, metrics=metrics)
+                    )
 
             # Return to Tk once after showing the busy state.  Letting a
             # cache/model worker seize CPU in this same event-loop turn is what
@@ -662,21 +758,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             print(f"[RAM cache] Could not release cached analysis arrays ({exc}).")
 
     def _field_value(entries, key, default=""):
-        """Function for field value.
-
-        Args:
-            entries: Input value for this operation.
-            key: Input value for this operation.
-            default: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
-        entry = entries.get(key) if isinstance(entries, dict) else None
-        if entry is None:
-            return default
         try:
-            return entry.get()
+            return _worker_entry_value(entries, key, default)
         except Exception:
             return default
 
@@ -684,13 +767,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Return a Tk variable value if it has already been created."""
         try:
             if name == "gabor_format_var":
-                return gabor_format_var.get()
+                return _worker_var_value("gabor_format", gabor_format_var, default)
             if name == "wavelet_format_var":
-                return wavelet_format_var.get()
+                return _worker_var_value("wavelet_format", wavelet_format_var, default)
             if name == "downsample_format_var":
-                return downsample_format_var.get()
+                return _worker_var_value("downsample_format", downsample_format_var, default)
             if name == "neural_cache_format_var":
-                return neural_cache_format_var.get()
+                return _worker_var_value("neural_cache_format", neural_cache_format_var, default)
         except Exception:
             return default
         return default
@@ -713,9 +796,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return _project_layout().dir_for_field(field_name)
 
     def _set_entry_value(entry, value):
-        """Replace one Tk entry value."""
-        entry.delete(0, tk.END)
-        entry.insert(0, str(value))
+        """Replace one editable field or selection-control value."""
+        if isinstance(entry, ctk.CTkEntry):
+            entry.delete(0, tk.END)
+            entry.insert(0, str(value))
+        else:
+            entry.set(str(value))
 
     def _apply_project_layout_defaults(force=False):
         """Populate folder fields with the strict project layout."""
@@ -736,7 +822,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         }
         for key, path in field_map.items():
             if key in param_entries:
-                current = param_entries[key].get().strip()
+                current = _field_value(param_entries, key).strip()
                 if force or current.lower() in ("", "none", "null") or Path(current).suffix:
                     _set_entry_value(param_entries[key], path)
         gabor_field_map = {
@@ -746,23 +832,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         }
         for key, path in gabor_field_map.items():
             if key in gabor_entries:
-                current = gabor_entries[key].get().strip()
+                current = _field_value(gabor_entries, key).strip()
                 if force or current.lower() in ("", "none", "null") or Path(current).suffix:
                     _set_entry_value(gabor_entries[key], path)
         if (
             "Spks Path" in param_entries
             and (
                 force
-                or param_entries["Spks Path"].get().strip().lower() in ("", "none", "null")
-                or Path(param_entries["Spks Path"].get().strip()).suffix
+                or _field_value(param_entries, "Spks Path").strip().lower() in ("", "none", "null")
+                or Path(_field_value(param_entries, "Spks Path").strip()).suffix
             )
         ):
             _set_entry_value(param_entries["Spks Path"], layout.neural_cache_dir)
 
     def _folder_from_entry(entries, key, default_folder=None):
         """Return a GUI folder value, falling back to a layout folder."""
-        entry = entries.get(key)
-        value = entry.get().strip() if entry is not None else ""
+        value = _field_value(entries, key, "").strip()
         if value.lower() in ("", "none", "null"):
             return str(default_folder or _layout_field_folder(key))
         path = Path(value)
@@ -1580,21 +1665,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Return whether an export remains a folder, a ZIP, or both."""
         if export_packaging_var is None:
             return "folder"
-        value = str(export_packaging_var.get()).lower()
+        value = str(_worker_var_value("export_packaging", export_packaging_var, "folder")).lower()
         return value if value in {"folder", "zip", "both"} else "folder"
 
     def _selected_export_numeric_layout():
         """Return whether Section B writes graph-local or per-neuron numeric data."""
         if export_numeric_layout_var is None:
             return "per_graph"
-        value = str(export_numeric_layout_var.get()).lower()
+        value = str(_worker_var_value("export_numeric_layout", export_numeric_layout_var, "per_graph")).lower()
         if value in {"per_neuron", "per-neuron .npz"}:
             return "per_neuron"
         return "per_graph"
 
     def _apply_export_profile(profile=None):
         """Apply a purposeful export preset without removing custom controls."""
-        selected = str(profile or (export_profile_var.get() if export_profile_var is not None else "")).lower()
+        selected = str(
+            profile or (_worker_var_value("export_profile", export_profile_var, "") if export_profile_var is not None else "")
+        ).lower()
         profiles = {
             "quick review": {
                 "files": {"png": True, "svg": False, "data_pickle": False,
@@ -1775,7 +1862,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 _add_array_exports("payload", payload, arrays, metadata)
             _time_export_stage(timing, "array_collect", collect_arrays)
         try:
-            array_format = record.get("array_format", export_array_format_var.get())
+            array_format = record.get(
+                "array_format", _worker_var_value("export_array_format", export_array_format_var, "npy")
+            )
         except (NameError, RuntimeError):
             array_format = record.get("array_format", "npy")
         if array_format not in {"npy", "zarr", "both"}:
@@ -1887,7 +1976,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         fig = record["figure"]
         if array_format is None:
             try:
-                array_format = export_array_format_var.get()
+                array_format = _worker_var_value("export_array_format", export_array_format_var, "npy")
             except (NameError, RuntimeError):
                 array_format = "npy"
         # Payloads are exported separately below and can be very large (or
@@ -1935,7 +2024,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _snapshot_export_records(records):
         """Capture all UI figures before a background export begins."""
         try:
-            array_format = export_array_format_var.get()
+            array_format = _worker_var_value("export_array_format", export_array_format_var, "npy")
         except (NameError, RuntimeError):
             array_format = "npy"
         file_options = _selected_export_files()
@@ -1975,10 +2064,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 destination = _package_export_root(export_root, packaging)
             except Exception as exc:
                 print(f"[EXPORT] Failed graph '{title}': {exc}")
-                root.after(0, lambda error=str(exc): messagebox.showerror("Export Failed", f"Could not export {title}: {error}"))
+                schedule_on_ui(
+                    lambda error=str(exc): messagebox.showerror(
+                        "Export Failed", f"Could not export {title}: {error}"
+                    )
+                )
                 return False
             print(f"[DONE] Exported graph '{title}' with reusable data to: {destination}")
-            root.after(0, lambda: messagebox.showinfo("Export Complete", f"Exported {title}.\n\n{destination}"))
+            schedule_on_ui(
+                lambda: messagebox.showinfo("Export Complete", f"Exported {title}.\n\n{destination}")
+            )
             return True
 
         run_in_thread(write_export, f"Export {title}")()
@@ -2045,11 +2140,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         )
                     else:
                         messagebox.showinfo("Export Complete", f"Exported {len(exported)} graph(s).\n\n{destination}")
-                root.after(0, show_result)
+                schedule_on_ui(show_result)
                 return True
             except Exception as exc:
                 print(f"Failed to export displayed results: {exc}")
-                root.after(0, lambda error=str(exc): messagebox.showerror("Export Failed", f"Could not export displayed results: {error}"))
+                schedule_on_ui(
+                    lambda error=str(exc): messagebox.showerror(
+                        "Export Failed", f"Could not export displayed results: {error}"
+                    )
+                )
                 return False
 
         run_in_thread(write_export, f"Export {export_label}")()
@@ -2455,7 +2554,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             pass
         try:
-            batch_array_format = export_array_format_var.get()
+            batch_array_format = _worker_var_value("export_array_format", export_array_format_var, "npy")
         except (NameError, RuntimeError):
             batch_array_format = "npy"
         batch_numeric_layout = _selected_export_numeric_layout()
@@ -2551,7 +2650,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         messagebox.showerror(
                             "Export Packaging Failed", f"The files were written, but packaging failed: {error}\n\n{export_root}"
                         )
-                    root.after(0, show_packaging_error)
+                    schedule_on_ui(show_packaging_error)
                     return
 
                 def show_delivery():
@@ -2573,7 +2672,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         )
                     else:
                         messagebox.showinfo("Export Complete", f"Exported selected single-graph files.\n\n{destination}")
-                root.after(0, show_delivery)
+                schedule_on_ui(show_delivery)
 
             threading.Thread(target=finish_delivery, daemon=True).start()
 
@@ -2624,7 +2723,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                     report_finished(kind, 0)
                                     state["neuron_id"] += 1
                                     root.after(1, export_next_graph_type)
-                                root.after(0, record_sta_failure)
+                                schedule_on_ui(record_sta_failure)
                                 return
 
                             def use_sta_batch():
@@ -2632,7 +2731,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                 state["sta_results"] = results
                                 print(f"[EXPORT] Computed STA for {ids.size} neurons in one bounded batch.")
                                 root.after(1, export_next_graph_type)
-                            root.after(0, use_sta_batch)
+                            schedule_on_ui(use_sta_batch)
 
                         threading.Thread(target=compute_sta_batch, daemon=True).start()
                         return
@@ -2713,7 +2812,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     parent = frame_plot_individual
                 embed_interactive_figure(fig, parent, record.get("title"))
             print(message)
-        root.after(0, render)
+        schedule_on_ui(render)
 
     def _state_for_plot_cache(state):
         """Function for state for plot cache.
@@ -2868,7 +2967,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             Result produced by the operation.
         """
         folder = _gabor_folder_for_kind(kind)
-        return str(conventional_gabor_path(folder, kind, gabor_format_var.get()))
+        return str(conventional_gabor_path(folder, kind, _worker_var_value("gabor_format", gabor_format_var, "npy")))
 
     def _save_library_array(library, path_save, description):
         """Function for save library array.
@@ -2883,7 +2982,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """
         update_progress(70, f"Saving {description}", "Writing output file")
         os.makedirs(os.path.dirname(path_save) or ".", exist_ok=True)
-        if gabor_format_var.get() == "zarr":
+        if _worker_var_value("gabor_format", gabor_format_var, "npy") == "zarr":
             try:
                 import zarr as _zarr
             except ImportError as exc:
@@ -3029,15 +3128,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _ensure_convolution_kernel_cache(kind, force=False):
         """Build or reuse the compact convolution kernel cache for ``kind``."""
         _ensure_wavelet_imports("convolution kernel cache construction")
-        sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
-        frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        sigmas = parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas")
+        frequencies = parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies")
         phase_offsets = _gabor_phase_offsets_radians()
-        n_theta = int(gabor_entries["N_thetas"].get())
+        n_theta = int(_field_value(gabor_entries, "N_thetas"))
         kind = kind.lower()
         if kind == "fine":
             sigmas = _ordered_float_union(
                 sigmas,
-                parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
+                parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model"),
             )
             cache_frequencies = frequencies
         elif kind == "coarse":
@@ -3072,7 +3171,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _selected_wavelet_backend():
         """Return the selected wavelet decomposition backend."""
         try:
-            value = wavelet_backend_var.get()
+            value = _worker_var_value("wavelet_backend", wavelet_backend_var, "legacy")
         except NameError:
             return "legacy"
         return value if value in {"legacy", "convolution"} else "legacy"
@@ -3080,7 +3179,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _selected_coarse_rf_frequency_mode():
         """Return how coarse RF assigns spatial frequencies to its Gabor bank."""
         try:
-            value = coarse_rf_frequency_mode_var.get()
+            value = _worker_var_value("coarse_rf_frequency_mode", coarse_rf_frequency_mode_var, "coupled")
         except NameError:
             return "coupled"
         return "frequency_list" if value in {
@@ -3097,8 +3196,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if _selected_coarse_rf_frequency_mode() != "coupled":
             return []
         try:
-            sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
-            frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+            sigmas = parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas")
+            frequencies = parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies")
         except (KeyError, NameError, ValueError):
             return []
         if len(sigmas) == len(frequencies) and len(sigmas) > 0:
@@ -3119,7 +3218,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if _selected_coarse_rf_frequency_mode() != "frequency_list":
             return np.asarray(_coarse_matched_pair_frequencies(), dtype=float), "matched_or_legacy"
         try:
-            cycles_per_sigma = float(filter_bank_cycles_per_sigma_var.get())
+            cycles_per_sigma = float(
+                _worker_var_value("filter_bank_cycles_per_sigma", filter_bank_cycles_per_sigma_var, "")
+            )
         except (NameError, TypeError, ValueError) as exc:
             raise ValueError("Cycles / sigma must be a finite positive number for Run Model phase caches.") from exc
         if not np.isfinite(cycles_per_sigma) or cycles_per_sigma <= 0:
@@ -3129,7 +3230,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _selected_wavelet_format():
         """Return the selected durable format for wavelet/RF cache products."""
         try:
-            value = wavelet_format_var.get()
+            value = _worker_var_value("wavelet_format", wavelet_format_var, "zarr")
         except NameError:
             return "zarr"
         return value if value in {"npy", "zarr"} else "zarr"
@@ -3137,7 +3238,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _selected_neural_cache_format():
         """Return the selected aligned neural-cache output format."""
         try:
-            value = neural_cache_format_var.get()
+            value = _worker_var_value("neural_cache_format", neural_cache_format_var, "npy")
         except NameError:
             return "npy"
         return value if value in {"npy", "zarr"} else "npy"
@@ -3145,7 +3246,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _selected_neural_source():
         """Return whether neural cache creation should use data dir or cache path."""
         try:
-            value = neural_source_var.get()
+            value = _worker_var_value("neural_source", neural_source_var, "data_dir")
         except NameError:
             return "data_dir"
         return value if value in {"data_dir", "spks_path"} else "data_dir"
@@ -3153,7 +3254,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _selected_downsample_format():
         """Return the selected precomputed downsampled movie output format."""
         try:
-            value = downsample_format_var.get()
+            value = _worker_var_value("downsample_format", downsample_format_var, "npy")
         except NameError:
             return "npy"
         return value if value in {"npy", "zarr"} else "npy"
@@ -3161,7 +3262,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _selected_downsample_percent():
         """Return the selected spatial downsample percentage (1--100%)."""
         try:
-            value = float(downsample_percent_var.get())
+            value = float(_worker_var_value("downsample_percent", downsample_percent_var, 20.0))
         except Exception:
             return 20.0
         return max(1.0, min(100.0, value))
@@ -3187,7 +3288,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Derive a visual-angle-calibrated grid from movie metadata and coverage."""
         try:
             analysis_coverage = parse_literal(
-                param_entries["Analysis Coverage"].get(), "Analysis Coverage"
+                _field_value(param_entries, "Analysis Coverage"), "Analysis Coverage"
             )
         except (KeyError, NameError):
             analysis_coverage = None
@@ -3198,7 +3299,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _analysis_degrees_per_pixel(movie_path=None):
         """Return calibrated horizontal/vertical degrees per analysis pixel."""
         analysis_coverage = parse_literal(
-            param_entries["Analysis Coverage"].get(), "Analysis Coverage"
+            _field_value(param_entries, "Analysis Coverage"), "Analysis Coverage"
         )
         grid_x, grid_y = _stimulus_grid_dimensions(movie_path=movie_path)
         degrees_x = abs(float(analysis_coverage[0]) - float(analysis_coverage[1])) / grid_x
@@ -3207,7 +3308,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _gabor_phase_offsets_radians():
         """The GUI accepts degrees; skimage convolution kernels require radians."""
-        return np.deg2rad(parse_literal(gabor_entries["Phases"].get(), "Phases (degrees)"))
+        return np.deg2rad(parse_literal(_field_value(gabor_entries, "Phases"), "Phases (degrees)"))
 
     def _coarse_wavelet_provenance(coarse_nx, coarse_ny, sigmas, frequencies, phase_offsets):
         """Return every scientific parameter that defines a coarse cache."""
@@ -3217,7 +3318,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "schema": 2,
             "backend": _selected_wavelet_backend(),
             "grid": [int(coarse_nx), int(coarse_ny)],
-            "n_orientations": int(gabor_entries["N_thetas"].get()),
+            "n_orientations": int(_field_value(gabor_entries, "N_thetas")),
             "sigmas": [float(value) for value in sigmas],
             "phase_offsets_radians": [float(value) for value in phase_offsets],
             "frequency_mode": frequency_mode,
@@ -3234,7 +3335,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "schema": 3,
             "backend": _selected_wavelet_backend(),
             "grid": [int(coarse_nx), int(coarse_ny)],
-            "n_orientations": int(gabor_entries["N_thetas"].get()),
+            "n_orientations": int(_field_value(gabor_entries, "N_thetas")),
             "sigmas": [float(value) for value in sigmas],
             "phase_offsets_radians": [float(value) for value in phase_offsets],
             "frequency_mode": "sigma_coupled",
@@ -3248,7 +3349,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "schema": 2,
             "backend": _selected_wavelet_backend(),
             "grid": [int(full_nx), int(full_ny)],
-            "n_orientations": int(gabor_entries["N_thetas"].get()),
+            "n_orientations": int(_field_value(gabor_entries, "N_thetas")),
             "sigmas": [float(value) for value in sigmas],
             "frequencies": [float(value) for value in frequencies],
             "phase_offsets_radians": [float(value) for value in phase_offsets],
@@ -3350,7 +3451,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 f"    {candidate}"
             )
             if actual_format != _selected_downsample_format():
-                root.after(0, lambda value=actual_format: downsample_format_var.set(value))
+                schedule_on_ui(lambda value=actual_format: downsample_format_var.set(value))
             return str(candidate), actual_format
         return None, preferred_format or _selected_downsample_format()
 
@@ -3399,12 +3500,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             kind: Input value for this operation.
         """
         _ensure_gabor_imports("Gabor library construction")
-        sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
-        frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        sigmas = parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas")
+        frequencies = parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies")
         full_nx, full_ny = _stimulus_grid_dimensions(movie_path=_find_movie_path())
-        n_theta = int(gabor_entries["N_thetas"].get())
+        n_theta = int(_field_value(gabor_entries, "N_thetas"))
         offsets = _gabor_phase_offsets_radians()
-        path_save = gabor_entries["Save Path"].get()
+        path_save = _field_value(gabor_entries, "Save Path")
         kind = kind.lower()
         if kind not in {"coarse", "fine"}:
             raise ValueError(f"Unknown Gabor library kind: {kind}")
@@ -3416,7 +3517,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             nx, ny = _analysis_grid_dimensions(full_nx, full_ny, "full")
             sigmas = _ordered_float_union(
                 sigmas,
-                parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
+                parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model"),
             )
             path_save = _library_output_path("fine", path_save)
             description = f"fine independent-frequency Gabor library ({nx} x {ny})"
@@ -3449,9 +3550,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             _write_recovery_step(f"{kind}_gabor_reused", path=output_path, shape=expected_shape)
             entry_key = "Coarse Library Path" if kind == "coarse" else "Fine Library Path"
             if entry_key in gabor_entries:
-                _set_entry_value(gabor_entries[entry_key], _gabor_folder_for_kind(kind))
+                schedule_on_ui(
+                    lambda key=entry_key, library_kind=kind: _set_entry_value(
+                        gabor_entries[key], _gabor_folder_for_kind(library_kind)
+                    )
+                )
             if kind == "fine" and "Library Path" in param_entries:
-                _set_entry_value(param_entries["Library Path"], _gabor_folder_for_kind(kind))
+                schedule_on_ui(
+                    lambda library_kind=kind: _set_entry_value(
+                        param_entries["Library Path"], _gabor_folder_for_kind(library_kind)
+                    )
+                )
             update_progress(100, f"{description} already complete")
             return
 
@@ -3491,10 +3600,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         )
         entry_key = "Coarse Library Path" if kind == "coarse" else "Fine Library Path"
         if entry_key in gabor_entries:
-            _set_entry_value(gabor_entries[entry_key], _gabor_folder_for_kind(kind))
+            schedule_on_ui(
+                lambda key=entry_key, library_kind=kind: _set_entry_value(
+                    gabor_entries[key], _gabor_folder_for_kind(library_kind)
+                )
+            )
         if kind == "fine" and "Library Path" in param_entries:
-            _set_entry_value(param_entries["Library Path"], _gabor_folder_for_kind(kind))
-            refresh_size_estimates()
+            def apply_fine_library_path():
+                _set_entry_value(param_entries["Library Path"], _gabor_folder_for_kind(kind))
+                refresh_size_estimates()
+
+            schedule_on_ui(apply_fine_library_path)
         update_progress(100, f"{description} complete")
 
     def create_both_gabor_libraries():
@@ -3519,8 +3635,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         output_format = _selected_downsample_format()
         downsample_path = _downsample_video_path(movpath, scale, output_format)
         expected_shape = (expected_frames, target_ny, target_nx)
-        visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
-        analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
+        visual_coverage = parse_literal(_field_value(param_entries, "Visual Coverage"), "Visual Coverage")
+        analysis_coverage = parse_literal(_field_value(param_entries, "Analysis Coverage"), "Analysis Coverage")
         crop_params = {
             **_downsample_cache_crop_params(visual_coverage, analysis_coverage),
             **_movie_source_provenance(movpath),
@@ -3622,8 +3738,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         current_wavelet_dir[0] = wavelet_folder
 
-        sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
-        frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+        sigmas = parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas")
+        frequencies = parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies")
         sigmas = [float(value) for value in sigmas]
         frequencies = [float(value) for value in frequencies]
         if not sigmas or not np.all(np.isfinite(sigmas)) or any(value <= 0 for value in sigmas):
@@ -3670,7 +3786,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
         fine_library_sigmas = _ordered_float_union(
             sigmas,
-            parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
+            parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model"),
         )
         coarse_lib_path = _find_gabor_library("coarse")
         fine_lib_path = _find_gabor_library("fine")
@@ -3688,7 +3804,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 fine_kernel_cache_path = cache_path
             else:
                 coarse_kernel_cache_path = cache_path
-        n_thetas = int(gabor_entries["N_thetas"].get())
+        n_thetas = int(_field_value(gabor_entries, "N_thetas"))
         if n_thetas <= 0:
             raise ValueError("N_thetas must be a positive integer.")
         coarse_nx, coarse_ny = _stimulus_grid_dimensions("coarse", movpath)
@@ -3697,8 +3813,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         full_downsample_path = _downsample_video_path(movpath, "full", downsample_output_format)
         coarse_downsample_path = _downsample_video_path(movpath, "coarse", downsample_output_format)
 
-        visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
-        analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
+        visual_coverage = parse_literal(_field_value(param_entries, "Visual Coverage"), "Visual Coverage")
+        analysis_coverage = parse_literal(_field_value(param_entries, "Analysis Coverage"), "Analysis Coverage")
         crop_params = {
             **_downsample_cache_crop_params(visual_coverage, analysis_coverage),
             **_movie_source_provenance(movpath),
@@ -4284,7 +4400,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             os.makedirs(full_output, exist_ok=True)
 
         sigmas_full = parse_literal(
-            param_entries["Sigmas Full Model"].get(),
+            _field_value(param_entries, "Sigmas Full Model"),
             "Sigmas Full Model",
         )
         sigmas_full = [float(value) for value in sigmas_full]
@@ -4520,7 +4636,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if flash:
             try:
                 individual_update_label.configure(
-                    text=f"Updated neuron {param_entries['Neuron ID'].get()}",
+                    text=f"Updated neuron {_field_value(param_entries, 'Neuron ID')}",
                     fg_color="#F97316",
                     text_color="#111827",
                 )
@@ -4584,22 +4700,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _neural_alignment_context():
         """Return parsed inputs needed to load or create aligned neural caches."""
-        data_dirs = _parse_data_dir(param_entries["Dir"].get())
+        data_dirs = _parse_data_dir(_field_value(param_entries, "Dir"))
         data_dirs = (resolve_folder_reference(data_dirs[0], "raw_data"),) + tuple(data_dirs[1:])
-        exp_info = parse_literal(param_entries["Experiment Info"].get(), "Experiment Info")
-        block_end = int(param_entries["Block End"].get())
+        exp_info = parse_literal(_field_value(param_entries, "Experiment Info"), "Experiment Info")
+        block_end = int(_field_value(param_entries, "Block End"))
         nb_frames = _movie_metadata()["frames"]
         pathdata = Path(data_dirs[0]) / exp_info[0] / exp_info[1] / str(exp_info[2])
         pathsuite2p = pathdata / "suite2p"
         neural_cache_dir = Path(_folder_from_entry(param_entries, "Spks Path", _project_layout().neural_cache_dir))
         if workflow == WORKFLOW_2P:
-            n_planes = int(param_entries["Number of Planes"].get())
-            resolution = float(param_entries["Resolution"].get())
+            n_planes = int(_field_value(param_entries, "Number of Planes"))
+            resolution = float(_field_value(param_entries, "Resolution"))
             sampling_rate = None
         else:
             n_planes = None
             resolution = None
-            sampling_rate = float(param_entries["Sampling Rate (samples / sec)"].get())
+            sampling_rate = float(_field_value(param_entries, "Sampling Rate (samples / sec)"))
+            photodiode_port = int(_field_value(param_entries, "Photodiode Port"))
+            if photodiode_port < 0:
+                raise ValueError("Photodiode Port must be a non-negative integer")
         return {
             "data_dirs": data_dirs,
             "experiment_info": exp_info,
@@ -4611,12 +4730,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "nb_frames": nb_frames,
             "resolution": resolution,
             "sampling_rate": sampling_rate,
+            "photodiode_port": photodiode_port if workflow == WORKFLOW_EPHYS else None,
         }
 
     def create_neural_cache():
         """Create or validate the aligned neural firing-rate cache."""
         context = _neural_alignment_context()
-        spks_text = param_entries["Spks Path"].get().strip()
+        spks_text = _field_value(param_entries, "Spks Path").strip()
         if _selected_neural_source() == "spks_path":
             if spks_text.lower() in ("", "none", "null"):
                 raise ValueError("Select a Spks Path, or switch neural source to Data Dir.")
@@ -4628,7 +4748,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
             print(f"Validated aligned spikes cache: {loaded_spks_path} {tuple(spks.shape)}")
             print(f"Validated neuron position cache: {loaded_pos_path} {tuple(np.asarray(neuron_pos).shape)}")
-            _set_entry_value(param_entries["Spks Path"], spks_folder)
+            schedule_on_ui(
+                lambda folder=spks_folder: _set_entry_value(param_entries["Spks Path"], folder)
+            )
             update_progress(100, "Neural cache", "Existing cache ready")
             return True
 
@@ -4641,7 +4763,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             spks, neuron_pos, loaded_spks_path, loaded_pos_path = load_neural_cache_pair(context["neural_cache_dir"])
             print(f"Resume: found aligned spikes cache: {loaded_spks_path} {tuple(spks.shape)}")
             print(f"Resume: found neuron position cache: {loaded_pos_path} {tuple(np.asarray(neuron_pos).shape)}")
-            _set_entry_value(param_entries["Spks Path"], context["neural_cache_dir"])
+            schedule_on_ui(
+                lambda folder=context["neural_cache_dir"]: _set_entry_value(param_entries["Spks Path"], folder)
+            )
             update_progress(100, "Neural cache", "Existing cache ready")
             return True
 
@@ -4659,6 +4783,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             nb_frames=context["nb_frames"],
             resolution=context["resolution"],
             sampling_rate=context["sampling_rate"],
+            photodiode_port=context["photodiode_port"],
             stimulus_duration=_movie_metadata()["duration"],
             threshold=1.25,
             method="frame2ttl",
@@ -4673,7 +4798,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         saved_spks_path, saved_pos_path = cache_pair
         print(f"Created aligned spikes cache: {saved_spks_path} {tuple(aligned.spikes.shape)}")
         print(f"Created neuron position cache: {saved_pos_path} {tuple(np.asarray(aligned.neuron_pos).shape)}")
-        _set_entry_value(param_entries["Spks Path"], context["neural_cache_dir"])
+        schedule_on_ui(
+            lambda folder=context["neural_cache_dir"]: _set_entry_value(param_entries["Spks Path"], folder)
+        )
         update_progress(100, "Neural cache", "Cache created")
         return True
 
@@ -4686,7 +4813,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _ensure_rf_imports("coarse RF analysis")
         rf_extra = {
             "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
-            "force_3d_graphs_to_2d": bool(force_2d_graphs_var.get()),
+            "force_3d_graphs_to_2d": bool(_worker_var_value("force_2d_graphs", force_2d_graphs_var, False)),
             # Cached Coarse RF results before this schema lack the complete
             # precomputed orientation-export records.
             "orientation_export_schema": 2,
@@ -4701,7 +4828,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 analysis_state.clear()
                 analysis_state.update(cached_state)
                 current_wavelet_dir[0] = cached_state.get("wavelet_dir", current_wavelet_dir[0])
-                root.after(0, _refresh_model_settings_hint)
+                schedule_on_ui(_refresh_model_settings_hint)
             _render_figure_records(
                 cached.get("figures"),
                 message=f"Loaded coarse RF plots from cache: {_plot_cache_path()}",
@@ -4709,15 +4836,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return
 
         try:
-            data_dirs = _parse_data_dir(param_entries["Dir"].get())
+            data_dirs = _parse_data_dir(_field_value(param_entries, "Dir"))
             data_dirs = (resolve_folder_reference(data_dirs[0], "raw_data"),) + tuple(data_dirs[1:])
-            exp_info = parse_literal(param_entries["Experiment Info"].get(), "Experiment Info")
-            sigmas = np.array(parse_literal(gabor_entries["Sigmas"].get(), "Sigmas"))
-            frequencies = np.array(parse_literal(gabor_entries["Frequencies"].get(), "Frequencies"))
+            exp_info = parse_literal(_field_value(param_entries, "Experiment Info"), "Experiment Info")
+            sigmas = np.array(parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas"))
+            frequencies = np.array(parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies"))
             nf = len(frequencies)
-            visual_coverage = parse_literal(param_entries["Visual Coverage"].get(), "Visual Coverage")
-            analysis_coverage = parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
-            block_end = int(param_entries["Block End"].get())
+            visual_coverage = parse_literal(_field_value(param_entries, "Visual Coverage"), "Visual Coverage")
+            analysis_coverage = parse_literal(_field_value(param_entries, "Analysis Coverage"), "Analysis Coverage")
+            block_end = int(_field_value(param_entries, "Block End"))
             movie_metadata = _movie_metadata()
             nx, ny = movie_metadata["width"], movie_metadata["height"]
             coarse_nx, coarse_ny = _stimulus_grid_dimensions("coarse")
@@ -4734,9 +4861,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if _selected_coarse_rf_frequency_mode() == "coupled" and len(frequencies) == len(sigmas)
                 else None
             )
-            n_orientations = int(gabor_entries["N_thetas"].get())
+            n_orientations = int(_field_value(gabor_entries, "N_thetas"))
             ns = len(sigmas)
-            spks_path = param_entries["Spks Path"].get()
+            spks_path = _field_value(param_entries, "Spks Path")
             neural_cache_dir = Path(_folder_from_entry(param_entries, "Spks Path", _project_layout().neural_cache_dir))
             nb_frames = movie_metadata["frames"]
             movpath = _find_movie_path()
@@ -4745,15 +4872,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             screen_ratio = degrees_per_pixel
             xM, xm, yM, ym = analysis_coverage
             if workflow == WORKFLOW_2P:
-                n_planes = int(param_entries["Number of Planes"].get())
-                resolution = float(param_entries["Resolution"].get())
+                n_planes = int(_field_value(param_entries, "Number of Planes"))
+                resolution = float(_field_value(param_entries, "Resolution"))
                 sampling_rate = None
             else:
                 n_planes = None
                 resolution = None
                 sampling_rate = float(
-                    param_entries["Sampling Rate (samples / sec)"].get()
+                    _field_value(param_entries, "Sampling Rate (samples / sec)")
                 )
+                photodiode_port = int(_field_value(param_entries, "Photodiode Port"))
+                if photodiode_port < 0:
+                    raise ValueError("Photodiode Port must be a non-negative integer")
         except Exception as e:
             print(f"Invalid input: {e}")
             return False
@@ -4792,6 +4922,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         nb_frames=nb_frames,
                         resolution=resolution,
                         sampling_rate=sampling_rate,
+                        photodiode_port=(photodiode_port if workflow == WORKFLOW_EPHYS else None),
                         stimulus_duration=_movie_metadata()["duration"],
                         threshold=1.25,
                         method='frame2ttl',
@@ -4810,7 +4941,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if saved_spks_path is not None:
                     print(f"Saved aligned neural cache as {_selected_neural_cache_format().upper()}: {saved_spks_path}")
             if saved_spks_path is not None and saved_spks_path.exists():
-                _set_entry_value(param_entries["Spks Path"], neural_cache_dir)
+                schedule_on_ui(
+                    lambda folder=neural_cache_dir: _set_entry_value(param_entries["Spks Path"], folder)
+                )
             if workflow == WORKFLOW_2P:
                 neuron_pos = np.asarray(neuron_pos)
                 neuron_pos[:, 1] = abs(neuron_pos[:, 1] - np.max(neuron_pos[:, 1]))
@@ -5105,7 +5238,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             rf_train_idx=rf_split_settings["train_idx"],
             rf_correlation_path=rf_output_path,
         )
-        root.after(0, _refresh_model_settings_hint)
+        schedule_on_ui(_refresh_model_settings_hint)
 
         def render_gui_plots():
             """Function for render gui plots."""
@@ -5119,7 +5252,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             plot_neuron_pos = neuron_pos
             plot_axis_labels = ("X (um)", "Y (um)", "Z (um)")
             dropped_position_axis = None
-            if force_2d_graphs_var.get() and pos_dim >= 3:
+            if _worker_var_value("force_2d_graphs", force_2d_graphs_var, False) and pos_dim >= 3:
                 coordinate_means = np.nanmean(neuron_pos[:, :3], axis=0)
                 dropped_position_axis = int(np.nanargmin(np.abs(coordinate_means)))
                 retained_position_axes = [axis for axis in range(3) if axis != dropped_position_axis]
@@ -5751,9 +5884,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         spike_train = np.mean(np.asarray(spks[:, :, neuron_id]), axis=0)
                         result = _psth_sta_for_neuron(neuron_id, spike_train)
                     except Exception as exc:
-                        root.after(0, lambda: finish(sta_error=str(exc)))
+                        schedule_on_ui(lambda: finish(sta_error=str(exc)))
                     else:
-                        root.after(0, lambda: finish(sta_result=result))
+                        schedule_on_ui(lambda: finish(sta_result=result))
 
                 worker = threading.Thread(
                     target=prepare_sta,
@@ -5789,7 +5922,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "source": "Run Coarse RF Analysis",
                     "neuron_pos": neuron_pos,
                     "plotted_neuron_pos": plot_neuron_pos,
-                    "force_3d_graphs_to_2d": bool(force_2d_graphs_var.get()),
+                    "force_3d_graphs_to_2d": bool(_worker_var_value("force_2d_graphs", force_2d_graphs_var, False)),
                     "dropped_position_axis": dropped_position_axis,
                     "response_correlation": respcorr,
                     "skewness": skewness,
@@ -5804,7 +5937,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "best_params": np.asarray(rfs_gabor[1]),
                     "neuron_pos": neuron_pos,
                     "plotted_neuron_pos": plot_neuron_pos,
-                    "force_3d_graphs_to_2d": bool(force_2d_graphs_var.get()),
+                    "force_3d_graphs_to_2d": bool(_worker_var_value("force_2d_graphs", force_2d_graphs_var, False)),
                     "dropped_position_axis": dropped_position_axis,
                     "sigmas_deg": sigmas_deg,
                     "frequencies": rf_frequencies,
@@ -5845,8 +5978,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 """Function for click RF."""
                 try:
                     neuron_id = _selected_neuron_id()
-                    include_model = bool(run_model_on_inspect_var.get())
-                    include_full = bool(run_full_model_on_inspect_var.get())
+                    include_model = bool(_worker_var_value("run_model_on_inspect", run_model_on_inspect_var, False))
+                    include_full = bool(_worker_var_value("run_full_model_on_inspect", run_full_model_on_inspect_var, False))
                     _clear_model_diagnostic_figures()
                     queued_models = [
                         label for enabled, label in (
@@ -5947,7 +6080,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 print(f"[PSTH STA] Initial selected-neuron render failed: {exc}")
                 finish_plot_rendering()
 
-        root.after(0, render_gui_plots)
+        schedule_on_ui(render_gui_plots)
 
     def _selected_neuron_id():
         """Function for selected neuron id.
@@ -5955,7 +6088,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         Returns:
             Result produced by the operation.
         """
-        neuron_id = int(param_entries["Neuron ID"].get())
+        neuron_id = int(_field_value(param_entries, "Neuron ID"))
         if "spks" in analysis_state:
             neuron_count = int(analysis_state["spks"].shape[2])
             if neuron_count <= 0:
@@ -5971,7 +6104,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 def update_neuron_entry():
                     param_entries["Neuron ID"].delete(0, tk.END)
                     param_entries["Neuron ID"].insert(0, str(corrected))
-                root.after(0, update_neuron_entry)
+                schedule_on_ui(update_neuron_entry)
                 neuron_id = corrected
         return neuron_id
 
@@ -6038,7 +6171,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _model_fit_minutes(state):
         """Parse the user-facing fitting duration once for both model paths."""
-        raw_value = param_entries["Model Fit Minutes"].get()
+        raw_value = _field_value(param_entries, "Model Fit Minutes")
         try:
             parsed = parse_literal(raw_value, "Model Fit Minutes")
             minutes = int(parsed)
@@ -6075,10 +6208,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if n_trials < 2:
                 raise ValueError("Detected 1 trial; the models need at least 2 trials.")
             train_idx = _parse_trial_indices_entry(
-                param_entries["Train Trial Indices"].get(), n_trials, "Train Trial Indices",
+                _field_value(param_entries, "Train Trial Indices"), n_trials, "Train Trial Indices",
             )
             test_idx = _parse_trial_indices_entry(
-                param_entries["Test Trial Indices"].get(), n_trials, "Test Trial Indices", train_idx,
+                _field_value(param_entries, "Test Trial Indices"), n_trials, "Test Trial Indices", train_idx,
             )
             duplicates = sorted({idx for idx in train_idx + test_idx if (train_idx + test_idx).count(idx) > 1})
             if duplicates:
@@ -6111,12 +6244,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if n_trials < 2:
             raise ValueError("Model cross-validation requires at least two trials.")
         train_idx = _parse_trial_indices_entry(
-            param_entries["Train Trial Indices"].get(),
+            _field_value(param_entries, "Train Trial Indices"),
             n_trials,
             "Train Trial Indices",
         )
         test_idx = _parse_trial_indices_entry(
-            param_entries["Test Trial Indices"].get(),
+            _field_value(param_entries, "Test Trial Indices"),
             n_trials,
             "Test Trial Indices",
             train_indices=train_idx,
@@ -6132,7 +6265,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "train_idx": train_idx,
             "test_idx": test_idx,
             "lastmin": _parse_bool_entry(
-                param_entries["Use Last Minute Holdout"].get(),
+                _field_value(param_entries, "Use Last Minute Holdout"),
                 "Use Last Minute Holdout",
             ),
         }
@@ -6607,8 +6740,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     f"{name.title()} RF coordinates {tuple(coords)} are outside the coarse RF grid "
                     f"{tuple(limits.astype(int) + 1)}. Re-run coarse RF analysis for the current cache."
                 )
-        sigmas_full = np.array(parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"))
-        frequencies = np.array(parse_literal(gabor_entries["Frequencies"].get(), "Frequencies"))
+        sigmas_full = np.array(parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model"))
+        frequencies = np.array(parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies"))
         if frequencies.size == 0:
             raise ValueError("Run Full Model requires at least one configured value in Frequencies.")
         wavelet_path = _wavelet_folder("full")
@@ -6790,7 +6923,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         modality_keys = (
             {"Resolution", "Number of Planes"}
             if workflow == WORKFLOW_2P
-            else {"Sampling Rate (samples / sec)"}
+            else {"Sampling Rate (samples / sec)", "Photodiode Port"}
         )
         modality_values = {
             key: value for key, value in analysis_values.items() if key in modality_keys
@@ -6818,6 +6951,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "neural_cache_format": _selected_neural_cache_format(),
                 "performance": _runtime_control_values(),
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
+                "suite2p_output_dir": suite2p_output_dir_var.get().strip(),
                 "export_files": _selected_export_files(),
                 "export_profile": export_profile_var.get() if export_profile_var is not None else "Full archive",
                 "export_array_format": export_array_format_var.get(),
@@ -6913,8 +7047,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             render_parameter_fields(preserve_values=True, loaded_values=analysis_values)
             for key, value in analysis_values.items():
                 if key in param_entries:
-                    param_entries[key].delete(0, tk.END)
-                    param_entries[key].insert(0, str(value))
+                    _set_entry_value(param_entries[key], value)
             save_options = gui_state
             gabor_format_var.set(save_options.get("gabor_format", gabor_format_var.get()))
             loaded_wavelet_format = save_options.get("wavelet_format")
@@ -6950,6 +7083,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             _set_runtime_controls(save_options.get("performance") or {})
             suite2p_subject_dirs_var.set(
                 str(save_options.get("suite2p_subject_dirs", "")).strip()
+            )
+            suite2p_output_dir_var.set(
+                str(save_options.get("suite2p_output_dir", "")).strip()
             )
             _apply_suite2p_subject_dirs()
             _apply_project_layout_defaults(force=True)
@@ -7091,14 +7227,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Function for estimate gabor library size."""
         try:
             nx, ny = _stimulus_grid_dimensions(movie_path=_find_movie_path())
-            n_theta = int(gabor_entries["N_thetas"].get())
-            sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
+            n_theta = int(_field_value(gabor_entries, "N_thetas"))
+            sigmas = parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas")
             fine_sigmas = _ordered_float_union(
                 sigmas,
-                parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model"),
+                parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model"),
             )
             offsets = _gabor_phase_offsets_radians()
-            frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+            frequencies = parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies")
             coarse_nx, coarse_ny = _analysis_grid_dimensions(nx, ny, "coarse")
             full_nx, full_ny = _analysis_grid_dimensions(nx, ny, "full")
             coarse_bytes, coarse_shape = _gabor_library_npy_bytes(
@@ -7148,10 +7284,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             metadata = _movie_metadata(movie_path)
             n_frames = metadata["frames"]
             nx, ny = _stimulus_grid_dimensions(movie_path=movie_path)
-            n_thetas = int(gabor_entries["N_thetas"].get())
-            sigmas = parse_literal(gabor_entries["Sigmas"].get(), "Sigmas")
-            sigmas_full = parse_literal(param_entries["Sigmas Full Model"].get(), "Sigmas Full Model")
-            frequencies = parse_literal(gabor_entries["Frequencies"].get(), "Frequencies")
+            n_thetas = int(_field_value(gabor_entries, "N_thetas"))
+            sigmas = parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas")
+            sigmas_full = parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model")
+            frequencies = parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies")
             n_sigmas = len(sigmas)
             n_sigmas_full = len(sigmas_full)
             n_frequencies = max(1, len(frequencies))
@@ -7210,6 +7346,80 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         entry_wrap.columnconfigure(0, weight=1)
 
         hint = INPUT_HINTS.get(key, "")
+        if key == "Photodiode Port":
+            # This is a real selection control, not a magic constant.  It can
+            # be narrowed to exactly the ports present in the raw recording.
+            default_port = str(default or DEFAULT_EPHYS_PARAMS["Photodiode Port"])
+            port_values = [str(port) for port in range(32)]
+            if default_port not in port_values:
+                port_values.append(default_port)
+            entry = ctk.CTkOptionMenu(
+                entry_wrap,
+                values=port_values,
+                height=30,
+                corner_radius=6,
+                fg_color="#E5E7EB",
+                button_color="#64748B",
+                button_hover_color="#475569",
+                text_color=text_color,
+                command=lambda _value, name=key: _on_config_entry_changed(name),
+            )
+            entry.set(default_port)
+            entry.grid(row=0, column=0, sticky="ew")
+            ToolTip(entry)
+            entries_dict[key] = entry
+
+            def refresh_photodiode_ports():
+                """Find ports without blocking the GUI while raw data is scanned."""
+                try:
+                    raw_dir = _parse_data_dir(_field_value(param_entries, "Dir"))[0]
+                    raw_dir = resolve_folder_reference(raw_dir, "raw_data")
+                except Exception as exc:
+                    messagebox.showerror("Digital input ports", f"Select a valid Raw Data Folder first: {exc}")
+                    return
+
+                def discover_ports():
+                    from ..suite_ephys.DIO import available_dio_ports
+
+                    ports = available_dio_ports(raw_dir)
+                    if not ports:
+                        raise FileNotFoundError(
+                            f"No Trodes Din<port>.dat files were found under {raw_dir}."
+                        )
+
+                    def apply_ports():
+                        selected = entry.get()
+                        values = [str(port) for port in ports]
+                        entry.configure(values=values)
+                        entry.set(selected if selected in values else values[0])
+                        print(
+                            f"Discovered photodiode digital-input ports under {raw_dir}: "
+                            f"{', '.join(values)}"
+                        )
+
+                    schedule_on_ui(apply_ports)
+
+                run_in_thread(discover_ports, "Digital input port discovery")()
+
+            ctk.CTkButton(
+                entry_wrap,
+                text="Find ports",
+                width=82,
+                height=30,
+                corner_radius=6,
+                fg_color="#64748B",
+                hover_color="#475569",
+                command=refresh_photodiode_ports,
+            ).grid(row=0, column=1, padx=(5, 0))
+            ctk.CTkLabel(
+                entry_wrap,
+                text="Choose the port carrying the photodiode/TTL signal. Find ports scans Din<port>.dat files.",
+                text_color=muted_text,
+                font=ctk.CTkFont(size=10),
+                anchor="w",
+            ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(1, 0))
+            return label_widget, entry_wrap
+
         entry = ctk.CTkEntry(
             entry_wrap,
             height=30,
@@ -7254,6 +7464,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
     terminal_redirect = None
+    root.after(25, _drain_ui_callbacks)
     keep_awake = KeepAwake("waven analysis GUI is open")
     keep_awake.start()
     workflow_label = workflow_display_name(workflow)
@@ -7262,6 +7473,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def on_closing():
         """Function for on closing."""
         if messagebox.askokcancel("Quit", "Are you sure you want to close the application? Unsaved temporary data will be removed."):
+            ui_callbacks_closed.set()
             cancel_event = active_task.get("cancel_event")
             if cancel_event is not None:
                 cancel_event.set()
@@ -7704,6 +7916,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             gui_options.get("suite2p_subject_dirs", os.environ.get("WAVEN_SUBJECT_DIRS", ""))
         ).strip()
     )
+    suite2p_output_dir_var = tk.StringVar(
+        value=str(
+            gui_options.get("suite2p_output_dir", os.environ.get("WAVEN_SUITE2P_OUTPUT_DIR", ""))
+        ).strip()
+    )
 
     # These controls expose the remaining optional hardware features.  Core
     # scheduling and cache paths are automatic and deliberately not persisted
@@ -7801,7 +8018,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _apply_runtime_controls()
 
     def _apply_suite2p_subject_dirs():
-        """Apply optional Suite2p dataset roots used for timeline-data discovery.
+        """Apply optional Suite2p timeline roots and output-directory override.
 
         The value uses the operating-system path separator (``;`` on Windows,
         ``:`` on POSIX) so it matches the established ``WAVEN_SUBJECT_DIRS``
@@ -7814,6 +8031,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             os.environ["WAVEN_SUBJECT_DIRS"] = configured_dirs
         else:
             os.environ.pop("WAVEN_SUBJECT_DIRS", None)
+        output_dir = suite2p_output_dir_var.get().strip()
+        if output_dir:
+            os.environ["WAVEN_SUITE2P_OUTPUT_DIR"] = output_dir
+        else:
+            os.environ.pop("WAVEN_SUITE2P_OUTPUT_DIR", None)
 
     def refresh_scale_controls():
         """Refresh shared-grid controls for the selected backend."""
@@ -8043,6 +8265,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     suite2p_dirs_entry.pack(fill=tk.X, padx=10, pady=(0, 5))
     suite2p_dirs_entry.bind("<FocusOut>", lambda _event: _apply_suite2p_subject_dirs())
+    ctk.CTkLabel(
+        suite2p_dirs_frame,
+        text="Completed Suite2p output folder (contains plane0, plane1, ...).",
+        text_color=muted_text,
+        wraplength=310,
+        justify="left",
+    ).pack(anchor="w", padx=10, pady=(3, 4))
+    suite2p_output_entry = ctk.CTkEntry(
+        suite2p_dirs_frame,
+        textvariable=suite2p_output_dir_var,
+        placeholder_text="Optional Suite2p output folder",
+    )
+    suite2p_output_entry.pack(fill=tk.X, padx=10, pady=(0, 5))
+    suite2p_output_entry.bind("<FocusOut>", lambda _event: _apply_suite2p_subject_dirs())
     ctk.CTkButton(
         suite2p_dirs_frame,
         text="Apply Suite2p Folders",
@@ -8472,6 +8708,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         "Acquisition & Timing": [
             "Number of Planes",
             "Sampling Rate (samples / sec)",
+            "Photodiode Port",
             "Block End",
         ],
         "Spatial & Wavelet": [
@@ -8747,7 +8984,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _sampling_coverage():
         """Return the currently configured analysis coverage for sampling planning."""
-        return parse_literal(param_entries["Analysis Coverage"].get(), "Analysis Coverage")
+        return parse_literal(_field_value(param_entries, "Analysis Coverage"), "Analysis Coverage")
 
     def _refresh_sampling_status():
         """Show the calibrated grid, visual sampling, and Nyquist limit."""

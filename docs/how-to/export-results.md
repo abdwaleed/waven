@@ -1,5 +1,20 @@
 # Export results
 
+Export is the final, optional GUI stage. It writes files from completed
+analysis results; it does not change caches, rerun analysis, or make an
+incomplete upstream stage valid.
+
+## Before clicking Export
+
+| Input/control | Type | Required? | Effect | Output type |
+| --- | --- | --- | --- | --- |
+| completed Coarse RF result | analysis result | Yes | Supplies current population/selected-neuron plots and numerical payloads | figures plus arrays/metadata |
+| optional model result | analysis result | Only for model plots | Adds its currently displayed diagnostics to eligible exports | figures plus arrays/metadata |
+| graph-type checkboxes | Boolean selections | Yes for each action | Choose visible graph/data payloads to write | selected graph bundles |
+| array format | `npy`, `zarr`, or `both` | Optional; defaults shown in GUI | Format for reusable numerical arrays only | `.npy`, `.zarr`, or both |
+| export preset | Quick review, Data bundle, Full archive | Optional | Controls packaging and metadata density | folders and optional archives |
+| delivery | folder, ZIP, or both | Optional | Chooses how a finished package is delivered | directory and/or `.zip` |
+
 The Export tab has two clearly separated sections.
 
 **Section A — Current Display** exports the graphs that are currently visible:
@@ -63,6 +78,24 @@ The terminal reports per-neuron export timings for restoring figures, drawing,
 PNG/SVG output, numeric arrays, pickles, manifests, file count, and bytes. Use
 those timings to choose the appropriate preset rather than assuming that a
 particular format is the bottleneck.
+
+## Output structure and when to use it
+
+| File/folder | Type | Written by | Required? | Purpose |
+| --- | --- | --- | --- | --- |
+| `graphs/` | directory | all presets | Yes | Image output grouped by selected view/neuron. |
+| `*.png` | raster image | all presets | Yes | Fast visual review and paper-draft figures. |
+| `*.svg` | vector image | Full archive | Optional | Editable/publication vector figure. |
+| `data.npy` or `data.zarr` | numerical array | selected array format | Optional | Reusable array values behind an exported graph. |
+| `data.npz` | compressed array bundle | Data bundle | Optional | One compact numeric package per neuron/unit. |
+| `manifest.json` / `data_manifest.json` | JSON metadata | Data bundle and Full archive | Optional | Graph title, axes, array keys, and generated files. |
+| `*.pkl` | Python pickle | Full archive | Optional | Richer Python-specific payload; use only in trusted Python workflows. |
+| `export_manifest.json` | JSON summary | batch exports | Yes for batch output | Records package contents and any per-neuron failures. |
+
+`npy` is straightforward for Python/NumPy interchange. `zarr` is useful for
+larger chunked data. Choose `both` only when two downstream consumers actually
+need it because it duplicates numeric storage. PNG/SVG and metadata output are
+independent of this numeric-array selection.
 
 Export folders use compact, collision-safe directory names so batch exports
 remain below typical Windows path-length limits. The complete graph title and

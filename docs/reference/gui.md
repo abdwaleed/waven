@@ -59,6 +59,10 @@ settings required by the current backend:
   output format;
 - **Continue / existing cache** shows only the folder containing an existing
   `spikes`/`pos` pair.
+- **Ephys** adds a **Photodiode Port** selector. **Find ports** scans the raw
+  data tree for Trodes `Din<port>.dat` filenames and narrows the menu to ports
+  actually present; it intentionally does not require a folder named `.DIO`.
+  The user must choose the port wired to the photodiode/TTL signal.
 
 Non-path text fields include a visible example beneath the entry. These examples
 distinguish integers, floats, booleans, tuples, and numeric lists, and state the
@@ -108,6 +112,15 @@ only for two-photon timeline discovery outside `Dir`; an empty value removes
 the setting from the current process so a saved configuration never forces a
 path from another computer.
 
+Two-photon cache creation reads completed Suite2p output; it does not segment
+raw TIFF recordings itself. Each configured plane must contain `spks.npy`,
+`iscell.npy`, and `stat.npy` under a folder such as `suite2p/plane0`. When that
+output lives outside the default experiment layout, enter its parent `suite2p`
+folder in **Completed Suite2p output folder**. A Cortex Lab `Timeline.mat` is
+also required to align the neural recording to the stimulus; a standalone
+`timestamps.npy` does not provide the photodiode/TTL stimulus events needed for
+that alignment.
+
 ## Folder contract
 
 GUI path fields are folders. `Project Root` anchors the strict project layout:
@@ -125,6 +138,13 @@ model timing, and ephys alignment. The computed analysis-grid dimensions are
 shown read-only in the Gabor tab.
 
 ## Long-task contract
+
+All task settings are captured on the GUI thread before a worker begins.
+Workers report progress and completion through a main-thread callback queue;
+they do not call Tk/Tcl directly. This keeps the window interactive during
+cache creation and avoids the Windows minimize/restore deadlock caused by
+cross-thread Tk calls. The task status, terminal view, Cancel button, and
+normal window minimize/restore controls remain usable while processing.
 
 | GUI action | Durable resume point |
 | --- | --- |

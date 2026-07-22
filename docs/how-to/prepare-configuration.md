@@ -145,7 +145,7 @@ These fields define the Gabor filters before they are applied to the movie.
 | `Dir` | path string | directory | yes | Conventional raw-data folder, usually `input/raw_data`. It may contain a `.waven_reference.json` pointing to external raw data. |
 | `Path Directory` | path string | directory | yes | Coarse wavelet cache folder, usually `cache/wavelets/coarse`. |
 | `Movie Path` | path string | directory | yes | Stimulus movie folder, usually `input/stimulus_movie`. Put exactly one compatible movie file in this folder. |
-| `Spks Path` | path string | directory | yes | Neural cache folder, usually `input/neural_cache`. Exact `spikes`/`pos` names are preferred, but semantic stems such as `my_spikes.npy` and `cell_positions.npy` are accepted when unambiguous. |
+| `Spks Path` | path string | directory | required only for Continue / existing cache | Neural cache folder, usually `input/neural_cache`. Exact `spikes`/`pos` names are preferred, but semantic stems such as `my_spikes.npy` and `cell_positions.npy` are accepted when unambiguous. Fresh/raw processing writes this pair here. |
 | `Full Model Wavelet Path` | path string | directory | yes for full mode | Full-model wavelet folder, usually `cache/wavelets/full`. |
 | `Full Model Save Path` | path string | directory | yes for full model outputs | Model output folder, usually `output/models`. |
 | `Plot Cache Path` | path string | directory | optional | Plot cache folder, usually `output/plots`; the GUI writes `plot_cache.pkl.gz` inside it. |
@@ -199,6 +199,14 @@ STA.
 | `2p` | `two_photon` | `Resolution` | float string | micrometers per pixel | Imaging-plane spatial scale used for neuron positions. |
 | `2p` | `two_photon` | `Number of Planes` | integer string | imaging planes | Number of imaging planes in the recording. |
 | `ephys` | `ephys` | `Sampling Rate (samples / sec)` | float string | samples per second | Electrophysiology acquisition sampling rate, e.g. `"30000"`. |
+| `ephys` | `ephys` | `Photodiode Port` | non-negative integer string | Trodes digital-input port | Digital input that carries the stimulus photodiode/TTL signal, e.g. `"3"`. The GUI provides a menu and **Find ports** button; do not assume the default is the correct wire. |
+
+For ephys folder discovery, Waven does not require a folder named `.DIO`.
+It scans below `Dir` for Trodes filenames ending in `Din<port>.dat` and uses
+only the folders containing the selected port. For split recordings, folders
+with a `.partN` path component are concatenated in part order. **Find ports**
+can populate the GUI menu from this scan, but the acquisition wiring is still
+the authority for which port is the photodiode.
 
 Programmatic loading:
 
@@ -232,6 +240,13 @@ wavelets are usually the limiting object because each phase is a dense
 ```text
 bytes_per_phase = n_frames * analysis_x * analysis_y * n_orientations * n_sigmas * n_frequencies * 4
 ```
+
+This is the uncompressed `float32` upper-bound calculation for one phase. The
+GUI reports product-specific estimates before runs; retain free local disk
+beyond the estimate for temporary chunks, metadata, and other products. GPU is
+optional, while RAM and CPU determine practical chunk size and throughput. See
+the [first GUI analysis quickstart](../tutorials/first-gui-analysis.md) for a
+first-run hardware and storage check.
 
 Coarse RF search is intentionally smaller because it uses the derived coarse
 grid and usually one coupled size/frequency relationship.

@@ -72,6 +72,7 @@ DEFAULT_TWO_PHOTON_PARAMS: Dict[str, str] = {
 
 DEFAULT_EPHYS_PARAMS: Dict[str, str] = {
     "Sampling Rate (samples / sec)": "30000",
+    "Photodiode Port": "3",
 }
 
 # Legacy flat dict kept for backward-compatible merges.
@@ -500,6 +501,7 @@ class AnalysisConfig:
     resolution: Optional[float] = None
     n_planes: Optional[int] = None
     sampling_rate: Optional[float] = None
+    photodiode_port: Optional[int] = None
     spks_path: Optional[Path] = None
     full_model_wavelet_path: Optional[Path] = None
     full_model_save_path: Optional[Path] = None
@@ -549,6 +551,7 @@ class AnalysisConfig:
         resolution: Optional[float] = None
         n_planes: Optional[int] = None
         sampling_rate: Optional[float] = None
+        photodiode_port: Optional[int] = None
 
         if workflow == WORKFLOW_2P:
             resolution = _as_float(_get(mapping, "Resolution"), "Resolution")
@@ -561,6 +564,12 @@ class AnalysisConfig:
                 _get(mapping, "Sampling Rate (samples / sec)"),
                 "Sampling Rate (samples / sec)",
             )
+            photodiode_port = _as_int(
+                _get(mapping, "Photodiode Port"),
+                "Photodiode Port",
+            )
+            if photodiode_port < 0:
+                raise ValueError("Photodiode Port must be a non-negative digital-input port number")
         else:
             raise ValueError(f"Unknown workflow: {workflow!r}")
 
@@ -584,6 +593,7 @@ class AnalysisConfig:
             resolution=resolution,
             n_planes=n_planes,
             sampling_rate=sampling_rate,
+            photodiode_port=photodiode_port,
             sigmas=_as_float_tuple(_get(mapping, "Sigmas"), "Sigmas"),
             sigmas_full_model=_as_float_tuple(
                 _get(mapping, "Sigmas Full Model"),
@@ -775,6 +785,7 @@ class AnalysisConfig:
             mapping["Number of Planes"] = str(self.n_planes)
         elif self.workflow == WORKFLOW_EPHYS:
             mapping["Sampling Rate (samples / sec)"] = str(self.sampling_rate)
+            mapping["Photodiode Port"] = str(self.photodiode_port)
         return mapping
 
     @classmethod

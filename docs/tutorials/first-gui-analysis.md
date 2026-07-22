@@ -1,120 +1,176 @@
 # First GUI analysis
 
-This tutorial follows the GUI in its required order. The essential idea is
-simple: the stimulus movie defines the timing and spatial grid for the whole
-session, so it is prepared before neural alignment or Gabor work.
+This is the first-run path for Waven. The GUI is a staged pipeline: every completed stage creates a durable input for a later stage. Start at the top and use the status message to see the next available action.
 
-## Before opening the GUI
+## The story of one analysis
 
-Have these items ready:
+```mermaid
+flowchart LR
+  A["Choose folders and settings"] --> B["1. Prepare Stimulus Cache"]
+  B --> C["2. Create or validate neural cache"]
+  B --> D["3. Build Gabor assets"]
+  C --> E["4. Prepare a wavelet product"]
+  D --> E
+  E --> F["5. Run Coarse RF Analysis"]
+  F --> G["Optional: Run Model / Run Full Model"]
+  F --> H["6. Export figures and data"]
+  G --> H
+```
 
-- one supported stimulus movie in a folder by itself;
-- raw two-photon/ephys data **or** an existing matching `spikes`/`pos` cache;
-- a writable local project folder with room for `cache/` and `output/`;
-- visual and analysis coverage in `[left, right, top, bottom]` degree order;
-- Gabor orientations, sizes, phases (in degrees), and—only for the full
-  model—spatial frequencies.
+After the stimulus cache exists, you may prepare neural, Gabor, and wavelet inputs in a different order. Coarse RF analysis needs both a matching neural cache and the Coarse RF wavelet product.
 
-Start from the repository root with `conda activate waven` then `python ui.py`.
-The first launch may show blank GUI fields if `pipeline_config.json` is empty;
-that is expected. The GUI validates a field only when an action needs it.
+## Before launching
 
-## 1. Configure folders
+From the repository root, activate the Waven environment and launch the GUI:
 
-Set `Project Root`, `Movie Path`, neural-data paths, and output folders in
-`pipeline_config.json` or the GUI. `Movie Path` is a folder containing one
-stimulus movie. The project layout is documented in
-[Project Layout](../reference/project-layout.md).
+```bash
+conda activate waven
+python ui.py
+```
 
-Do not enter stimulus width, height, frame count, or FPS. They are read from
-the movie. Do not enter `NX` or `NY`; one downsampling percentage determines
-the shared analysis grid.
+The configuration file is optional. Fill fields in the GUI for a first run, then use **Save Current GUI Inputs / Parameters** when the choices work. [Prepare configuration](../how-to/prepare-configuration.md) documents the reusable JSON form.
 
-## 2. Stimulus & Metadata
+### Input checklist
 
-Open **1 Stimulus & Metadata**, select the movie folder, choose the percentage,
-and click **Prepare Stimulus Cache**. This reads and validates:
+| Input | Type | Required? | What to provide |
+| --- | --- | --- | --- |
+| Project Root | writable folder | Yes | Folder that owns the Waven `input`, `cache`, and `output` tree. |
+| Movie Path | folder containing one supported movie | Yes | Visual stimulus movie; Waven reads its dimensions, FPS, frames, and duration. |
+| Visual Coverage | four-number list | Yes | `[left, right, top, bottom]` visual degrees for the original movie. |
+| Analysis Coverage | four-number list | Yes | Crop to analyze, in the same order and inside Visual Coverage. |
+| Raw Data Folder (`Dir`) | folder | For fresh neural alignment | Raw two-photon/ephys data, or its Waven reference folder. |
+| Spks Path | folder | Only for Continue / existing cache | Existing compatible `spikes` and `pos` pair. |
+| Completed Suite2p output | folder | Fresh 2-photon only | Completed `suite2p/planeN` results, not raw TIFFs. |
+| Sampling Rate | positive number in Hz | Ephys only | Acquisition rate, for example `30000`. |
+| Photodiode Port | selected integer | Ephys only | Trodes digital input carrying the photodiode/TTL signal. |
 
-- original width and height;
-- frame count;
-- frames per second;
-- duration (`frames / FPS`).
+The conventional project tree is:
 
-It then writes the binary downsampled movie with shape `(time, y, x)`. The GUI
-uses this metadata-derived frame count for neural-cache alignment and the
-duration to validate ephys photodiode trial boundaries. This is why **Session
-Setup** is intentionally unavailable for neural cache creation until this step
-succeeds.
+```text
+your_experiment/
+  input/raw_data/             raw source or a .waven_reference.json pointer
+  input/stimulus_movie/       one movie file
+  input/neural_cache/         spikes.npy/.zarr and pos.npy/.zarr
+  cache/gabor/                Gabor libraries or convolution kernels
+  cache/wavelets/             coarse and full-model products
+  output/plots/               plot cache
+  output/models/              optional model output
+  output/recovery_cache/      resumable task checkpoints
+```
 
-## 3. Session Setup
+### Disk, RAM, CPU, and GPU
 
-Open **2 Session Setup** and choose the neural source.
+Read the size estimates in the Gabor and Wavelet Products tabs before an experiment-sized run. Full-model wavelets are often the largest artifacts. Keep enough free local disk for the displayed output plus working headroom; SSD/NVMe storage is strongly preferable for large disk-backed caches.
 
-- **Fresh / raw data** builds an aligned `spikes`/`pos` cache. For ephys,
-  `spikes` is frame-bin firing rate in Hz: spike count divided by the actual
-  photodiode-defined bin duration.
-- **Continue / existing cache** validates an existing compatible cache pair.
+Waven processes chunked artifacts rather than loading every wavelet tile into RAM, but more RAM allows larger chunks and makes large sessions smoother. CPU cores decode movies, resize frames, load data, and handle CPU fallbacks. A CUDA GPU is optional: compatible convolution/RF work uses it when available and otherwise falls back to CPU.
 
-The resulting neural array has shape `(trials, frames, neurons)`.
+Start with a short movie, modest percentage, and small Gabor lists. This verifies codecs, storage, available RAM, and optional GPU drivers before a full run creates a large partial cache.
 
-## 4. Gabor and wavelet products
+Long tasks run away from the GUI event loop. You can minimize, restore, inspect progress, or press **Cancel** during a task. Use Cancel rather than force-closing the program; completed artifacts are reusable and non-resumable partial outputs are cleaned up where appropriate.
 
-In **3 Gabor**, select Legacy or Convolution.
+## Session Configuration
 
-- Legacy creates coarse and fine flattened Gabor libraries.
-- Convolution creates compact coarse and fine kernel caches instead.
+The panel above the tabs supplies the settings used by every stage. Path fields expect folders, not individual files. Browse buttons keep the project layout predictable even when source data live outside the project folder.
 
-In **4 Wavelet Products**, prepare only the products you need:
+### Choose the workflow
 
-| Action | Used by | Product |
+Select **2-photon** or **Ephys** first. Workflow-specific fields appear in **Acquisition & Timing**.
+
+| Workflow | Fresh-data inputs | Output |
 | --- | --- | --- |
-| Prepare Coarse RF Power Cache | Run Coarse RF Analysis | `coarse_rf_power.zarr` |
-| Prepare Run Model Phase Caches | Run Model | `coarse_model_real.zarr`, `coarse_model_imag.zarr` |
-| Prepare Run Full Model Phase Caches | Run Full Model | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` |
+| 2-photon | raw/timeline data, completed Suite2p output, Number of Planes, Resolution (µm/px) | frame-aligned `spikes` shaped `(trials, frames, neurons)` and neuron positions |
+| Ephys | raw recording folder, sampling rate, photodiode port, ephys unit source | frame-aligned firing-rate `spikes` shaped `(trials, frames, units)` and unit positions/metadata when present |
 
-All large internal products are chunked Zarr arrays. They are streamed from
-disk rather than eagerly loaded into memory.
+For ephys, use the **Photodiode Port** menu to select the digital input that carries the stimulus photodiode/TTL signal. **Find ports** scans the raw-data tree for filenames ending in `Din<port>.dat`; it does not depend on a folder name such as `.DIO`. Select the correct physical signal, not merely the first discovered port. Port `3` remains only as a backwards-compatible default for older saved configurations.
 
-## 5. Analyze
+### Enter values in their intended form
 
-Click **Run Coarse RF Analysis**. RF maps and displayed orientation/size curves
-are correlation-based diagnostics. The OSI and gOSI distributions are different:
-they use firing-rate orientation tuning from the aligned `spikes` cache, weighted
-by the preferred wavelet feature. Individual orientation and size correlation
-curves show 95% confidence intervals only.
+| GUI section | Input | Type/example | Required? | Meaning |
+| --- | --- | --- | --- | --- |
+| Paths & Session | Experiment Info | `('mouse01', '2026-05-23', 3)` | Fresh alignment | Session identifier under raw data. |
+| Acquisition & Timing | Block End | integer, e.g. `0` | Fresh alignment | Last acquisition block to consider. |
+| Spatial & Wavelet | Visual/Analysis Coverage | `[-69, 69, 56, -56]` | Yes | Maps movie pixels to visual degrees and defines the crop. |
+| Gabor | N_thetas | integer, e.g. `18` | Yes | Orientation bins from 0° through 180°. |
+| Gabor | Sigmas | list, e.g. `[2, 4, 8]` | Yes | Coarse RF filter sizes in analysis pixels. |
+| Gabor | Frequencies | list, e.g. `[0.02, 0.06]` | Full model; optional for coupled coarse RF | Spatial-frequency bins. |
+| Gabor | Phases | degrees list, e.g. `[0, 90]` | Yes | Phase offsets used for real/imaginary products. |
+| Performance & Hardware | optional toggles | checkboxes | No | Scheduling/acceleration controls, not scientific parameters. |
 
-After RF analysis, **Run Model (Coarse RF)** requires the named coarse-model
-phase pair. **Run Full Model** requires the named full-model phase pair and
-uses the coarse RF feature seeds for local refinement.
+Do not enter source movie width, height, FPS, frame count, `NX`, or `NY`. The selected movie owns those values. The stimulus percentage determines the shared analysis grid.
 
-### Read the plots correctly
+## 1. Stimulus & Metadata
 
-- **All Neurons** azimuth/elevation/orientation/size colours are each neuron's
-  preferred RF feature derived from Pearson correlation; they are not firing
-  rate values.
-- **Individual Neuron** RF, orientation, size, and frequency are derived from
-  the same RF correlation tensor. Azimuth and elevation are the established
-  signed SVD spatial projections of the selected RF map, which give a robust
-  one-dimensional retinotopic profile instead of letting one pixel dominate the
-  curve. Only orientation and size show trial-derived 95% confidence intervals.
-- **OSI/gOSI** are separate. Waven uses the preferred RF location to weight
-  each orientation's stimulus frames, then computes the tuning from neural
-  firing rate/aligned activity. Mean and median are displayed at sufficient
-  precision so weak nonzero selectivity is not rounded away.
+Open **1 Stimulus & Metadata**, confirm Movie Path, choose a downsampling percentage and cache format, then click **Prepare Stimulus Cache**.
 
-## Resuming safely
+| Input | Type | Required? | Output | Output type |
+| --- | --- | --- | --- | --- |
+| movie folder | folder with one movie | Yes | validated movie metadata | width, height, FPS, frames, duration |
+| coverage lists | four-number lists | Yes | cropped/resized stimulus cache | `(frames, y, x)` binary NPY or Zarr array |
+| percentage | 1–100 | Yes | common analysis-grid dimensions | read-only derived values |
 
-Every cache is validated by shape and a parameter fingerprint. Re-running an
-action reuses a compatible completed product and regenerates a stale one. If a
-run fails, read the reported artifact name and shape; do not substitute a cache
-made with a different movie, percentage, backend, orientation count, sigma
-list, phase list, or frequency list.
+This step is first because ephys alignment needs the movie duration to validate photodiode trial boundaries, while neural alignment and wavelets need the frame count. Changing movie, percentage, or coverage invalidates dependent products; prepare the cache again before continuing.
 
-## A small first run is worth it
+## 2. Session Setup
 
-For a new machine or a changed configuration, first test a short/small movie
-with a modest percentage and a small Gabor bank. Confirm that the terminal
-shows the same task banner, progress/ETA, and final resource summary for every
-stage. Then move to the experiment-scale movie. This catches missing codecs,
-path references, GPU-driver issues, and insufficient disk capacity without
-creating an enormous partial cache.
+Choose exactly one neural-data source in **2 Session Setup**.
+
+| Choice | Input | Button | Output |
+| --- | --- | --- | --- |
+| Fresh / raw data | workflow-specific raw inputs | **Create pos/spikes Cache** | aligned `spikes` and `pos` in selected NPY/Zarr format |
+| Continue / existing cache | folder containing matching cache pair | **Validate Existing Neural Cache** | validated cache, without raw-data alignment |
+
+The neural cache is shared by Coarse RF, PSTH/STA, and model steps. Waven checks that its frame axis matches the prepared movie; do not substitute a cache from another movie or downsampling configuration.
+
+## 3. Gabor
+
+Choose a backend and prepare its Gabor assets. **Legacy** creates larger flattened coarse/fine libraries. **Convolution** creates compact reusable kernel caches. Both use the same orientations, sigmas, frequencies, and phases.
+
+| Product | Used by | Required? |
+| --- | --- | --- |
+| coarse Gabor library or kernel cache | Coarse RF | Yes before its wavelet product when the selected backend needs it |
+| fine/full Gabor library or kernel cache | Full Model | Only for full-model work |
+
+## 4. Wavelet Products
+
+Prepare only the consumer-specific wavelet product you need. These cache types are not interchangeable.
+
+| Button | Output | Enables |
+| --- | --- | --- |
+| Prepare Coarse RF Power Cache | `coarse_rf_power.zarr` | **Run Coarse RF Analysis** |
+| Prepare Run Model Phase Caches | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | **Run Model (Coarse RF)** |
+| Prepare Run Full Model Phase Caches | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | **Run Full Model** |
+
+Every analysis requires the first row. Both model actions additionally require the Coarse RF result because it seeds their later feature search.
+
+## 5. Analysis
+
+Click **Run Coarse RF Analysis** first. It combines the aligned neural cache with Coarse RF wavelets and creates population/selected-neuron displays.
+
+| Button | Required inputs | Result |
+| --- | --- | --- |
+| Run Coarse RF Analysis | prepared stimulus, neural cache, coarse-RF power cache | correlation RF maps, preferred features, orientation/size diagnostics, OSI/gOSI summaries |
+| Run Model (Coarse RF) | Coarse RF result + Run Model phase pair | coarse model fit and diagnostics |
+| Run Full Model | Coarse RF result + full-model phase pair | full-model refinement and diagnostics |
+
+RF maps and preferred-feature curves are correlation-based diagnostics. OSI/gOSI are calculated separately from frame-aligned neural activity at the preferred stimulus feature. Select an individual neuron/unit to inspect its RF, tuning curves, and PSTH-weighted STA panels.
+
+## 6. Export
+
+Export packages computed results; it does not rerun analysis.
+
+| Section | Scope | Control | Output |
+| --- | --- | --- | --- |
+| A — Current Display | visible all-neuron and/or selected-neuron plots | independent graph-type checkboxes | PNG/SVG plus selected numeric data and manifests |
+| B — Every Analyzed Neuron | one selected graph type for all units | graph-type checkboxes | graph/data bundle per neuron/unit; can be large |
+| Presets | either section | Quick review, Data bundle, Full archive | controls packaging, not analysis |
+
+Choose NPY, Zarr, or both for reusable arrays; images and JSON metadata remain separate. **Quick review** is for visual QA, **Data bundle** groups each neuron’s numerical data, and **Full archive** retains detailed per-graph structure. See [Export results](../how-to/export-results.md) for file and folder details.
+
+## Common first-run mistakes
+
+- A disabled action normally has an unmet upstream requirement. Read the adjacent status/hint before rerunning later stages.
+- Cache fingerprints prevent reuse when movie, coverage, percentage, backend, or Gabor settings differ.
+- Find ports finds possible ephys channels; confirm from the acquisition setup which port is the photodiode/TTL.
+- Keep the application open during work. It remains responsive; use its Cancel button and terminal/status progress instead of terminating the process.
+
+Next: [Prepare configuration](../how-to/prepare-configuration.md), [GUI reference](../reference/gui.md), and [Export results](../how-to/export-results.md).

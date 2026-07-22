@@ -1492,8 +1492,21 @@ def downsample_video_binary(
     import skimage.transform
     import gc
 
+    # OpenCV otherwise creates its own native pool for every outer resize
+    # worker.  That nested parallelism can occupy every core and starve Tk's
+    # event loop on small Windows machines.  The bounded outer pool below is
+    # the only parallel layer used by this GUI-facing operation.
+    previous_cv2_threads = None
+    try:
+        previous_cv2_threads = cv2.getNumThreads()
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
+
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
+        if previous_cv2_threads is not None:
+            cv2.setNumThreads(previous_cv2_threads)
         raise IOError(f"Cannot open video file for downsampling: {path}")
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -1501,6 +1514,8 @@ def downsample_video_binary(
     ret, first_img = cap.read()
     if not ret:
         cap.release()
+        if previous_cv2_threads is not None:
+            cv2.setNumThreads(previous_cv2_threads)
         raise IOError(f"Cannot read the first frame from video: {path}")
     xi, xe, yi, ye = coverage_crop_bounds(
         first_img.shape[:2], visual_coverage, analysis_coverage,
@@ -1564,6 +1579,8 @@ def downsample_video_binary(
             from numcodecs import Blosc
         except ImportError as exc:
             cap.release()
+            if previous_cv2_threads is not None:
+                cv2.setNumThreads(previous_cv2_threads)
             raise ImportError(
                 "Zarr downsampled video output requires the 'zarr' and 'numcodecs' packages. "
                 "Install project requirements or select 'npy'."
@@ -1687,6 +1704,11 @@ def downsample_video_binary(
     finally:
         if executor is not None:
             executor.shutdown(wait=True)
+        if previous_cv2_threads is not None:
+            try:
+                cv2.setNumThreads(previous_cv2_threads)
+            except Exception:
+                pass
         
     cap.release()
     if hasattr(output_mmap, "flush"):
