@@ -69,6 +69,7 @@ nav:
       - Build Gabor Libraries: how-to/build-gabor-libraries.md
       - Run Wavelet Decomposition: how-to/run-wavelet-decomposition.md
       - Run RF Analysis: how-to/run-rf-analysis.md
+      - Interpret Analysis Graphs: how-to/interpret-analysis-graphs.md
       - Export Results: how-to/export-results.md
       - Build The Documentation: how-to/build-docs.md
   - Explanation:

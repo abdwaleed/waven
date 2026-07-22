@@ -44,6 +44,7 @@ from the aligned neural cache—not correlation amplitudes. See
 
 - [First GUI Analysis](tutorials/first-gui-analysis.md)
 - [Prepare Wavelet Products](how-to/run-wavelet-decomposition.md)
+- [Interpret Analysis Graphs](how-to/interpret-analysis-graphs.md)
 - [GUI Reference](reference/gui.md)
 - [Data Contracts and Scientific Interpretation](reference/data-contracts.md)
 - [Source Architecture and Ownership](reference/source-architecture.md)
