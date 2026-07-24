@@ -5183,14 +5183,26 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         # Pass the disk-backed wavelet tensor directly.  PearsonCorrelationPinkNoise
         # streams spatial-feature blocks; flattening this Zarr selection here would
         # allocate the entire coarse cache (several GiB for long recordings).
-        rf_split_settings = _model_split_settings({"spks": spks})
+        n_cache_trials = int(spks.shape[0])
+        if n_cache_trials < 1:
+            raise ValueError("The neural cache contains no trials.")
+        if n_cache_trials == 1:
+            # Coarse RF can be estimated from a single trial even though the
+            # optional model workflows cannot perform cross-validation.
+            rf_train_idx = [0]
+            print(
+                "Single-trial neural cache: Coarse RF will use trial 1. "
+                "Run Model and Run Full Model remain unavailable without a held-out trial."
+            )
+        else:
+            rf_train_idx = _model_split_settings({"spks": spks})["train_idx"]
         # Materialize only the requested training trials.  Zarr deliberately
         # rejects NumPy's ``spks[[0, 2], ...]`` shorthand, which previously
         # made Coarse RF fail whenever the neural cache remained disk-backed.
         training_response = np.mean(
             read_first_axis_indices(
                 spks,
-                rf_split_settings["train_idx"],
+                rf_train_idx,
                 slice(0, n_frames),
                 slice(None),
             ),
@@ -5358,7 +5370,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             nb_frames=nb_frames,
             wavelet_dir=parent_dir,
             neural_cache_dir=str(neural_cache_dir),
-            rf_train_idx=rf_split_settings["train_idx"],
+            rf_train_idx=rf_train_idx,
             rf_correlation_path=rf_output_path,
         )
         schedule_on_ui(_refresh_model_settings_hint)
@@ -6361,7 +6373,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 return
             n_trials = int(spikes.shape[0])
             if n_trials < 2:
-                raise ValueError("Detected 1 trial; the models need at least 2 trials.")
+                model_settings_hint.configure(
+                    text=(
+                        "Detected 1 trial. Coarse RF uses that trial, but Run Model and "
+                        "Run Full Model require at least 2 trials for cross-validation."
+                    ),
+                    text_color=muted_text,
+                )
+                return
             train_idx = _parse_trial_indices_entry(
                 _field_value(param_entries, "Train Trial Indices"), n_trials, "Train Trial Indices",
             )
