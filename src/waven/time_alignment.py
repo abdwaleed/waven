@@ -31,6 +31,49 @@ class AlignedNeuralData:
     unit_info: Optional[Sequence[Dict[str, Any]]] = None
 
 
+def normalize_excluded_trial_numbers(values: Optional[Sequence[int]]) -> Tuple[int, ...]:
+    """Validate and de-duplicate one-indexed trial numbers requested for removal."""
+    normalized = []
+    for value in values or ():
+        if isinstance(value, bool):
+            raise ValueError("Excluded Trial Numbers must contain positive whole numbers")
+        number = int(value)
+        if number != value or number < 1:
+            raise ValueError("Excluded Trial Numbers must contain positive whole numbers")
+        if number not in normalized:
+            normalized.append(number)
+    return tuple(normalized)
+
+
+def exclude_identified_trials(
+    spikes: np.ndarray,
+    excluded_trial_numbers: Optional[Sequence[int]] = None,
+) -> np.ndarray:
+    """Drop requested one-indexed trials, reporting any request beyond the recording."""
+    if np.ndim(spikes) < 1:
+        raise ValueError("Aligned neural responses must have a trial axis")
+
+    requested = normalize_excluded_trial_numbers(excluded_trial_numbers)
+    if not requested:
+        return spikes
+
+    n_trials = int(spikes.shape[0])
+    included = tuple(number for number in requested if number <= n_trials)
+    ignored = tuple(number for number in requested if number > n_trials)
+    if ignored:
+        print(
+            f"Identified {n_trials} trial(s), so the maximum identified trial is {n_trials}. "
+            f"Ignored out-of-range exclusion(s) {list(ignored)}; "
+            f"excluded matching trial(s) {list(included)}."
+        )
+    elif included:
+        print(f"Excluded identified trial(s) {list(included)} from {n_trials} trial(s).")
+
+    excluded = set(included)
+    keep_indices = [index for index in range(n_trials) if index + 1 not in excluded]
+    return np.asarray(spikes)[keep_indices]
+
+
 def _save_aligned_outputs(
     neuron_pos: np.ndarray,
     spikes: np.ndarray,
@@ -66,6 +109,7 @@ def load_two_photon_spikes(
     save_dir: Optional[Path] = None,
     output_format: str = "npy",
     stimulus_duration: Optional[float] = None,
+    excluded_trial_numbers: Optional[Sequence[int]] = None,
 ) -> AlignedNeuralData:
     """Load and time-align two-photon (suite2p) spike data.
 
@@ -98,6 +142,8 @@ def load_two_photon_spikes(
         spikes, neuron_pos, _, _ = load_neural_cache_pair(spks_path.parent, spks_path)
         aligned_spikes = None
 
+    spikes = exclude_identified_trials(spikes, excluded_trial_numbers)
+
     if spks_path is None:
         _save_aligned_outputs(neuron_pos, spikes, save_dir, output_format)
 
@@ -116,6 +162,7 @@ def align_ephys_data(
     output_format: str = "npy",
     stimulus_duration: Optional[float] = None,
     photodiode_port: Optional[int] = None,
+    excluded_trial_numbers: Optional[Sequence[int]] = None,
     **kwargs: Any,
 ) -> AlignedNeuralData:
     
@@ -389,6 +436,7 @@ def align_ephys_data(
     neuron_pos, spikes, unit_ids, unit_info = extract_pos_and_spikes(
         units, start_times, end_times, pd_time, pd_state, nb_frames
     )
+    spikes = exclude_identified_trials(spikes, excluded_trial_numbers)
     
     print(neuron_pos.shape)
     print(spikes.shape)
@@ -440,6 +488,8 @@ def load_aligned_spikes(
     save_dir: Optional[Path] = None,
     output_format: str = "npy",
     stimulus_duration: Optional[float] = None,
+    excluded_trial_numbers: Optional[Sequence[int]] = None,
+    reuse_cache: bool = True,
 ) -> AlignedNeuralData:
     """Dispatch spike loading to the workflow-specific alignment routine."""
     cache_dir = Path(".") if save_dir is None else Path(save_dir)
@@ -451,13 +501,20 @@ def load_aligned_spikes(
 
     if spks_path is not None:
         spikes, neuron_pos, _, _ = load_neural_cache_pair(spks_path.parent, spks_path)
-        return AlignedNeuralData(spikes=spikes, neuron_pos=neuron_pos)
+        return AlignedNeuralData(
+            spikes=exclude_identified_trials(spikes, excluded_trial_numbers),
+            neuron_pos=neuron_pos,
+        )
 
-    try:
-        spikes, neuron_pos, _, _ = load_neural_cache_pair(cache_dir)
-        return AlignedNeuralData(spikes=spikes, neuron_pos=neuron_pos)
-    except FileNotFoundError:
-        pass
+    if reuse_cache:
+        try:
+            spikes, neuron_pos, _, _ = load_neural_cache_pair(cache_dir)
+            return AlignedNeuralData(
+                spikes=exclude_identified_trials(spikes, excluded_trial_numbers),
+                neuron_pos=neuron_pos,
+            )
+        except FileNotFoundError:
+            pass
 
     if workflow == WORKFLOW_2P:
         if resolution is None or n_planes is None:
@@ -476,6 +533,7 @@ def load_aligned_spikes(
             save_dir=cache_dir,
             output_format=output_format,
             stimulus_duration=stimulus_duration,
+            excluded_trial_numbers=excluded_trial_numbers,
         )
 
     if workflow == WORKFLOW_EPHYS:
@@ -494,6 +552,7 @@ def load_aligned_spikes(
             experiment_info=experiment_info,
             threshold=threshold,
             method=method,
+            excluded_trial_numbers=excluded_trial_numbers,
         )
 
     raise ValueError(f"Unknown workflow: {workflow!r}")

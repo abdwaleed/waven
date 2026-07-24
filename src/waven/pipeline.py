@@ -322,6 +322,7 @@ def load_spikes_and_positions(
         sampling_rate=analysis.sampling_rate,
         photodiode_port=analysis.photodiode_port,
         spks_path=analysis.spks_path,
+        excluded_trial_numbers=analysis.excluded_trial_numbers,
         threshold=threshold,
         method=method,
         correct_positions=correct_positions,

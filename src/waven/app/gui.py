@@ -1553,7 +1553,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "interpolators",
                 "diagnostics",
             ]
-        payload = {"source": model_name, "neuron_id": neuron_id}
+        # ``neuron_id`` is retained for backward compatibility with existing
+        # export readers, but it is an array index.  ``unit_id`` is the exact
+        # key read from the ephys PKL file (when that provenance is available).
+        raw_unit_ids = analysis_state.get("unit_ids")
+        unit_id = neuron_id
+        if raw_unit_ids is not None and 0 <= int(neuron_id) < len(raw_unit_ids):
+            unit_id = raw_unit_ids[int(neuron_id)]
+            if isinstance(unit_id, np.generic):
+                unit_id = unit_id.item()
+        payload = {
+            "source": model_name,
+            "neuron_id": neuron_id,
+            "neuron_index": neuron_id,
+            "unit_id": unit_id,
+        }
         if isinstance(result, tuple):
             for name, value in zip(names, result):
                 payload[name] = value
@@ -4833,6 +4847,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def create_neural_cache():
         """Create or validate the aligned neural firing-rate cache."""
         context = _neural_alignment_context()
+        from .. import time_alignment as ta
+
+        excluded_trial_numbers = ta.normalize_excluded_trial_numbers(
+            parse_literal(_field_value(param_entries, "Excluded Trial Numbers"), "Excluded Trial Numbers")
+        )
         spks_text = _field_value(param_entries, "Spks Path").strip()
         if _selected_neural_source() == "spks_path":
             if spks_text.lower() in ("", "none", "null"):
@@ -4855,7 +4874,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             print("Neural source is Data Dir; Spks Path will be ignored unless you select Spks Path mode.")
 
         cache_pair = find_neural_cache_pair(context["neural_cache_dir"])
-        if cache_pair is not None:
+        if cache_pair is not None and not excluded_trial_numbers:
             update_progress(20, "Neural cache", "Loading existing aligned cache")
             spks, neuron_pos, loaded_spks_path, loaded_pos_path = load_neural_cache_pair(context["neural_cache_dir"])
             print(f"Resume: found aligned spikes cache: {loaded_spks_path} {tuple(spks.shape)}")
@@ -4866,8 +4885,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             update_progress(100, "Neural cache", "Existing cache ready")
             return True
 
+        if cache_pair is not None:
+            print("Rebuilding the neural cache from raw data to apply Excluded Trial Numbers.")
+
         update_progress(10, "Neural cache", "Aligning neural data")
-        from .. import time_alignment as ta
 
         aligned = ta.load_aligned_spikes(
             workflow,
@@ -4886,6 +4907,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             method="frame2ttl",
             save_dir=context["neural_cache_dir"],
             output_format=_selected_neural_cache_format(),
+            excluded_trial_numbers=excluded_trial_numbers,
+            reuse_cache=False,
         )
         cache_pair = find_neural_cache_pair(context["neural_cache_dir"])
         if cache_pair is None:
@@ -5234,7 +5257,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     raw_unit_id = raw_unit_id.item()
                 shank = cached_info.get("shank", "")
                 unit = cached_info.get("unit") or f"unit{raw_unit_id}"
-                record_unit_id = f"{shank}_{unit}" if shank else str(unit)
                 best_feature = np.asarray(rfs_gabor[1], dtype=int)[:5, neuron_id]
                 feature_x, feature_y, feature_orientation, feature_sigma, feature_frequency = (
                     int(value) for value in best_feature
@@ -5246,7 +5268,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
                 records.append(
                     {
-                        "unit_id": record_unit_id,
+                        # Do not transform the acquisition identifier.  In
+                        # particular, avoid replacing the PKL key with a
+                        # composite display label such as ``shank0_unit17``.
+                        "unit_id": raw_unit_id,
                         "curve_kind": curve_kind,
                         "tuning": {
                             "orientations": angles.tolist(),
@@ -5274,6 +5299,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "shank": shank,
                             "unit": unit,
                             "unit_index": neuron_id,
+                            "neuron_index": neuron_id,
                             "quality": cached_info.get("quality", ""),
                             "position": cached_info.get("position", np.asarray(neuron_pos[neuron_id]).tolist()),
                             "n_spikes_total": cached_info.get("n_spikes", ""),
@@ -5567,6 +5593,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         entry_neuron.delete(0, tk.END)
                         entry_neuron.insert(0, str(neuron_id))
 
+                    raw_unit_id = (
+                        unit_ids[neuron_id]
+                        if unit_ids is not None and neuron_id < len(unit_ids)
+                        else neuron_id
+                    )
+                    if isinstance(raw_unit_id, np.generic):
+                        raw_unit_id = raw_unit_id.item()
+
                     trial_spikes = spks[:, :, neuron_id]
                     spike_train = np.mean(trial_spikes, axis=0)
                     ax2.clear()
@@ -5586,6 +5620,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         {
                             "source": "Inspect Single Neuron",
                             "neuron_id": neuron_id,
+                            "neuron_index": neuron_id,
+                            "unit_id": raw_unit_id,
                             "spike_train": spike_train,
                             "trial_spikes": trial_spikes,
                         },
@@ -5677,7 +5713,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         else:
                             position_text = str(position or "")
                         shank = record.get("shank") or ""
-                        unit = record.get("unit") or ""
+                        original_unit_id = record.get("original_unit_id", raw_unit_id)
                         quality = record.get("quality") or ""
                         n_spikes = record.get("n_spikes_total", "")
                         stats_text = (
@@ -5693,7 +5729,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             f"Trials: {min(tuning_record['trial_counts'])}\n\n"
                             "UNIT INFO\n"
                             f"Shank: {shank}\n"
-                            f"Unit: {unit}\n"
+                            f"PKL Unit ID: {original_unit_id}\n"
                             "Channel: \n"
                             f"Position: {position_text}\n"
                             f"Quality: {quality}\n"
@@ -5805,6 +5841,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         {
                             "source": "Inspect Single Neuron",
                             "neuron_id": neuron_id,
+                            "neuron_index": neuron_id,
+                            "unit_id": raw_unit_id,
                             "rf2d": rf2d,
                             "azimuth_correlation_tuning": azimuth_tuning,
                             "elevation_correlation_tuning": elevation_tuning[::-1],
@@ -5843,7 +5881,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         )
                         _set_figure_export_payload(
                             fig_sta,
-                            {"source": "Coarse RF PSTH-weighted STA", "neuron_id": neuron_id},
+                            {
+                                "source": "Coarse RF PSTH-weighted STA",
+                                "neuron_id": neuron_id,
+                                "neuron_index": neuron_id,
+                                "unit_id": raw_unit_id,
+                            },
                         )
                     else:
                         n_lags = int(sta_result.maps.shape[0])
@@ -5881,6 +5924,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             {
                                 "source": "Coarse RF PSTH-weighted STA",
                                 "neuron_id": neuron_id,
+                                "neuron_index": neuron_id,
+                                "unit_id": raw_unit_id,
                                 "sta_maps": sta_result.maps,
                                 "sta_lag_frames": sta_result.lag_frames,
                                 "sta_lag_ms": sta_result.lag_ms,
@@ -8893,7 +8938,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         external_param_keys = {
             "Neuron ID", "Dir", "Spks Path", "Movie Path", "Path Directory",
             "Full Model Wavelet Path", "Full Model Save Path", "Plot Cache Path",
-            "Recovery Cache Directory", "Sigmas Full Model", "Train Trial Indices",
+            "Recovery Cache Directory", "Sigmas Full Model", "Excluded Trial Numbers", "Train Trial Indices",
             "Test Trial Indices", "Use Last Minute Holdout", "Model Fit Minutes",
         }
         existing_values = {}
@@ -8979,7 +9024,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             for key, row_widgets in neural_row_widgets.items():
                 visible = (key == "Dir" and source == "data_dir") or (
                     key == "Spks Path" and source == "spks_path"
-                )
+                ) or (key == "Excluded Trial Numbers" and source == "data_dir")
                 for widget in row_widgets:
                     widget.grid() if visible else widget.grid_remove()
             if source == "data_dir":
@@ -9030,8 +9075,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ANALYSIS_LABELS,
     )
 
+    neural_row_widgets["Excluded Trial Numbers"] = add_config_row(
+        frame_neural_cache,
+        "Excluded Trial Numbers",
+        param_defaults.get("Excluded Trial Numbers", neural_section_defaults.get("Excluded Trial Numbers", "[]")),
+        param_entries,
+        3,
+        frame_color,
+        ANALYSIS_LABELS,
+    )
+
     neural_cache_format_frame = ctk.CTkFrame(frame_neural_cache, fg_color="transparent")
-    neural_cache_format_frame.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    neural_cache_format_frame.grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
     ctk.CTkLabel(
         neural_cache_format_frame,
         text="Create as:",
@@ -9065,7 +9120,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#1D4ED8",
         command=run_in_thread(create_neural_cache, "Neural cache creation"),
     )
-    btn_create_neural_cache.grid(row=4, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    btn_create_neural_cache.grid(row=5, column=0, columnspan=2, pady=(12, 0), sticky="ew")
     _refresh_neural_source_controls()
 
     # --- Stimulus downsample cache ---

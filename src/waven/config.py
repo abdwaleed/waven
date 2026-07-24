@@ -48,6 +48,7 @@ DEFAULT_COMMON_PARAMS: Dict[str, str] = {
     "Hz": "30",
     "Number of Frames": "18000",
     "Number of Trials to Keep": "3",
+    "Excluded Trial Numbers": "[]",
     "Movie Path": (
         "your_experiment/input/stimulus_movie"
     ),
@@ -175,6 +176,20 @@ def _as_int(value: Any, field_name: str) -> int:
     if parsed is None:
         raise ValueError(f"{field_name} is required")
     return int(parsed)
+
+
+def _as_positive_int_tuple(value: Any, field_name: str) -> Tuple[int, ...]:
+    """Parse a one-indexed trial-number list and reject invalid entries."""
+    values = []
+    for item in _as_tuple(value, field_name):
+        if isinstance(item, bool):
+            raise ValueError(f"{field_name} must contain positive whole numbers")
+        number = int(item)
+        if number != item or number < 1:
+            raise ValueError(f"{field_name} must contain positive whole numbers")
+        if number not in values:
+            values.append(number)
+    return tuple(values)
 
 
 def _as_float(value: Any, field_name: str) -> float:
@@ -492,6 +507,7 @@ class AnalysisConfig:
     hz: int
     nb_frames: int
     n_trials_to_keep: int
+    excluded_trial_numbers: Tuple[int, ...]
     train_trial_indices: str
     test_trial_indices: str
     use_last_minute_holdout: bool
@@ -610,6 +626,10 @@ class AnalysisConfig:
             n_trials_to_keep=_as_int(
                 _get(mapping, "Number of Trials to Keep"),
                 "Number of Trials to Keep",
+            ),
+            excluded_trial_numbers=_as_positive_int_tuple(
+                _get(mapping, "Excluded Trial Numbers", "[]"),
+                "Excluded Trial Numbers",
             ),
             train_trial_indices=str(_get(mapping, "Train Trial Indices") or "auto"),
             test_trial_indices=str(_get(mapping, "Test Trial Indices") or "auto"),
@@ -768,6 +788,7 @@ class AnalysisConfig:
             "Hz": str(self.hz),
             "Number of Frames": str(self.nb_frames),
             "Number of Trials to Keep": str(self.n_trials_to_keep),
+            "Excluded Trial Numbers": repr(list(self.excluded_trial_numbers)),
             "Train Trial Indices": self.train_trial_indices,
             "Test Trial Indices": self.test_trial_indices,
             "Use Last Minute Holdout": str(self.use_last_minute_holdout),
