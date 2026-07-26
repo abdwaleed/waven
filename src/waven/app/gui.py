@@ -5731,9 +5731,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 """Function for click RF."""
                 try:
                     neuron_id = _selected_neuron_id()
-                    include_model = _run_model_phase_caches_present()
+                    include_model = bool(
+                        _worker_var_value("run_model_on_inspect", run_model_on_inspect_var, False)
+                    )
                     include_full = bool(_worker_var_value("run_full_model_on_inspect", run_full_model_on_inspect_var, False))
-                    if not include_model:
+                    if include_model and not _run_model_phase_caches_present():
+                        include_model = False
                         print(
                             "[INSPECT] Run Model tuning curves were not queued because the coarse model phase "
                             "caches are not prepared. Select 'Prepare Run Model Phase Caches' and run "
@@ -5749,7 +5752,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     _clear_model_diagnostic_figures()
                     queued_models = [
                         label for enabled, label in (
-                            (include_model, "Run Model (automatic)"),
+                            (include_model, "Run Model"),
                             (include_full, "Run Full Model"),
                         ) if enabled
                     ]
@@ -8932,9 +8935,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     btn_runRF.pack(fill=tk.X)
 
+    run_model_on_inspect_var = tk.BooleanVar(value=False)
     run_full_model_on_inspect_var = tk.BooleanVar(value=False)
     inspect_model_options = ctk.CTkFrame(frame_analysis, fg_color="transparent")
     inspect_model_options.pack(fill=tk.X, pady=(6, 0))
+    ctk.CTkCheckBox(
+        inspect_model_options,
+        text="Also run Run Model tuning curves (slower)",
+        variable=run_model_on_inspect_var,
+        onvalue=True,
+        offvalue=False,
+        text_color=text_color,
+        checkbox_width=18,
+        checkbox_height=18,
+    ).pack(anchor="w", pady=2)
     ctk.CTkCheckBox(
         inspect_model_options,
         text="Also run Full Model and create its amplitude, phase, and drift tuning curves",
@@ -8948,10 +8962,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.CTkLabel(
         inspect_model_options,
         text=(
-            "Inspect Single Neuron automatically adds the fast Run Model tuning curves when its coarse real/imaginary "
-            "phase caches are prepared. Run Full Model is opt-in: it refines the fit with the much larger full-resolution "
-            "phase bank (including full sigma and frequency axes), so it needs the Full Model caches and can take much longer. "
-            "Both use the Coarse RF result as their seed."
+            "The default inspection uses the prepared Coarse RF result and PSTH-weighted STA only. "
+            "Run Model and Run Full Model are optional because their amplitude, phase, and drift tuning fits add substantial "
+            "time. Full Model uses the much larger full-resolution phase bank and can take considerably longer. "
+            "Both model fits use the Coarse RF result as their seed."
         ),
         text_color=muted_text,
         justify="left",
