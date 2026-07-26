@@ -15,6 +15,7 @@ from .storage.neural_cache import (
     load_neural_cache_pair,
     save_aligned_neural_cache,
 )
+from .runtime.task_control import check_cancelled
 
 WORKFLOW_2P = "2p"
 WORKFLOW_EPHYS = "ephys"
@@ -81,8 +82,10 @@ def _save_aligned_outputs(
     output_format: str = "npy",
     unit_ids: Optional[Sequence[object]] = None,
     unit_info: Optional[Sequence[Dict[str, Any]]] = None,
+    cancel_event=None,
 ) -> dict:
     """Persist aligned arrays beside the experiment data for later GUI reuse."""
+    check_cancelled(cancel_event)
     return save_aligned_neural_cache(
         neuron_pos,
         spikes,
@@ -110,6 +113,7 @@ def load_two_photon_spikes(
     output_format: str = "npy",
     stimulus_duration: Optional[float] = None,
     excluded_trial_numbers: Optional[Sequence[int]] = None,
+    cancel_event=None,
 ) -> AlignedNeuralData:
     """Load and time-align two-photon (suite2p) spike data.
 
@@ -120,11 +124,14 @@ def load_two_photon_spikes(
     interface consistent with electrophysiology.  Two-photon alignment derives
     its timing from the recorded TTL/frame data, so it is not used here.
     """
+    check_cancelled(cancel_event)
     from .data import neural as neural_io
 
     if spks_path is None:
+        check_cancelled(cancel_event)
         suite2p_dir = neural_io.validate_suite2p_output(suite2p_dir, n_planes)
         neural_io.validate_two_photon_timeline(experiment_info, data_dirs)
+        check_cancelled(cancel_event)
         spikes, aligned_spikes, neuron_pos = neural_io.loadSPKMesoscope(
             experiment_info,
             list(data_dirs),
@@ -135,17 +142,20 @@ def load_two_photon_spikes(
             threshold=threshold,
             last=True,
             method=method,
+            cancel_event=cancel_event,
         )
+        check_cancelled(cancel_event)
         if correct_positions:
             neuron_pos = neural_io.correctNeuronPos(neuron_pos, resolution, n_planes)
     else:
         spikes, neuron_pos, _, _ = load_neural_cache_pair(spks_path.parent, spks_path)
         aligned_spikes = None
 
+    check_cancelled(cancel_event)
     spikes = exclude_identified_trials(spikes, excluded_trial_numbers)
 
     if spks_path is None:
-        _save_aligned_outputs(neuron_pos, spikes, save_dir, output_format)
+        _save_aligned_outputs(neuron_pos, spikes, save_dir, output_format, cancel_event=cancel_event)
 
     return AlignedNeuralData(
         spikes=spikes,
@@ -163,6 +173,7 @@ def align_ephys_data(
     stimulus_duration: Optional[float] = None,
     photodiode_port: Optional[int] = None,
     excluded_trial_numbers: Optional[Sequence[int]] = None,
+    cancel_event=None,
     **kwargs: Any,
 ) -> AlignedNeuralData:
     
@@ -224,6 +235,7 @@ def align_ephys_data(
         unit_ids = np.asarray(list(units.keys()), dtype=object)
         unit_info = []
         for neuron_idx, (unit_id, neuron_data) in enumerate(units.items()):
+            check_cancelled(cancel_event)
             
             position = np.asarray(neuron_data.get('position', []), dtype=float).ravel()
             neuron_pos[neuron_idx, :min(3, position.size)] = position[:3]
@@ -242,6 +254,7 @@ def align_ephys_data(
             )
 
             for trial_idx, (start_time, end_time) in enumerate(zip(start_times, end_times)):
+                check_cancelled(cancel_event)
                 trial_pd_mask = (pd_time >= start_time) & (pd_time <= end_time)
                 trial_pd_time = pd_time[trial_pd_mask]
                 trial_pd_state = pd_state[trial_pd_mask]
@@ -403,6 +416,7 @@ def align_ephys_data(
     #======================================
     # MAIN EXECUTION
     #======================================
+    check_cancelled(cancel_event)
     pkl_path = get_pkl_path(data_dir)
     
     with open(pkl_path, "rb") as data:
@@ -414,6 +428,7 @@ def align_ephys_data(
             SAMPLING_RATE = pkl_data['metadata']['sampling_frequency']
         units = pkl_data['units']
 
+    check_cancelled(cancel_event)
     if stimulus_duration is None or stimulus_duration <= 0:
         raise ValueError("Ephys alignment requires the stimulus movie duration from metadata.")
 
@@ -427,15 +442,18 @@ def align_ephys_data(
         f"Using photodiode digital-input port {photodiode_port} from "
         f"{len(dio_files)} discovered .dat folder(s)."
     )
+    check_cancelled(cancel_event)
     pd_time, pd_state = choose_correct_din_file(dio_files, photodiode_port)
     freq = get_frequency(pd_time, SAMPLING_RATE)
 
     start_times, end_times = get_possible_trial_edges(freq, pd_time) 
     start_times, end_times = validate_edges(start_times, end_times, stimulus_duration, SAMPLING_RATE, 0.01)
 
+    check_cancelled(cancel_event)
     neuron_pos, spikes, unit_ids, unit_info = extract_pos_and_spikes(
         units, start_times, end_times, pd_time, pd_state, nb_frames
     )
+    check_cancelled(cancel_event)
     spikes = exclude_identified_trials(spikes, excluded_trial_numbers)
     
     print(neuron_pos.shape)
@@ -448,6 +466,7 @@ def align_ephys_data(
         output_format,
         unit_ids=unit_ids,
         unit_info=unit_info,
+        cancel_event=cancel_event,
     )
 
     return AlignedNeuralData(
@@ -490,8 +509,10 @@ def load_aligned_spikes(
     stimulus_duration: Optional[float] = None,
     excluded_trial_numbers: Optional[Sequence[int]] = None,
     reuse_cache: bool = True,
+    cancel_event=None,
 ) -> AlignedNeuralData:
     """Dispatch spike loading to the workflow-specific alignment routine."""
+    check_cancelled(cancel_event)
     cache_dir = Path(".") if save_dir is None else Path(save_dir)
     if save_dir is None:
         if workflow == WORKFLOW_2P and data_dir_strings:
@@ -501,6 +522,7 @@ def load_aligned_spikes(
 
     if spks_path is not None:
         spikes, neuron_pos, _, _ = load_neural_cache_pair(spks_path.parent, spks_path)
+        check_cancelled(cancel_event)
         return AlignedNeuralData(
             spikes=exclude_identified_trials(spikes, excluded_trial_numbers),
             neuron_pos=neuron_pos,
@@ -509,6 +531,7 @@ def load_aligned_spikes(
     if reuse_cache:
         try:
             spikes, neuron_pos, _, _ = load_neural_cache_pair(cache_dir)
+            check_cancelled(cancel_event)
             return AlignedNeuralData(
                 spikes=exclude_identified_trials(spikes, excluded_trial_numbers),
                 neuron_pos=neuron_pos,
@@ -534,6 +557,7 @@ def load_aligned_spikes(
             output_format=output_format,
             stimulus_duration=stimulus_duration,
             excluded_trial_numbers=excluded_trial_numbers,
+            cancel_event=cancel_event,
         )
 
     if workflow == WORKFLOW_EPHYS:
@@ -553,6 +577,7 @@ def load_aligned_spikes(
             threshold=threshold,
             method=method,
             excluded_trial_numbers=excluded_trial_numbers,
+            cancel_event=cancel_event,
         )
 
     raise ValueError(f"Unknown workflow: {workflow!r}")

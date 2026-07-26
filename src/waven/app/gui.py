@@ -59,7 +59,6 @@ from ..gui_support import (
     _safe_name,
     _zarr_output_path,
     ALL_NEURON_GRAPH_OPTIONS,
-    CURRENT_INDIVIDUAL_GRAPH_OPTIONS,
     SINGLE_NEURON_GRAPH_OPTIONS,
     classify_export_record,
     classify_individual_axis,
@@ -78,8 +77,6 @@ from ..runtime.task_control import (
 from ..project_layout import (
     WavenProjectLayout,
     conventional_downsample_path,
-    conventional_gabor_path,
-    find_single_artifact,
     find_stimulus_movie,
     resolve_folder_reference,
     write_reference,
@@ -108,7 +105,6 @@ from .constants import (
     workflow_display_name,
 )
 from .dependencies import (
-    load_gabor_builders,
     load_model_operations,
     load_plot_backend,
     load_rf_operations,
@@ -130,43 +126,24 @@ def _ensure_plot_imports():
     NavigationToolbar2Tk = dependencies.navigation_toolbar
 
 
-def _ensure_gabor_imports(label="Gabor library construction"):
-    """Load Gabor builders only when a Gabor action needs them.
-
-    Args:
-        label: Human-readable caller description retained for future diagnostics.
-    """
-    global makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
-    dependencies = load_gabor_builders()
-    makeFilterLibrary = dependencies.make_filter_library
-    makeFilterLibrary2 = dependencies.make_filter_library2
-    makeGaborFilter = dependencies.make_gabor_filter
-
-
 def _ensure_wavelet_imports(label="stimulus wavelet generation"):
     """Load disk-backed wavelet operations on first use.
 
     Args:
         label: Human-readable caller description retained for future diagnostics.
     """
-    global coarseWavelet, downsample_video_binary, waveletDecomposition, waveletDecompositionFull
-    global build_convolution_kernel_cache, convolution_kernel_cache_path
-    global waveletDecompositionConv, waveletPowerDecompositionConv, waveletDecompositionFullConv
+    global downsample_video_binary, build_convolution_kernel_cache, convolution_kernel_cache_path
+    global waveletPowerDecompositionConv, waveletDecompositionFullConv
     global coarse_rf_zarr_layout
-    global video_downsample_chunk_size, convert_npy_to_zarr
+    global video_downsample_chunk_size
     dependencies = load_wavelet_operations()
-    coarseWavelet = dependencies.coarse_wavelet
     build_convolution_kernel_cache = dependencies.build_convolution_kernel_cache
     convolution_kernel_cache_path = dependencies.convolution_kernel_cache_path
     downsample_video_binary = dependencies.downsample_video_binary
-    waveletDecomposition = dependencies.wavelet_decomposition
-    waveletDecompositionConv = dependencies.wavelet_decomposition_conv
     waveletPowerDecompositionConv = dependencies.wavelet_power_decomposition_conv
-    waveletDecompositionFull = dependencies.wavelet_decomposition_full
     waveletDecompositionFullConv = dependencies.wavelet_decomposition_full_conv
     coarse_rf_zarr_layout = dependencies.coarse_rf_zarr_layout
     video_downsample_chunk_size = dependencies.video_downsample_chunk_size
-    convert_npy_to_zarr = dependencies.convert_npy_to_zarr
 
 
 def _ensure_rf_imports(label="coarse RF analysis"):
@@ -211,7 +188,6 @@ def _ensure_analysis_imports(label="analysis"):
     Args:
         label: Input value for this operation.
     """
-    _ensure_gabor_imports(label)
     _ensure_wavelet_imports(label)
     _ensure_rf_imports(label)
     _ensure_model_imports(label)
@@ -318,16 +294,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ("coarse_rf_frequency_mode", coarse_rf_frequency_mode_var),
             ("downsample_format", downsample_format_var),
             ("downsample_percent", downsample_percent_var),
-            ("export_array_format", export_array_format_var),
-            ("export_numeric_layout", export_numeric_layout_var),
-            ("export_packaging", export_packaging_var),
-            ("export_profile", export_profile_var),
             ("filter_bank_cycles_per_sigma", filter_bank_cycles_per_sigma_var),
             ("filter_bank_density", filter_bank_density_var),
             ("filter_bank_maximum_cpd", filter_bank_maximum_cpd_var),
             ("filter_bank_minimum_cpd", filter_bank_minimum_cpd_var),
             ("force_2d_graphs", force_2d_graphs_var),
-            ("gabor_format", gabor_format_var),
             ("maximum_spatial_frequency_cpd", maximum_spatial_frequency_cpd_var),
             ("neural_cache_format", neural_cache_format_var),
             ("neural_source", neural_source_var),
@@ -339,7 +310,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ("suite2p_output_dir", suite2p_output_dir_var),
             ("suite2p_subject_dirs", suite2p_subject_dirs_var),
             ("target_degrees_per_pixel", target_degrees_per_pixel_var),
-            ("wavelet_backend", wavelet_backend_var),
             ("wavelet_format", wavelet_format_var),
         ):
             variables[name] = variable.get()
@@ -489,10 +459,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             btn_cancel_terminal.configure(state=tk.DISABLED, text="Cancelling...")
         except NameError:
             pass
-        print("\n[!] Cancel requested. Waiting for the current safe checkpoint; resumable wavelet tiles will be retained.")
+        print("\n[!] Cancel requested. WAVEN is stopping at the next interruptible operation; resumable cache tiles will be retained.")
 
     def flash_taskbar():
-        """Function for flash taskbar."""
+        """Flash the Windows taskbar button, which uses the system alert colour."""
         try:
             FLASHW_ALL = 3
             class FLASHWINFO(ctypes.Structure):
@@ -508,6 +478,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             hwnd = root.winfo_id()
             fwi = FLASHWINFO(ctypes.sizeof(FLASHWINFO), hwnd, FLASHW_ALL, 3, 0)
             ctypes.windll.user32.FlashWindowEx(ctypes.byref(fwi))
+        except Exception:
+            pass
+
+    def notify_task_result(status):
+        """Request a system-level completion, failure, or cancellation notification."""
+        flash_taskbar()
+        try:
+            # Uses the user's configured Windows alert sounds and needs no
+            # bundled audio asset.
+            beep = 0x00000040 if status == "finished" else 0x00000010
+            ctypes.windll.user32.MessageBeep(beep)
         except Exception:
             pass
 
@@ -646,7 +627,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             print(_format_task_summary(metrics, status_label))
             print(task_finish_message(task_state["name"], status_label))
             print()
-            flash_taskbar()
+            notify_task_result(status_label)
         task_state["name"] = None
         task_state["start"] = None
         task_state["detail"] = None
@@ -711,6 +692,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 _start_recovery_checkpoint(label)
                 try:
                     result = func(*args, **kwargs)
+                    check_cancelled(cancel_event)
                     success = result is not False
                 except OperationCancelled:
                     cancelled = True
@@ -775,8 +757,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _safe_var_value(name, default=""):
         """Return a Tk variable value if it has already been created."""
         try:
-            if name == "gabor_format_var":
-                return _worker_var_value("gabor_format", gabor_format_var, default)
             if name == "wavelet_format_var":
                 return _worker_var_value("wavelet_format", wavelet_format_var, default)
             if name == "downsample_format_var":
@@ -834,16 +814,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 current = _field_value(param_entries, key).strip()
                 if force or current.lower() in ("", "none", "null") or Path(current).suffix:
                     _set_entry_value(param_entries[key], path)
-        gabor_field_map = {
-            "Save Path": layout.fine_gabor_dir,
-            "Coarse Library Path": layout.coarse_gabor_dir,
-            "Fine Library Path": layout.fine_gabor_dir,
-        }
-        for key, path in gabor_field_map.items():
-            if key in gabor_entries:
-                current = _field_value(gabor_entries, key).strip()
-                if force or current.lower() in ("", "none", "null") or Path(current).suffix:
-                    _set_entry_value(gabor_entries[key], path)
         if (
             "Spks Path" in param_entries
             and (
@@ -869,29 +839,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         folder = _folder_from_entry(param_entries, "Movie Path", _project_layout().stimulus_movie_dir)
         movie = find_stimulus_movie(folder)
         return str(movie)
-
-    def _gabor_folder():
-        """Return the conventional Gabor cache folder."""
-        return _folder_from_entry(gabor_entries, "Save Path", _project_layout().fine_gabor_dir)
-
-    def _gabor_folder_for_kind(kind):
-        """Return the folder for a coarse or full Gabor library."""
-        layout = _project_layout()
-        if kind == "coarse":
-            return _folder_from_entry(gabor_entries, "Coarse Library Path", layout.coarse_gabor_dir)
-        return _folder_from_entry(gabor_entries, "Fine Library Path", layout.fine_gabor_dir)
-
-    def _find_gabor_library(kind, output_format=None):
-        """Find the Gabor library artifact for ``kind`` inside its folder."""
-        folder = Path(_gabor_folder_for_kind(kind))
-        output_format = output_format or _safe_var_value("gabor_format_var", "npy")
-        conventional = conventional_gabor_path(folder, kind, output_format)
-        if conventional.exists():
-            return str(conventional)
-        try:
-            return str(find_single_artifact(folder, (".npy", ".zarr"), f"{kind} Gabor library"))
-        except FileNotFoundError:
-            return str(conventional)
 
     def _wavelet_folder(scale="coarse"):
         """Return the conventional wavelet cache folder for ``scale``."""
@@ -980,9 +927,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """
         fields = {
             "workflow": workflow,
-            "wavelet_backend": _selected_wavelet_backend(),
             "coarse_rf_frequency_mode": _selected_coarse_rf_frequency_mode(),
-            "gabor_format": _safe_var_value("gabor_format_var", "npy"),
             "neural_cache_format": _selected_neural_cache_format(),
             "downsample_percent": _selected_downsample_percent(),
             "downsample_format": _selected_downsample_format(),
@@ -1601,12 +1546,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     # actions without changing any of the figure/data serialization formats.
     export_selection_vars = {
         "current_all": {},
-        "current_individual": {},
         "all_individual": {},
     }
     export_selection_widgets = {
         "current_all": {},
-        "current_individual": {},
         "all_individual": {},
     }
     run_model_tuning_export_kinds = {
@@ -1618,9 +1561,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     model_tuning_export_kinds = run_model_tuning_export_kinds | run_full_model_tuning_export_kinds
     model_tuning_export_availability = {kind: False for kind in model_tuning_export_kinds}
     export_file_vars = {}
-    export_packaging_var = None
-    export_profile_var = None
-    export_numeric_layout_var = None
 
     _EXPORT_TIMING_STAGES = (
         "restore", "draw", "extract", "png", "svg", "array_collect",
@@ -1679,9 +1619,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "png": True,
             "svg": True,
             "data_pickle": True,
-            "figure_pickle": True,
-            "arrays": True,
-            "manifest": True,
+            # Internal support remains explicitly off so old configuration files
+            # cannot quietly re-enable a sprawling export layout.
+            "figure_pickle": False,
+            "arrays": False,
+            "manifest": False,
         }
         if not export_file_vars:
             return defaults
@@ -1691,59 +1633,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         }
 
     def _selected_export_packaging():
-        """Return whether an export remains a folder, a ZIP, or both."""
-        if export_packaging_var is None:
-            return "folder"
-        value = str(_worker_var_value("export_packaging", export_packaging_var, "folder")).lower()
-        return value if value in {"folder", "zip", "both"} else "folder"
+        """Flat exports are written directly into the user-selected folder."""
+        return "folder"
 
     def _selected_export_numeric_layout():
-        """Return whether Section B writes graph-local or per-neuron numeric data."""
-        if export_numeric_layout_var is None:
-            return "per_graph"
-        value = str(_worker_var_value("export_numeric_layout", export_numeric_layout_var, "per_graph")).lower()
-        if value in {"per_neuron", "per-neuron .npz"}:
-            return "per_neuron"
+        """Retain one independent PKL bundle per exported graph."""
         return "per_graph"
-
-    def _apply_export_profile(profile=None):
-        """Apply a purposeful export preset without removing custom controls."""
-        selected = str(
-            profile or (_worker_var_value("export_profile", export_profile_var, "") if export_profile_var is not None else "")
-        ).lower()
-        profiles = {
-            "quick review": {
-                "files": {"png": True, "svg": False, "data_pickle": False,
-                          "figure_pickle": False, "arrays": False, "manifest": False},
-                "numeric_layout": "per_graph",
-            },
-            "data bundle": {
-                "files": {"png": True, "svg": False, "data_pickle": False,
-                          "figure_pickle": False, "arrays": True, "manifest": True},
-                "numeric_layout": "per_neuron",
-            },
-            "full archive": {
-                "files": {"png": True, "svg": True, "data_pickle": True,
-                          "figure_pickle": True, "arrays": True, "manifest": True},
-                "numeric_layout": "per_graph",
-            },
-        }
-        chosen = profiles.get(selected)
-        if chosen is None:
-            return
-        for key, value in chosen["files"].items():
-            variable = export_file_vars.get(key)
-            if variable is not None:
-                variable.set(value)
-        if export_numeric_layout_var is not None:
-            export_numeric_layout_var.set(
-                "Per-neuron .npz" if chosen["numeric_layout"] == "per_neuron" else "Per-graph files"
-            )
-
-    def _mark_export_profile_custom(_value=None):
-        """Keep the preset label honest after a user changes an individual control."""
-        if export_profile_var is not None:
-            export_profile_var.set("Custom")
 
     def _validate_export_file_selection():
         """Reject an export with no selected output products."""
@@ -1786,15 +1681,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _refresh_model_tuning_export_options():
         """Enable each model-tuning export choice only after that plot exists."""
-        available = {
-            classify_export_record(record.get("tab"), record.get("title"))
-            for record in figure_export_records
-            if record.get("tab") == "Individual neuron"
+        cache_available = {
+            **{kind: _run_model_phase_caches_present() for kind in run_model_tuning_export_kinds},
+            **{kind: _run_full_model_phase_caches_present() for kind in run_full_model_tuning_export_kinds},
         }
-        variables = export_selection_vars.get("current_individual", {})
-        widgets = export_selection_widgets.get("current_individual", {})
+        variables = export_selection_vars.get("all_individual", {})
+        widgets = export_selection_widgets.get("all_individual", {})
         for kind in model_tuning_export_kinds:
-            exists = kind in available
+            exists = bool(cache_available[kind])
             previous = bool(model_tuning_export_availability.get(kind, False))
             variable = variables.get(kind)
             widget = widgets.get(kind)
@@ -1815,6 +1709,31 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if classify_export_record(record.get("tab"), record.get("title")) in selected
         ]
 
+    def _export_neuron_prefix(record):
+        """Return a stable ``shankX_unitX`` prefix when a graph belongs to one unit."""
+        payload = record.get("export_payload") or {}
+        neuron_id = payload.get("neuron_id", payload.get("neuron_index"))
+        if neuron_id is None:
+            return "all_neurons"
+        try:
+            neuron_id = int(neuron_id)
+        except (TypeError, ValueError):
+            return "all_neurons"
+        unit_id = payload.get("unit_id", neuron_id)
+        unit_info = analysis_state.get("unit_info") or ()
+        info = unit_info[neuron_id] if 0 <= neuron_id < len(unit_info) else {}
+        shank = str(info.get("shank", "") or "0").strip()
+        unit = str(info.get("unit", "") or unit_id).strip()
+        shank = shank if shank.lower().startswith("shank") else f"shank{shank}"
+        unit = unit if unit.lower().startswith("unit") else f"unit{unit}"
+        return _safe_name(f"{shank}_{unit}")
+
+    def _flat_export_stem(record, graph_name):
+        """Name an export directly in its selected parent folder without nesting."""
+        return _export_safe_name(
+            f"{_export_neuron_prefix(record)}_{graph_name}", maximum_length=96
+        )
+
     def _export_figure_record(record, base_dir, index=None, timing=None):
         """Function for export figure record.
 
@@ -1831,22 +1750,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         fig = _time_export_stage(timing, "restore", lambda: _figure_from_export_snapshot(record))
         tab_name = record.get("tab") or "Plots"
         title = record.get("title") or _figure_title(fig)
-        prefix_bits = []
-        if index is not None:
-            prefix_bits.append(f"{index:02d}")
-        prefix_bits.extend([tab_name, title])
-        export_name = _export_safe_name("_".join(prefix_bits), maximum_length=56)
-        graph_dir = os.path.join(base_dir, export_name)
-        os.makedirs(graph_dir, exist_ok=True)
-
-        # Keep leaf names short.  Repeating long graph titles in a folder and
-        # every file exceeded the legacy Windows path limit for all-neuron
-        # exports despite otherwise valid filenames.
-        png_path = os.path.join(graph_dir, "figure.png")
-        svg_path = os.path.join(graph_dir, "figure.svg")
-        pickle_path = os.path.join(graph_dir, "data.pkl")
-        figure_pickle_path = os.path.join(graph_dir, "figure.pkl")
-        manifest_path = os.path.join(graph_dir, "manifest.json")
+        graph_name = _export_safe_name(title, maximum_length=68)
+        export_name = _flat_export_stem(record, graph_name)
+        os.makedirs(base_dir, exist_ok=True)
+        png_path = os.path.join(base_dir, f"{export_name}.png")
+        svg_path = os.path.join(base_dir, f"{export_name}.svg")
+        pickle_path = os.path.join(base_dir, f"{export_name}.pkl")
+        figure_pickle_path = os.path.join(base_dir, f"{export_name}_figure.pkl")
+        manifest_path = os.path.join(base_dir, f"{export_name}_manifest.json")
 
         file_options = record.get("file_options") or _selected_export_files()
         if file_options["png"]:
@@ -1890,37 +1801,31 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     _add_array_exports("source_artist", cached_artist_data, arrays, metadata)
                 _add_array_exports("payload", payload, arrays, metadata)
             _time_export_stage(timing, "array_collect", collect_arrays)
-        try:
-            array_format = record.get(
-                "array_format", _worker_var_value("export_array_format", export_array_format_var, "npy")
-            )
-        except (NameError, RuntimeError):
-            array_format = record.get("array_format", "npy")
+        # Arrays are cache artifacts, not part of the streamlined export UI.
+        # Keep this fixed fallback only for compatibility with old snapshots.
+        array_format = record.get("array_format", "npy")
         if array_format not in {"npy", "zarr", "both"}:
             array_format = "npy"
-        array_dir = os.path.join(graph_dir, "arrays")
-        if arrays:
-            os.makedirs(array_dir, exist_ok=True)
         array_files = {"npy": [], "zarr": []}
         for key, value in arrays.items():
             safe_key = _safe_name(key)
             array = np.asarray(value)
             if array_format in {"npy", "both"}:
-                path = os.path.join(array_dir, f"{safe_key}.npy")
+                path = os.path.join(base_dir, f"{export_name}_{safe_key}.npy")
                 _time_export_stage(timing, "arrays", lambda path=path, array=array: np.save(path, array))
                 _record_export_file(timing, path)
-                array_files["npy"].append(os.path.relpath(path, graph_dir))
+                array_files["npy"].append(os.path.relpath(path, base_dir))
             if array_format in {"zarr", "both"}:
                 try:
                     import zarr as _zarr
                 except ImportError as exc:
                     raise ImportError("Zarr export requires the 'zarr' package.") from exc
-                path = os.path.join(array_dir, f"{safe_key}.zarr")
+                path = os.path.join(base_dir, f"{export_name}_{safe_key}.zarr")
                 try:
                     zarr_array = array.astype(str) if array.dtype == object else array
                     _time_export_stage(timing, "arrays", lambda path=path, zarr_array=zarr_array: _zarr.save(path, zarr_array))
                     _record_export_file(timing, path)
-                    array_files["zarr"].append(os.path.relpath(path, graph_dir))
+                    array_files["zarr"].append(os.path.relpath(path, base_dir))
                 except Exception as exc:
                     metadata[f"{key}.zarr_export_error"] = str(exc)
                     print(f"  Skipped Zarr array '{key}': {exc}")
@@ -1969,13 +1874,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "tab": tab_name,
             "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "files": {
-                "png": "figure.png" if file_options["png"] else None,
-                "svg": "figure.svg" if file_options["svg"] else None,
+                "png": os.path.basename(png_path) if file_options["png"] else None,
+                "svg": os.path.basename(svg_path) if file_options["svg"] else None,
                 "array_format": array_format if file_options["arrays"] else None,
                 "array_files": array_files,
-                "pickle_data": "data.pkl" if file_options["data_pickle"] else None,
+                "pickle_data": os.path.basename(pickle_path) if file_options["data_pickle"] else None,
                 "pickle_data_contains_full_payload": pickle_data_saved,
-                "figure_pickle": "figure.pkl" if figure_pickle_saved else None,
+                "figure_pickle": os.path.basename(figure_pickle_path) if figure_pickle_saved else None,
             },
             "array_keys": sorted(arrays),
             "metadata": _json_safe(metadata),
@@ -1992,7 +1897,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         timing["graphs"] += 1
         if owns_timing:
             _log_export_timing(f"graph '{title}'", timing)
-        return graph_dir
+        return base_dir
 
     def _snapshot_export_record(record, array_format=None, file_options=None):
         """Freeze a GUI-owned figure for safe background export.
@@ -2004,10 +1909,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """
         fig = record["figure"]
         if array_format is None:
-            try:
-                array_format = _worker_var_value("export_array_format", export_array_format_var, "npy")
-            except (NameError, RuntimeError):
-                array_format = "npy"
+            array_format = "npy"
         # Payloads are exported separately below and can be very large (or
         # intentionally non-pickleable).  Keeping them off the temporary
         # Figure pickle reduces UI-thread copy time and preserves the previous
@@ -2052,13 +1954,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _snapshot_export_records(records):
         """Capture all UI figures before a background export begins."""
-        try:
-            array_format = _worker_var_value("export_array_format", export_array_format_var, "npy")
-        except (NameError, RuntimeError):
-            array_format = "npy"
         file_options = _selected_export_files()
         return [
-            _snapshot_export_record(record, array_format=array_format, file_options=file_options)
+            _snapshot_export_record(record, array_format="npy", file_options=file_options)
             for record in records
         ]
 
@@ -2085,7 +1983,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         def write_export():
             try:
-                export_root = os.path.join(export_dir, f"waven_export_{time.strftime('%Y%m%d_%H%M%S')}")
+                export_root = export_dir
                 os.makedirs(export_root, exist_ok=True)
                 print(f"[EXPORT] Writing graph 1/1: '{title}'")
                 graph_dir = _export_figure_record(snapshot, export_root, index=1)
@@ -2130,19 +2028,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             f"[EXPORT] Queued {export_label} | graphs={len(snapshots)} | "
             + _describe_export_options(file_options, packaging)
         )
-        export_root = os.path.join(selected_dir, f"waven_export_{time.strftime('%Y%m%d_%H%M%S')}")
+        export_root = selected_dir
         def write_export():
             exported = []
             failures = []
             try:
                 os.makedirs(export_root, exist_ok=True)
                 for index, record in enumerate(snapshots, start=1):
-                    tab_dir = os.path.join(export_root, _export_safe_name(record.get("tab") or "plots", 24))
-                    os.makedirs(tab_dir, exist_ok=True)
                     title = record.get("title") or f"graph {index}"
                     print(f"[EXPORT] Writing displayed graph {index}/{len(snapshots)}: '{title}'")
                     try:
-                        graph_dir = _export_figure_record(record, tab_dir, index=index)
+                        graph_dir = _export_figure_record(record, export_root, index=index)
                         exported.append(graph_dir)
                         print(f"[EXPORT] Wrote displayed graph {index}/{len(snapshots)}: {graph_dir}")
                     except Exception as exc:
@@ -2199,20 +2095,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         title = f"Select Folder for {tab_name} Export" if tab_name else "Select Folder for Displayed Result Export"
         _export_records(records, tab_name or "displayed_results", title)
 
-    def export_current_gui_results():
-        """Export selected graphs from both current All Neurons and Individual tabs."""
-        records = _filter_export_records(_active_export_records("All neurons"), "current_all")
-        records += _filter_export_records(_active_export_records("Individual neuron"), "current_individual")
-        _export_records(records, "current_gui", "Select Folder for Current GUI Export")
-
     def export_all_neurons_results():
         """Function for export all neurons results."""
         _export_displayed_results("All neurons", "current_all")
-
-    def export_individual_neuron_results():
-        """Function for export individual neuron results."""
-        records = _filter_export_records(_active_export_records("Individual neuron"), "current_individual")
-        _export_records(records, "current_individual_neuron", "Select Folder for Current Individual-Neuron Export")
 
     def _new_consolidated_numeric_bundle():
         """Create one fast numeric archive for an individual-neuron export."""
@@ -2291,20 +2176,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ):
         """Write selected individual-neuron axes as one-graph export bundles.
 
-        Full archive mode retains one cropped graph folder per axis. Fast
-        modes store flat image files under ``graphs/`` and, when requested,
-        consolidate all numerical values into one per-neuron NPZ bundle.
+        Every selected axis is written directly into ``base_dir`` with an
+        explicit shank/unit prefix; no export subdirectories are created.
         """
         selected_kinds = set(selected_kinds or {kind for kind, _label in SINGLE_NEURON_GRAPH_OPTIONS})
         file_options = dict(file_options or _selected_export_files())
         numeric_layout = numeric_layout if numeric_layout in {"per_graph", "per_neuron"} else "per_graph"
         consolidated = _new_consolidated_numeric_bundle() if numeric_layout == "per_neuron" else None
-        compact_visual_layout = bool(
-            numeric_layout == "per_neuron"
-            or (file_options["png"] and not any(
-                file_options[key] for key in ("svg", "data_pickle", "figure_pickle", "arrays", "manifest")
-            ))
-        )
+        compact_visual_layout = True
         needs_graph_data = bool(
             consolidated is not None
             or file_options["arrays"]
@@ -2312,7 +2191,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             or file_options["manifest"]
         )
         timing = _new_export_timing()
-        axis_root = os.path.join(base_dir, "graphs")
+        axis_root = base_dir
         os.makedirs(axis_root, exist_ok=True)
         exported = []
         png_dpi = 200
@@ -2379,25 +2258,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 graph_kind = classify_individual_axis(record.get("tab"), record.get("title"), title)
                 if graph_kind not in selected_kinds:
                     continue
-                graph_name = _export_safe_name(
-                    f"{record_index:02d}_{axis_index:02d}_{title}", maximum_length=56,
-                )
-                graph_dir = axis_root if compact_visual_layout else os.path.join(axis_root, graph_name)
-                if not compact_visual_layout:
-                    os.makedirs(graph_dir, exist_ok=True)
+                graph_name = _flat_export_stem(record, _export_safe_name(title, maximum_length=68))
+                graph_dir = axis_root
                 bbox = axis.get_tightbbox(renderer).expanded(1.08, 1.16)
                 bbox_inches = bbox.transformed(fig.dpi_scale_trans.inverted())
                 visual_files = []
                 if file_options["png"]:
                     png_path = os.path.join(
-                        graph_dir, f"{graph_name}.png" if compact_visual_layout else "graph.png",
+                        graph_dir, f"{graph_name}.png",
                     )
                     _time_export_stage(timing, "png", lambda: save_axis_png(png_path, bbox_inches))
                     _record_export_file(timing, png_path)
                     visual_files.append(os.path.relpath(png_path, base_dir))
                 if file_options["svg"]:
                     svg_path = os.path.join(
-                        graph_dir, f"{graph_name}.svg" if compact_visual_layout else "graph.svg",
+                        graph_dir, f"{graph_name}.svg",
                     )
                     _time_export_stage(
                         timing, "svg", lambda: fig.savefig(svg_path, format="svg", bbox_inches=bbox_inches),
@@ -2449,19 +2324,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if consolidated is not None:
                     _add_consolidated_numeric_graph(
                         consolidated, graph_name,
-                        visual_files[0] if visual_files else os.path.join("graphs", graph_name),
+                        visual_files[0] if visual_files else graph_name,
                         bundle, arrays, metadata, include_pickle=file_options["data_pickle"],
                         visual_files=visual_files,
                     )
                 else:
-                    array_dir = os.path.join(graph_dir, "arrays")
-                    if arrays:
-                        os.makedirs(array_dir, exist_ok=True)
                     for key, value in arrays.items():
                         safe_key = _safe_name(key)
                         array = np.asarray(value)
                         if active_array_format in {"npy", "both"}:
-                            path = os.path.join(array_dir, f"{safe_key}.npy")
+                            path = os.path.join(graph_dir, f"{graph_name}_{safe_key}.npy")
                             _time_export_stage(timing, "arrays", lambda path=path, array=array: np.save(path, array))
                             _record_export_file(timing, path)
                             array_files["npy"].append(os.path.relpath(path, graph_dir))
@@ -2470,7 +2342,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                 import zarr as _zarr
                             except ImportError as exc:
                                 raise ImportError("Zarr export requires the 'zarr' package.") from exc
-                            path = os.path.join(array_dir, f"{safe_key}.zarr")
+                            path = os.path.join(graph_dir, f"{graph_name}_{safe_key}.zarr")
                             try:
                                 zarr_array = array.astype(str) if array.dtype == object else array
                                 _time_export_stage(
@@ -2483,7 +2355,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                 metadata[f"{key}.zarr_export_error"] = str(exc)
                                 print(f"  Skipped Zarr array '{key}': {exc}")
                     if file_options["data_pickle"]:
-                        pickle_path = os.path.join(graph_dir, "data.pkl")
+                        pickle_path = os.path.join(graph_dir, f"{graph_name}.pkl")
                         def write_data_pickle():
                             with open(pickle_path, "wb") as handle:
                                 pickle.dump(bundle, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -2495,7 +2367,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     orientation_pickle = None
                     orientation_note = None
                     if (file_options["data_pickle"] or file_options["manifest"]) and isinstance(orientation_export, dict):
-                        orientation_note = "orientation_tuning_comparison_note.txt"
+                        orientation_note = f"{graph_name}_orientation_tuning_comparison_note.txt"
                         orientation_note_path = os.path.join(graph_dir, orientation_note)
                         def write_orientation_note():
                             with open(orientation_note_path, "w", encoding="utf-8") as handle:
@@ -2503,7 +2375,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         _time_export_stage(timing, "manifest", write_orientation_note)
                         _record_export_file(timing, orientation_note_path)
                         if file_options["data_pickle"]:
-                            orientation_pickle = "orientation_tuning.pkl"
+                            orientation_pickle = (
+                                f"{_export_neuron_prefix(record)}_{graph_kind}_orientation_tuning.pkl"
+                            )
                             orientation_pickle_path = os.path.join(graph_dir, orientation_pickle)
                             def write_orientation_pickle():
                                 with open(orientation_pickle_path, "wb") as handle:
@@ -2521,9 +2395,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         "graph_kind": graph_kind,
                         "one_graph_per_file": True,
                         "files": {
-                            "png": "graph.png" if file_options["png"] else None,
-                            "svg": "graph.svg" if file_options["svg"] else None,
-                            "pickle_data": "data.pkl" if file_options["data_pickle"] else None,
+                            "png": f"{graph_name}.png" if file_options["png"] else None,
+                            "svg": f"{graph_name}.svg" if file_options["svg"] else None,
+                            "pickle_data": f"{graph_name}.pkl" if file_options["data_pickle"] else None,
                             "orientation_tuning_pickle": orientation_pickle,
                             "orientation_comparison_note": orientation_note,
                             "array_format": active_array_format if file_options["arrays"] else None,
@@ -2534,7 +2408,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         "axis_data": _json_safe(axis_data),
                     }
                     if file_options["manifest"]:
-                        manifest_path = os.path.join(graph_dir, "manifest.json")
+                        manifest_path = os.path.join(graph_dir, f"{graph_name}_manifest.json")
                         def write_graph_manifest():
                             with open(manifest_path, "w", encoding="utf-8") as handle:
                                 json.dump(manifest, handle, indent=2)
@@ -2581,7 +2455,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         selected_dir = filedialog.askdirectory(title="Select Folder for Single-Graph Export for Every Analyzed Neuron")
         if not selected_dir:
             return
-        export_root = os.path.join(selected_dir, f"waven_export_{time.strftime('%Y%m%d_%H%M%S')}")
+        export_root = selected_dir
         os.makedirs(export_root, exist_ok=True)
         jobs = [("coarse_rf", rf_count, rf_draw, "Individual neuron")]
         sta_batch = individual_neuron_renderer.get("sta_batch") if "sta" in selected_kinds else None
@@ -2600,10 +2474,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             pass
         _set_terminal_activity(True, "Exporting")
         batch_entry_values, batch_variable_values = _capture_worker_ui_values()
-        try:
-            batch_array_format = _worker_var_value("export_array_format", export_array_format_var, "npy")
-        except (NameError, RuntimeError):
-            batch_array_format = "npy"
+        batch_array_format = "npy"
         batch_numeric_layout = _selected_export_numeric_layout()
         try:
             batch_workers = int(os.environ.get("WAVEN_EXPORT_WORKERS", "2"))
@@ -2697,6 +2568,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         except NameError:
                             pass
                         _set_terminal_activity(False)
+                        notify_task_result("failed")
                         messagebox.showerror(
                             "Export Packaging Failed", f"The files were written, but packaging failed: {error}\n\n{export_root}"
                         )
@@ -2709,6 +2581,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     except NameError:
                         pass
                     _set_terminal_activity(False)
+                    notify_task_result("failed" if state["failures"] else "finished")
                     completed = total_neurons - len(state["failures"])
                     elapsed = time.perf_counter() - export_started
                     print(
@@ -2845,8 +2718,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 # Export does not need Tk canvas redraws; the exporter draws
                 # only the figures it writes, below.
                 draw(neuron_id, switch_tab=False, sta_result=sta_result, for_export=True)
-                neuron_dir = os.path.join(export_root, "rf", f"n{neuron_id:05d}")
-                os.makedirs(neuron_dir, exist_ok=True)
+                neuron_dir = export_root
                 base_records = [
                     record for record in _active_export_records(tab_name)
                     if classify_export_record(record.get("tab"), record.get("title")) not in model_tuning_export_kinds
@@ -3067,55 +2939,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             reason = "cancellation" if cancelled else "failure"
             print(f"Kept recovery checkpoint after {reason}: {task_dir}")
 
-    def _library_output_path(kind, base_path):
-        """Function for library output path.
-
-        Args:
-            kind: Input value for this operation.
-            base_path: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
-        folder = _gabor_folder_for_kind(kind)
-        return str(conventional_gabor_path(folder, kind, _worker_var_value("gabor_format", gabor_format_var, "npy")))
-
-    def _save_library_array(library, path_save, description):
-        """Function for save library array.
-
-        Args:
-            library: Input value for this operation.
-            path_save: Input value for this operation.
-            description: Input value for this operation.
-
-        Returns:
-            Result produced by the operation.
-        """
-        update_progress(70, f"Saving {description}", "Writing output file")
-        os.makedirs(os.path.dirname(path_save) or ".", exist_ok=True)
-        if _worker_var_value("gabor_format", gabor_format_var, "npy") == "zarr":
-            try:
-                import zarr as _zarr
-            except ImportError as exc:
-                raise ImportError(
-                    "Zarr library output requires the 'zarr' package. "
-                    "Install project requirements or select 'npy' as the library format."
-                ) from exc
-            output_path = os.path.splitext(path_save)[0] + ".zarr"
-            if not os.path.exists(output_path):
-                _register_cancel_cleanup_path(output_path)
-            print(f"Saving {description} into Zarr container: {output_path}")
-            _raise_if_cancelled()
-            _zarr.save(output_path, library)
-        else:
-            output_path = path_save
-            if not os.path.exists(output_path):
-                _register_cancel_cleanup_path(output_path)
-            _raise_if_cancelled()
-            np.save(output_path, library)
-            print(f"{description} saved to: {output_path}")
-        return output_path
-
     def _artifact_shape(path):
         """Function for artifact shape.
 
@@ -3279,14 +3102,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Compatibility value for legacy callers; the GUI now uses one shared grid."""
         return "coarse"
 
-    def _selected_wavelet_backend():
-        """Return the selected wavelet decomposition backend."""
-        try:
-            value = _worker_var_value("wavelet_backend", wavelet_backend_var, "legacy")
-        except NameError:
-            return "legacy"
-        return value if value in {"legacy", "convolution"} else "legacy"
-
     def _selected_coarse_rf_frequency_mode():
         """Return how coarse RF assigns spatial frequencies to its Gabor bank."""
         try:
@@ -3300,9 +3115,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _coarse_matched_pair_frequencies():
         """Return user-defined sigma/frequency pairs when the two lists match.
 
-        A matched list is interpreted only by the convolution backend.  Unequal
-        lists deliberately retain the established legacy sigma-to-frequency
-        relationship, preserving existing configurations.
+        Coupled mode uses each configured sigma/frequency pair directly.
         """
         if _selected_coarse_rf_frequency_mode() != "coupled":
             return []
@@ -3322,12 +3135,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ``run_Model`` has no frequency axis, so in that mode its compact phase
         pair follows the calibrated cycles-per-sigma relationship instead of
         silently selecting an arbitrary independent-frequency slice.  The
-        established matched-pair/legacy behaviour is retained when Coarse RF
-        itself is coupled.
+        matched user-configured pairs when Coarse RF itself is coupled.
         """
         sigmas = np.asarray(sigmas, dtype=float)
         if _selected_coarse_rf_frequency_mode() != "frequency_list":
-            return np.asarray(_coarse_matched_pair_frequencies(), dtype=float), "matched_or_legacy"
+            return np.asarray(_coarse_matched_pair_frequencies(), dtype=float), "matched_pairs"
         try:
             cycles_per_sigma = float(
                 _worker_var_value("filter_bank_cycles_per_sigma", filter_bank_cycles_per_sigma_var, "")
@@ -3427,7 +3239,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         matched_frequencies = _coarse_matched_pair_frequencies()
         return {
             "schema": 2,
-            "backend": _selected_wavelet_backend(),
+            "backend": "convolution",
             "grid": [int(coarse_nx), int(coarse_ny)],
             "n_orientations": int(_field_value(gabor_entries, "N_thetas")),
             "sigmas": [float(value) for value in sigmas],
@@ -3444,7 +3256,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         phase_frequencies, coupling_source = _run_model_phase_coupled_frequencies(sigmas)
         return {
             "schema": 3,
-            "backend": _selected_wavelet_backend(),
+            "backend": "convolution",
             "grid": [int(coarse_nx), int(coarse_ny)],
             "n_orientations": int(_field_value(gabor_entries, "N_thetas")),
             "sigmas": [float(value) for value in sigmas],
@@ -3458,7 +3270,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Return every scientific parameter that defines a Full Model cache."""
         return {
             "schema": 2,
-            "backend": _selected_wavelet_backend(),
+            "backend": "convolution",
             "grid": [int(full_nx), int(full_ny)],
             "n_orientations": int(_field_value(gabor_entries, "N_thetas")),
             "sigmas": [float(value) for value in sigmas],
@@ -3588,152 +3400,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Return the library kind required by the current analysis scale."""
         return "fine" if _selected_analysis_scale() == "full" else "coarse"
 
-    def create_selected_gabor_library():
-        """Build the Gabor library required by the selected analysis scale."""
-        if _selected_wavelet_backend() == "convolution":
-            kind = _selected_gabor_kind()
-            description = "fine full-model" if kind == "fine" else "coarse RF"
-            update_progress(5, "Convolution kernel cache", f"Building {description} compact kernels")
-            print(
-                "Convolution backend selected: building compact Gabor kernels instead "
-                "of the giant flattened legacy library."
-            )
-            cache_path = _ensure_convolution_kernel_cache(kind)
-            print(f"Convolution kernel cache ready: {cache_path}")
-            update_progress(100, "Convolution kernel cache", "Compact kernels ready")
-            return
-        create_gabor(_selected_gabor_kind())
-
-    def create_gabor(kind="fine"):
-        """Function for create gabor.
-
-        Args:
-            kind: Input value for this operation.
-        """
-        _ensure_gabor_imports("Gabor library construction")
-        sigmas = parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas")
-        frequencies = parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies")
-        full_nx, full_ny = _stimulus_grid_dimensions(movie_path=_find_movie_path())
-        n_theta = int(_field_value(gabor_entries, "N_thetas"))
-        offsets = _gabor_phase_offsets_radians()
-        path_save = _field_value(gabor_entries, "Save Path")
-        kind = kind.lower()
-        if kind not in {"coarse", "fine"}:
-            raise ValueError(f"Unknown Gabor library kind: {kind}")
-        if kind == "coarse":
-            nx, ny = _analysis_grid_dimensions(full_nx, full_ny, "coarse")
-            path_save = _library_output_path("coarse", path_save)
-            description = f"coarse coupled Gabor library ({nx} x {ny})"
-        else:
-            nx, ny = _analysis_grid_dimensions(full_nx, full_ny, "full")
-            sigmas = _ordered_float_union(
-                sigmas,
-                parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model"),
-            )
-            path_save = _library_output_path("fine", path_save)
-            description = f"fine independent-frequency Gabor library ({nx} x {ny})"
-        xs = np.arange(nx)
-        ys = np.arange(ny)
-        thetas = np.array([(i * np.pi) / n_theta for i in range(n_theta)])
-        sigmas = np.array(sigmas)
-        offsets = np.array(offsets)
-        frequencies = np.array(frequencies)
-
-        _, expected_shape = _gabor_library_npy_bytes(
-            nx,
-            ny,
-            n_theta,
-            sigmas,
-            offsets,
-            frequencies if kind == "fine" else [0],
-        )
-        output_path = _library_artifact_path(path_save)
-        library_fingerprint = _cache_fingerprint(
-            {
-                "artifact": "gabor_library",
-                "kind": kind,
-                "shape": expected_shape,
-                "grid": (nx, ny),
-            }
-        )
-        if _artifact_ready(output_path, expected_shape, library_fingerprint, kind=f"{kind}_gabor_library"):
-            print(f"Resume: found completed {description}, reusing {output_path}")
-            _write_recovery_step(f"{kind}_gabor_reused", path=output_path, shape=expected_shape)
-            entry_key = "Coarse Library Path" if kind == "coarse" else "Fine Library Path"
-            if entry_key in gabor_entries:
-                schedule_on_ui(
-                    lambda key=entry_key, library_kind=kind: _set_entry_value(
-                        gabor_entries[key], _gabor_folder_for_kind(library_kind)
-                    )
-                )
-            if kind == "fine" and "Library Path" in param_entries:
-                schedule_on_ui(
-                    lambda library_kind=kind: _set_entry_value(
-                        param_entries["Library Path"], _gabor_folder_for_kind(library_kind)
-                    )
-                )
-            update_progress(100, f"{description} already complete")
-            return
-
-        update_progress(5, f"Building {description}", "Estimating filter bank")
-        _raise_if_cancelled()
-        if kind == "fine" and frequencies.size and np.any(frequencies != 0):
-            L = makeFilterLibrary2(
-                xs,
-                ys,
-                thetas,
-                sigmas,
-                offsets,
-                frequencies,
-                cancel_event=_current_cancel_event(),
-            )
-        else:
-            frequency = frequencies[0] if frequencies.size else 0
-            L = makeFilterLibrary(
-                xs,
-                ys,
-                thetas,
-                sigmas,
-                offsets,
-                frequency,
-                freq=False,
-                cancel_event=_current_cancel_event(),
-            )
-
-        _raise_if_cancelled()
-        output_path = _save_library_array(L, path_save, description)
-        _write_artifact_metadata(
-            output_path,
-            f"{kind}_gabor_library",
-            expected_shape,
-            library_fingerprint,
-            params={"kind": kind, "grid": (nx, ny)},
-        )
-        entry_key = "Coarse Library Path" if kind == "coarse" else "Fine Library Path"
-        if entry_key in gabor_entries:
-            schedule_on_ui(
-                lambda key=entry_key, library_kind=kind: _set_entry_value(
-                    gabor_entries[key], _gabor_folder_for_kind(library_kind)
-                )
-            )
-        if kind == "fine" and "Library Path" in param_entries:
-            def apply_fine_library_path():
-                _set_entry_value(param_entries["Library Path"], _gabor_folder_for_kind(kind))
-                refresh_size_estimates()
-
-            schedule_on_ui(apply_fine_library_path)
-        update_progress(100, f"{description} complete")
-
     def create_both_gabor_libraries():
-        """Prepare the coarse and full-model Gabor assets for the shared grid."""
-        if _selected_wavelet_backend() == "convolution":
-            _ensure_wavelet_imports("convolution kernel cache construction")
-            _ensure_convolution_kernel_cache("coarse")
-            _ensure_convolution_kernel_cache("fine")
-            update_progress(100, "Convolution kernel caches", "Coarse and full-model kernels ready")
-            return
-        create_gabor("coarse")
-        create_gabor("fine")
+        """Prepare the compact convolution kernels for both analysis products."""
+        _ensure_wavelet_imports("convolution kernel cache construction")
+        _ensure_convolution_kernel_cache("coarse")
+        _ensure_convolution_kernel_cache("fine")
+        update_progress(100, "Convolution kernel caches", "Coarse and full-model kernels ready")
 
     def create_downsampled_video_cache(scale=None):
         """Create or reuse the selected downsampled stimulus movie cache."""
@@ -3827,12 +3499,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if product not in {"coarse_rf", "model", "coarse_bundle", "full_model"}:
             raise ValueError(f"Unknown wavelet product: {product}")
         scale = "full" if product == "full_model" else "coarse"
-        backend = _selected_wavelet_backend()
         coarse_frequency_mode = _selected_coarse_rf_frequency_mode()
         if scale not in {"coarse", "full"}:
             raise ValueError(f"Unknown wavelet decomposition scale: {scale}")
-        if backend not in {"legacy", "convolution"}:
-            raise ValueError(f"Unknown wavelet decomposition backend: {backend}")
         try:
             movpath = _find_movie_path()
         except Exception as exc:
@@ -3859,26 +3528,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             raise ValueError("Frequencies must contain only finite positive values.")
         matched_pair_frequencies = _coarse_matched_pair_frequencies()
         include_model_phases = product in {"model", "coarse_bundle"}
-        if (
-            (product in {"coarse_rf", "coarse_bundle"} or include_model_phases)
-            and coarse_frequency_mode == "frequency_list"
-            and backend != "convolution"
-        ):
-            raise ValueError(
-                "Independent Coarse RF frequencies and their compact Run Model phase cache require "
-                "the Convolution backend. Select it in Advanced Session Config, then prepare the caches."
-            )
-        if (
-            product == "coarse_rf"
-            and coarse_frequency_mode == "coupled"
-            and matched_pair_frequencies
-            and backend != "convolution"
-        ):
-            print(
-                "Coarse RF has matched sigma/frequency lists, but the Legacy backend uses its "
-                "historical sigma-coupled formula. Select the Convolution backend to use the "
-                "user-defined visual-angle-calibrated pairs."
-            )
         phase_offsets = _gabor_phase_offsets_radians()
         if len(phase_offsets) < 2:
             raise ValueError("Phases must contain real and imaginary offsets.")
@@ -3899,22 +3548,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             sigmas,
             parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model"),
         )
-        coarse_lib_path = _find_gabor_library("coarse")
-        fine_lib_path = _find_gabor_library("fine")
-        if backend == "legacy" and scale == "coarse" and not coarse_lib_path:
-            raise ValueError("Coarse Library Path is required. Select Coarse RF and click Build Gabor Library first.")
-        if backend == "legacy" and scale == "full" and not fine_lib_path:
-            raise ValueError("Fine Library Path is required. Select Full model and click Build Gabor Library first.")
         coarse_kernel_cache_path = None
         fine_kernel_cache_path = None
-        if backend == "convolution":
-            cache_kind = "fine" if scale == "full" else "coarse"
-            update_progress(4, "Convolution kernel cache", "Checking compact kernel cache")
-            cache_path = _ensure_convolution_kernel_cache(cache_kind)
-            if scale == "full":
-                fine_kernel_cache_path = cache_path
-            else:
-                coarse_kernel_cache_path = cache_path
+        cache_kind = "fine" if scale == "full" else "coarse"
+        update_progress(4, "Convolution kernel cache", "Checking compact kernel cache")
+        cache_path = _ensure_convolution_kernel_cache(cache_kind)
+        if scale == "full":
+            fine_kernel_cache_path = cache_path
+        else:
+            coarse_kernel_cache_path = cache_path
         n_thetas = int(_field_value(gabor_entries, "N_thetas"))
         if n_thetas <= 0:
             raise ValueError("N_thetas must be a positive integer.")
@@ -3979,25 +3621,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             """
             return _coverage_ratios_for_values(visual_coverage, analysis_coverage)
 
-        def _load_downsampled_movie(path, *, streaming=False):
-            """Load a binary movie safely, retaining disk backing for convolution."""
+        def _load_downsampled_movie(path):
+            """Load a binary movie while retaining disk-backed convolution input."""
             from ..storage.array_store import load_array
             from ..storage.binary_movie import SignedBinaryMovie
 
             arr = load_array(path, mmap_mode="r")
-            if streaming:
-                # Convolution consumes frame chunks.  This adapter converts only
-                # the requested chunk, avoiding a full cache-sized allocation.
-                return SignedBinaryMovie(arr)
-            from ..runtime.performance import has_enough_ram
-            required_bytes = int(np.prod(arr.shape, dtype=np.int64))
-            if not has_enough_ram(required_bytes, safety_margin=1.50):
-                raise MemoryError(
-                    "Legacy wavelet decomposition needs the signed stimulus movie in RAM "
-                    f"({required_bytes / 1024**3:.2f} GiB). Choose the convolution backend "
-                    "for disk-streamed execution or reduce the downsampling percentage."
-                )
-            return np.asarray(arr, dtype=np.int8) * 2 - 1
+            # Convolution consumes frame chunks. This adapter converts only the
+            # requested chunk, avoiding a full cache-sized allocation.
+            return SignedBinaryMovie(arr)
 
         coarse_power_path = os.path.join(wavelet_folder, "coarse_rf_power.zarr")
         model_real_path = os.path.join(wavelet_folder, "coarse_model_real.zarr")
@@ -4039,7 +3671,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         coarse_phase_fingerprint = _cache_fingerprint(
             {
                 "artifact": "coarse_wavelet_phase",
-                "backend": backend,
+                "backend": "convolution",
                 "shape": coarse_phase_shape,
                 "downsample": coarse_downsample_fingerprint,
                 "scientific_parameters": _coarse_model_phase_provenance(
@@ -4050,15 +3682,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         coarse_power_fingerprint = _cache_fingerprint(
             {
                 "artifact": "coarse_rf_power",
-                "backend": backend,
+                "backend": "convolution",
                 "shape": coarse_power_shape,
                 "phase": coarse_phase_fingerprint,
                 "frequency_mode": coarse_frequency_mode,
                 "frequencies": frequencies if coarse_frequency_mode == "frequency_list" else [],
                 "matched_pair_frequencies": (
-                    matched_pair_frequencies
-                    if coarse_frequency_mode == "coupled" and backend == "convolution"
-                    else []
+                    matched_pair_frequencies if coarse_frequency_mode == "coupled" else []
                 ),
                 # Chunking and codec determine both direct-write throughput and
                 # the spatial read plan used by Coarse RF correlation.  A
@@ -4136,10 +3766,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if real_ready and imag_ready:
                 print("Resume: found completed Run Model real/imaginary phase pair, reusing it.")
                 return
-            if backend != "convolution":
-                raise ValueError(
-                    "Run Model sigma-coupled phase caches require the Convolution backend."
-                )
             # A partial pair must be regenerated together: their shared progress
             # marker proves matching frame tiles only when both stores were
             # produced by the same fused real/imaginary convolution.
@@ -4235,11 +3861,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         f"Check that Movie Path points to a readable video: {movpath}"
                     )
                 _raise_if_cancelled()
-                videodata = _load_downsampled_movie(
-                    coarse_downsample_path, streaming=(backend == "convolution")
-                )
+                videodata = _load_downsampled_movie(coarse_downsample_path)
 
-                if product in {"coarse_rf", "coarse_bundle"} and backend == "convolution":
+                if product in {"coarse_rf", "coarse_bundle"}:
                     bundle_label = (
                         "power + Run Model phase caches"
                         if include_model_phases and model_phase_fused_into_power
@@ -4347,37 +3971,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
                 else:
                     _register_cancel_cleanup_path(real_phase_path, preserve_on_cancel=True)
-                    if backend == "convolution":
-                        waveletDecompositionConv(
-                            videodata,
-                            0,
-                            sigmas,
-                            wavelet_folder,
-                            n_orientations=n_thetas,
-                            phase_offsets=phase_offsets,
-                            kernel_cache_path=coarse_kernel_cache_path,
-                            coupled_frequencies=(
-                                model_phase_coupled_frequencies
-                                if include_model_phases and model_phase_coupled_frequencies.size
-                                else matched_pair_frequencies
-                                if coarse_frequency_mode == "coupled" and backend == "convolution"
-                                else None
-                            ),
-                            output_format="zarr",
-                            output_stem=os.path.splitext(os.path.basename(real_phase_path))[0],
-                            cancel_event=_current_cancel_event(),
-                        )
-                    else:
-                        waveletDecomposition(
-                            videodata,
-                            0,
-                            sigmas,
-                            wavelet_folder,
-                            coarse_lib_path,
-                            output_format="zarr",
-                            output_stem=os.path.splitext(os.path.basename(real_phase_path))[0],
-                            cancel_event=_current_cancel_event(),
-                        )
+                    waveletPowerDecompositionConv(
+                        videodata,
+                        sigmas,
+                        wavelet_folder,
+                        n_orientations=n_thetas,
+                        phase_offsets=phase_offsets,
+                        kernel_cache_path=coarse_kernel_cache_path,
+                        phase_output_stems=(
+                            os.path.splitext(os.path.basename(real_phase_path))[0],
+                            os.path.splitext(os.path.basename(imag_phase_path))[0],
+                        ),
+                        write_power=False,
+                        coupled_frequencies=(
+                            model_phase_coupled_frequencies
+                            if include_model_phases and model_phase_coupled_frequencies.size
+                            else matched_pair_frequencies if coarse_frequency_mode == "coupled" else None
+                        ),
+                        cancel_event=_current_cancel_event(),
+                    )
                     _write_artifact_metadata(
                         real_phase_path,
                         "coarse_model_phase" if include_model_phases else "coarse_rf_temporary_phase",
@@ -4404,37 +4016,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
                 else:
                     _register_cancel_cleanup_path(imag_phase_path, preserve_on_cancel=True)
-                    if backend == "convolution":
-                        waveletDecompositionConv(
-                            videodata,
-                            1,
-                            sigmas,
-                            wavelet_folder,
-                            n_orientations=n_thetas,
-                            phase_offsets=phase_offsets,
-                            kernel_cache_path=coarse_kernel_cache_path,
-                            coupled_frequencies=(
-                                model_phase_coupled_frequencies
-                                if include_model_phases and model_phase_coupled_frequencies.size
-                                else matched_pair_frequencies
-                                if coarse_frequency_mode == "coupled" and backend == "convolution"
-                                else None
-                            ),
-                            output_format="zarr",
-                            output_stem=os.path.splitext(os.path.basename(imag_phase_path))[0],
-                            cancel_event=_current_cancel_event(),
-                        )
-                    else:
-                        waveletDecomposition(
-                            videodata,
-                            1,
-                            sigmas,
-                            wavelet_folder,
-                            coarse_lib_path,
-                            output_format="zarr",
-                            output_stem=os.path.splitext(os.path.basename(imag_phase_path))[0],
-                            cancel_event=_current_cancel_event(),
-                        )
+                    # The fused convolution writer created both quadrature
+                    # phase stores above.  This branch only records the
+                    # second store's metadata.
                     _write_artifact_metadata(
                         imag_phase_path,
                         "coarse_model_phase" if include_model_phases else "coarse_rf_temporary_phase",
@@ -4534,9 +4118,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 f"Check that Movie Path points to a readable video: {movpath}"
             )
         _raise_if_cancelled()
-        videodata = _load_downsampled_movie(
-            full_downsample_path, streaming=(backend == "convolution")
-        )
+        videodata = _load_downsampled_movie(full_downsample_path)
         full_model_shape = (
             videodata.shape[0],
             full_nx,
@@ -4545,26 +4127,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             len(sigmas_full),
             max(1, len(frequencies)),
         )
-        legacy_zarr_chunks = (
-            min(expected_frames, 128),
-            min(full_nx, 16),
-            min(full_ny, 16),
-            n_thetas,
-            len(sigmas_full),
-            max(1, len(frequencies)),
-        )
-        # The convolution writer chooses its own layout after it knows the
-        # hardware-safe frame/filter group.  Its sigma/frequency chunks are one
-        # by one, matching its per-combination writes and avoiding Zarr
-        # read/modify/recompress stalls.  Legacy keeps its established layout.
-        full_storage_layout = (
-            "convolution-sigma-frequency-chunked-v1"
-            if backend == "convolution" and is_zarr_wavelet
-            else None
-        )
+        # The convolution writer selects its storage layout after it knows the
+        # hardware-safe frame/filter group, avoiding Zarr recompression stalls.
+        full_storage_layout = "convolution-sigma-frequency-chunked-v1" if is_zarr_wavelet else None
         full_phase_identity = {
             "artifact": "full_wavelet_phase",
-            "backend": backend,
+            "backend": "convolution",
             "shape": full_model_shape,
             "downsample": full_downsample_fingerprint,
             "output_format": output_format,
@@ -4586,38 +4154,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 continue
             update_progress(45 + phase * 25, "Full wavelet decomposition", f"Writing full-model phase {phase}")
             _register_cancel_cleanup_path(target, preserve_on_cancel=True)
-            if backend == "convolution":
-                waveletDecompositionFullConv(
-                    videodata,
-                    phase,
-                    sigmas_full,
-                    frequencies,
-                    full_output,
-                    n_orientations=n_thetas,
-                    phase_offsets=phase_offsets,
-                    output_format=output_format,
-                    zarr_chunks=None,
-                    kernel_cache_path=fine_kernel_cache_path,
-                    # The fine kernel cache holds the coarse/full sigma union,
-                    # just like the legacy fine Gabor library.  The convolution
-                    # writer selects only the Full Model sigma axis for output.
-                    library_sigmas=fine_library_sigmas,
-                    progress_signature=phase_fingerprint,
-                    cancel_event=_current_cancel_event(),
-                )
-            else:
-                waveletDecompositionFull(
-                    videodata,
-                    phase,
-                    sigmas_full,
-                    frequencies,
-                    full_output,
-                    fine_lib_path,
-                    library_sigmas=fine_library_sigmas,
-                    output_format=output_format,
-                    zarr_chunks=legacy_zarr_chunks if is_zarr_wavelet else None,
-                    cancel_event=_current_cancel_event(),
-                )
+            waveletDecompositionFullConv(
+                videodata,
+                phase,
+                sigmas_full,
+                frequencies,
+                full_output,
+                n_orientations=n_thetas,
+                phase_offsets=phase_offsets,
+                output_format=output_format,
+                zarr_chunks=None,
+                kernel_cache_path=fine_kernel_cache_path,
+                # The fine kernel cache holds the coarse/full sigma union; the
+                # writer selects the Full Model sigma axis for output.
+                library_sigmas=fine_library_sigmas,
+                progress_signature=phase_fingerprint,
+                cancel_event=_current_cancel_event(),
+            )
             if not _artifact_matches(target, full_model_shape):
                 raise ValueError(f"Full-model wavelets were written with an unexpected shape: {target}")
             _write_artifact_metadata(
@@ -4909,6 +4462,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             output_format=_selected_neural_cache_format(),
             excluded_trial_numbers=excluded_trial_numbers,
             reuse_cache=False,
+            cancel_event=_current_cancel_event(),
         )
         cache_pair = find_neural_cache_pair(context["neural_cache_dir"])
         if cache_pair is None:
@@ -5048,6 +4602,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         method='frame2ttl',
                         save_dir=neural_cache_dir,
                         output_format=_selected_neural_cache_format(),
+                        cancel_event=_current_cancel_event(),
                     )
                 except NotImplementedError as exc:
                     print(exc)
@@ -5213,8 +4768,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                                  neuron_pos, coarse_nx, coarse_ny, ns, rf_nf, analysis_coverage, screen_ratio, sigmas_deg, rf_frequencies,
                                                   n_orientations=n_orientations,
                                                   plotting=False,
-                                                 rf_output_path=rf_output_path,
-                                                 paired_frequencies=matched_pair_frequencies_cpd)
+                                                  rf_output_path=rf_output_path,
+                                                  paired_frequencies=matched_pair_frequencies_cpd,
+                                                  cancel_event=_current_cancel_event())
         update_progress(75, "Coarse receptive-field analysis", "Precomputing orientation tuning curves")
         # Both curve types select the same preferred Gabor features.  Compute
         # them in one chunk-batched traversal so this stage reads each Zarr
@@ -5224,6 +4780,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             w_c_downsampled,
             rfs_gabor,
             tuning_cache_path=os.path.join(parent_dir, "coarse_rf_orientation_features.zarr"),
+            cancel_event=_current_cancel_event(),
         )
         orientation_selectivity = orientation_tunings["firing_rate"]
         correlation_selectivity = orientation_tunings["correlation"]
@@ -5236,6 +4793,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             trial_values = np.asarray(selectivity["trial_orientation_tuning"], dtype=float)
             records = []
             for neuron_id in range(means.shape[0]):
+                _raise_if_cancelled()
                 values = means[neuron_id]
                 trials = trial_values[:, neuron_id, :]
                 trial_counts = np.sum(np.isfinite(trials), axis=0)
@@ -6004,6 +5562,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 def finish(sta_result=None, sta_error=None):
                     """Yield once so the busy state paints before plot rendering."""
                     def render():
+                        render_success = False
                         try:
                             status_var.set(f"Inspecting neuron {neuron_id} - rendering plots")
                             root.update_idletasks()
@@ -6013,6 +5572,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                 sta_result=sta_result,
                                 sta_error=sta_error,
                             )
+                            render_success = sta_error is None
                         finally:
                             sta_render_in_progress[0] = False
                             btn_runRF.configure(state=tk.NORMAL, text="Inspect Single Neuron")
@@ -6023,6 +5583,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                                 _set_terminal_activity(False)
                             except Exception:
                                 pass
+                            notify_task_result("finished" if render_success else "failed")
                             if on_complete is not None:
                                 on_complete()
                     root.after(15, render)
@@ -6879,6 +6440,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 plotting=False,
                 frames_per_minute=frames_per_minute,
                 return_diagnostics=True,
+                cancel_event=_current_cancel_event(),
             )
 
         # ``call_model`` deliberately runs without plotting in this worker.
@@ -6983,7 +6545,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 full_nx, full_ny, sigmas_full, frequencies, _gabor_phase_offsets_radians(),
             ),
         }
-        if _selected_wavelet_backend() == "convolution" and _selected_wavelet_format() == "zarr":
+        if _selected_wavelet_format() == "zarr":
             expected_full_params["storage_layout"] = "convolution-sigma-frequency-chunked-v1"
         for phase_path in (
             os.path.join(wavelet_path, "dwt_videodata2_r.zarr"),
@@ -7027,6 +6589,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 coarse_shape=(state["coarse_nx"], state["coarse_ny"]),
                 hz=movie_metadata["fps"],
                 return_diagnostics=True,
+                cancel_event=_current_cancel_event(),
             )
 
         # See Run Model above: only compact numerical marginals cross the model
@@ -7155,7 +6718,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         state = {
             "workflow": workflow,
             "gui": {
-                "wavelet_backend": _selected_wavelet_backend(),
                 "coarse_rf_frequency_mode": _selected_coarse_rf_frequency_mode(),
                 "downsample_percent": _selected_downsample_percent(),
                 "sampling_mode": sampling_mode_var.get(),
@@ -7165,7 +6727,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "filter_bank_maximum_cpd": filter_bank_maximum_cpd_var.get(),
                 "filter_bank_density": filter_bank_density_var.get(),
                 "filter_bank_cycles_per_sigma": filter_bank_cycles_per_sigma_var.get(),
-                "gabor_format": gabor_format_var.get(),
                 "wavelet_format": wavelet_format_var.get(),
                 "downsample_format": _selected_downsample_format(),
                 "neural_source": _selected_neural_source(),
@@ -7174,10 +6735,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
                 "suite2p_output_dir": suite2p_output_dir_var.get().strip(),
                 "export_files": _selected_export_files(),
-                "export_profile": export_profile_var.get() if export_profile_var is not None else "Full archive",
-                "export_array_format": export_array_format_var.get(),
-                "export_numeric_layout": _selected_export_numeric_layout(),
-                "export_packaging": _selected_export_packaging(),
             },
             "gabor_param": {key: entry.get() for key, entry in gabor_entries.items()},
             "common": common_values,
@@ -7185,7 +6742,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "ephys": modality_values if workflow == WORKFLOW_EPHYS else {},
         }
         path = filedialog.asksaveasfilename(
-            title="Save Current GUI Inputs and Parameters",
+            title="Save pipeline_config.json",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json")],
             initialfile="pipeline_config.json",
@@ -7195,15 +6752,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         try:
             with open(path, "w", encoding="utf-8") as handle:
                 json.dump(state, handle, indent=2)
-            print(f"Saved GUI state to: {path}")
+            print(f"Saved pipeline configuration to: {path}")
+            notify_task_result("finished")
         except Exception as exc:
             messagebox.showerror("Save Failed", f"Could not save GUI state: {exc}")
             print(f"Failed to save GUI state: {exc}")
+            notify_task_result("failed")
 
     def load_app_state():
         """Function for load app state."""
         path = filedialog.askopenfilename(
-            title="Load GUI Inputs and Parameters",
+            title="Load pipeline_config.json",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json")],
         )
@@ -7218,10 +6777,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 set_workflow_from_panel(loaded_workflow)
             effective_workflow = loaded_workflow if loaded_workflow in (WORKFLOW_2P, WORKFLOW_EPHYS) else workflow
             gui_state = state.get("gui") or state.get("save_options") or {}
-            loaded_backend = gui_state.get("wavelet_backend", state.get("wavelet_backend"))
-            if loaded_backend in {"legacy", "convolution"}:
-                wavelet_backend_var.set(loaded_backend)
-                set_wavelet_backend_from_panel(loaded_backend)
             loaded_coarse_frequency_mode = gui_state.get("coarse_rf_frequency_mode")
             if loaded_coarse_frequency_mode in {"coupled", "frequency_list"}:
                 coarse_rf_frequency_mode_var.set(
@@ -7270,7 +6825,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if key in param_entries:
                     _set_entry_value(param_entries[key], value)
             save_options = gui_state
-            gabor_format_var.set(save_options.get("gabor_format", gabor_format_var.get()))
             loaded_wavelet_format = save_options.get("wavelet_format")
             if loaded_wavelet_format in {"npy", "zarr"}:
                 wavelet_format_var.set(loaded_wavelet_format)
@@ -7287,20 +6841,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             for key, variable in export_file_vars.items():
                 if key in export_file_options:
                     variable.set(_coerce_runtime_bool(export_file_options[key], bool(variable.get())))
-            export_array_format = save_options.get("export_array_format")
-            if export_array_format in {"npy", "zarr", "both"}:
-                export_array_format_var.set(export_array_format)
-            export_numeric_layout = str(save_options.get("export_numeric_layout", "")).lower()
-            if export_numeric_layout in {"per_graph", "per_neuron"}:
-                export_numeric_layout_var.set(
-                    "Per-neuron .npz" if export_numeric_layout == "per_neuron" else "Per-graph files"
-                )
-            export_profile = save_options.get("export_profile")
-            if export_profile in {"Quick review", "Data bundle", "Full archive", "Custom"}:
-                export_profile_var.set(export_profile)
-            export_packaging = str(save_options.get("export_packaging", "")).lower()
-            if export_packaging in {"folder", "zip", "both"}:
-                export_packaging_var.set(export_packaging)
             _set_runtime_controls(save_options.get("performance") or {})
             suite2p_subject_dirs_var.set(
                 str(save_options.get("suite2p_subject_dirs", "")).strip()
@@ -7317,10 +6857,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             except NameError:
                 pass
             refresh_size_estimates()
-            print(f"Loaded GUI state from: {path}")
+            print(f"Loaded pipeline configuration from: {path}")
+            notify_task_result("finished")
         except Exception as exc:
             messagebox.showerror("Load Failed", f"Could not load GUI state: {exc}")
             print(f"Failed to load GUI state: {exc}")
+            notify_task_result("failed")
 
 
     def cleanup_temporary_directories():
@@ -7423,75 +6965,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except Exception:
             return fallback
 
-    def _gabor_library_npy_bytes(nx, ny, n_theta, sigmas, offsets, frequencies):
-        """Exact byte count for the in-memory/NPY Gabor library tensor."""
-        flat_size = nx * ny
-        dtype_size = np.dtype(np.float16).itemsize
-        n_sigmas = max(1, len(sigmas))
-        n_offsets = max(1, len(offsets))
-        n_frequencies = max(1, len(frequencies))
-        if len(frequencies) and np.any(np.asarray(frequencies, dtype=float) != 0):
-            shape = (
-                nx,
-                ny,
-                n_theta,
-                n_sigmas,
-                n_frequencies,
-                n_offsets,
-                flat_size,
-            )
-        else:
-            shape = (nx, ny, n_theta, n_sigmas, n_offsets, flat_size)
-        return int(np.prod(shape, dtype=np.int64) * dtype_size), shape
-
-    def estimate_gabor_library_size():
-        """Function for estimate gabor library size."""
-        try:
-            nx, ny = _stimulus_grid_dimensions(movie_path=_find_movie_path())
-            n_theta = int(_field_value(gabor_entries, "N_thetas"))
-            sigmas = parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas")
-            fine_sigmas = _ordered_float_union(
-                sigmas,
-                parse_literal(_field_value(param_entries, "Sigmas Full Model"), "Sigmas Full Model"),
-            )
-            offsets = _gabor_phase_offsets_radians()
-            frequencies = parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies")
-            coarse_nx, coarse_ny = _analysis_grid_dimensions(nx, ny, "coarse")
-            full_nx, full_ny = _analysis_grid_dimensions(nx, ny, "full")
-            coarse_bytes, coarse_shape = _gabor_library_npy_bytes(
-                coarse_nx,
-                coarse_ny,
-                n_theta,
-                sigmas,
-                offsets,
-                [0],
-            )
-            fine_bytes, fine_shape = _gabor_library_npy_bytes(
-                full_nx,
-                full_ny,
-                n_theta,
-                fine_sigmas,
-                offsets,
-                frequencies,
-            )
-            if gabor_format_var.get() == "zarr":
-                gabor_size_label.configure(
-                    text=(
-                        "Legacy Gabor Zarr sizes are compression-dependent; NPY equivalents: "
-                        f"coarse {_format_bytes(coarse_bytes)} {coarse_shape}; "
-                        f"full {_format_bytes(fine_bytes)} {fine_shape}."
-                    )
-                )
-            else:
-                gabor_size_label.configure(
-                    text=(
-                        f"Legacy Gabor NPY sizes: coarse {_format_bytes(coarse_bytes)} {coarse_shape}; "
-                        f"full {_format_bytes(fine_bytes)} {fine_shape}"
-                    )
-                )
-        except Exception:
-            gabor_size_label.configure(text="Gabor disk size: enter valid dimensions to calculate")
-
     def estimate_wavelet_size():
         """Function for estimate wavelet size."""
         try:
@@ -7520,10 +6993,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             coarse_rf_bytes = coarse_phase_bytes * coarse_frequency_count
             coarse_model_bytes = 2 * coarse_phase_bytes
             full_model_raw_bytes = 2 * n_frames * full_nx * full_ny * n_thetas * n_sigmas_full * n_frequencies * bytes_per_float
-            backend = "convolution" if _selected_wavelet_backend() == "convolution" else "legacy"
             wavelet_size_label.configure(
                 text=(
-                    f"{backend.title()} internal Zarr products (uncompressed equivalents): "
+                    "Convolution internal Zarr products (uncompressed equivalents): "
                     f"Coarse RF power {_format_bytes(coarse_rf_bytes)} "
                     f"({_selected_coarse_rf_frequency_mode().replace('_', ' ')}); "
                     f"Run Model real + imaginary {_format_bytes(coarse_model_bytes)}; "
@@ -7536,17 +7008,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def refresh_size_estimates():
         """Function for refresh size estimates."""
-        estimate_gabor_library_size()
         estimate_wavelet_size()
 
-    GABOR_ESTIMATE_KEYS = {
-        "N_thetas",
-        "Sigmas",
-        "Sigmas Full Model",
-        "Phases",
-        "Frequencies",
-        "Save Path",
-    }
+    GABOR_ESTIMATE_KEYS = {"N_thetas", "Sigmas", "Sigmas Full Model", "Phases", "Frequencies"}
     WAVELET_ESTIMATE_KEYS = {"Movie Path", "N_thetas", "Sigmas", "Sigmas Full Model", "Frequencies", "Full Model Wavelet Path"}
 
     def _on_config_entry_changed(key):
@@ -8086,19 +7550,45 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     action_buttons = ctk.CTkFrame(session_actions, fg_color="transparent")
     action_buttons.pack(fill=tk.X, padx=10, pady=(0, 8))
     btn_load_state = ctk.CTkButton(
-        action_buttons, text="Load settings", height=28,
+        action_buttons, text="Load pipeline_config.json", height=28,
         fg_color=primary_btn, hover_color="#1D4ED8", command=load_app_state,
     )
     btn_load_state.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
     btn_save_state = ctk.CTkButton(
-        action_buttons, text="Save settings", height=28,
+        action_buttons, text="Save pipeline_config.json", height=28,
         fg_color="#4B5563", hover_color="#374151", command=save_app_state,
     )
     btn_save_state.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
-    initial_backend = gui_options.get("wavelet_backend", "legacy")
+    automation_frame = ctk.CTkFrame(frame_session, fg_color="#ECFDF5", corner_radius=8)
+    automation_frame.pack(fill=tk.X, pady=(0, 8))
+    ctk.CTkLabel(
+        automation_frame,
+        text="Guided pipeline",
+        text_color=text_color,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).pack(anchor="w", padx=10, pady=(8, 2))
+    ctk.CTkLabel(
+        automation_frame,
+        text=(
+            "Runs stimulus downsampling, neural-cache preparation, Coarse RF cache preparation, "
+            "and Coarse RF analysis using the current configuration."
+        ),
+        text_color=muted_text,
+        justify="left",
+        wraplength=320,
+    ).pack(anchor="w", padx=10, pady=(0, 6))
+    btn_run_guided_pipeline = ctk.CTkButton(
+        automation_frame,
+        text="Run Guided Coarse RF Pipeline",
+        height=30,
+        fg_color=success_btn,
+        hover_color="#065F46",
+        command=lambda: start_guided_pipeline(),
+    )
+    btn_run_guided_pipeline.pack(fill=tk.X, padx=10, pady=(0, 10))
+
     initial_neural_source = gui_options.get("neural_source", "data_dir")
-    wavelet_backend_var = tk.StringVar(value=initial_backend if initial_backend in {"legacy", "convolution"} else "legacy")
     initial_coarse_frequency_mode = gui_options.get("coarse_rf_frequency_mode", "coupled")
     coarse_rf_frequency_mode_var = tk.StringVar(
         value=(
@@ -8208,19 +7698,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             count = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
         except Exception:
             count = 0
-        try:
-            backend = wavelet_backend_var.get()
-        except NameError:
-            backend = "legacy"
-        if count >= 2 and backend == "convolution":
-            return (
-                f"Detected {count} CUDA GPUs. Coarse RF uses CUDA automatically; "
-                "when enabled, only compatible GPUs are combined for convolution."
-            )
         if count >= 2:
             return (
                 f"Detected {count} CUDA GPUs. Coarse RF uses CUDA automatically; "
-                "multi-GPU applies after selecting the convolution backend."
+                "when enabled, only compatible GPUs are combined for convolution."
             )
         if count == 1:
             return "Detected 1 CUDA GPU. Coarse RF uses it automatically; multi-GPU has no effect on this computer."
@@ -8267,21 +7748,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             os.environ.pop("WAVEN_SUITE2P_OUTPUT_DIR", None)
 
     def refresh_scale_controls():
-        """Refresh shared-grid controls for the selected backend."""
-        backend = _selected_wavelet_backend()
+        """Refresh shared-grid controls for the convolution-only workflow."""
         try:
-            if backend == "convolution":
-                btn_submit_gabor.configure(text="Prepare Convolution Kernels (Coarse RF + Full Model)")
-            else:
-                btn_submit_gabor.configure(text="Prepare Gabor Assets (Coarse RF + Full Model)")
-            # Legacy materializes a flattened library; convolution writes a
-            # compact kernel cache, so library storage estimates do not apply.
-            if backend == "legacy":
-                format_frame.grid()
-                gabor_size_label.grid()
-            else:
-                format_frame.grid_remove()
-                gabor_size_label.grid_remove()
+            btn_submit_gabor.configure(text="Prepare Convolution Kernels (Coarse RF + Full Model)")
             wavelet_format_segment.configure(state="normal")
             _refresh_scale_field_visibility()
             try:
@@ -8298,17 +7767,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     text="Select one stimulus movie in the Stimulus step to derive the analysis grid."
                 )
             refresh_size_estimates()
-        except NameError:
-            pass
-
-    def set_wavelet_backend_from_panel(value):
-        """Update the active legacy/convolution wavelet backend."""
-        if value not in {"legacy", "convolution"}:
-            return
-        wavelet_backend_var.set(value)
-        refresh_scale_controls()
-        try:
-            _apply_runtime_controls()
         except NameError:
             pass
 
@@ -8343,33 +7801,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         wraplength=330,
         justify="left",
     ).pack(fill=tk.X, pady=(8, 2))
-
-    backend_frame = ctk.CTkFrame(frame_session, fg_color="transparent")
-    backend_frame.pack(fill=tk.X, pady=(8, 8))
-    ctk.CTkLabel(
-        backend_frame,
-        text="Wavelet backend",
-        text_color=text_color,
-        font=ctk.CTkFont(size=12, weight="bold"),
-    ).pack(anchor="w", pady=(0, 4))
-    wavelet_backend_segment = ctk.CTkSegmentedButton(
-        backend_frame,
-        values=["legacy", "convolution"],
-        variable=wavelet_backend_var,
-        command=set_wavelet_backend_from_panel,
-        height=28,
-        corner_radius=6,
-        border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
-        text_color_disabled="#9CA3AF",
-    )
-    wavelet_backend_segment.pack(fill=tk.X)
-    wavelet_backend_segment.set(wavelet_backend_var.get())
 
     runtime_toggle = ctk.CTkButton(
         frame_session,
@@ -8662,11 +8093,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             repr([round(float(value), 8) for value in recommendation.frequencies_per_pixel]),
         )
         mode = _selected_coarse_rf_frequency_mode()
-        if _selected_wavelet_backend() != "convolution":
-            # Both explicit matched pairs and independent frequency lists need
-            # convolution kernels; Legacy only knows its historical hard-coded
-            # coarse sigma/frequency relationship.
-            set_wavelet_backend_from_panel("convolution")
         complexity = (
             recommendation.coupled_resource_multiplier
             if mode == "coupled"
@@ -8699,7 +8125,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ).grid(row=6, column=0, sticky="ew", padx=10, pady=(8, 10))
 
     gabor_input_start_row = 4
-    editable_gabor_params = [(key, value) for key, value in gabor_param.items() if key not in {"NX", "NY"}]
+    editable_gabor_params = [
+        (key, value)
+        for key, value in gabor_param.items()
+        if key not in {"NX", "NY", "Save Path", "Coarse Library Path", "Fine Library Path"}
+    ]
     for i, (label, default) in enumerate(editable_gabor_params):
         gabor_row_widgets[label] = add_config_row(
             frame_gabor, label, default, gabor_entries, i + gabor_input_start_row, frame_color, GABOR_LABELS
@@ -8718,8 +8148,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         pady=(6, 0),
     )
 
-    initial_gabor_format = gui_options.get("gabor_format", "npy")
-    gabor_format_var = tk.StringVar(value=initial_gabor_format if initial_gabor_format in {"npy", "zarr"} else "npy")
     btn_submit_gabor = ctk.CTkButton(
         frame_gabor,
         text="Prepare Gabor Assets (Coarse RF + Full Model)",
@@ -8735,66 +8163,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         columnspan=2,
         pady=(15, 0),
         sticky="ew",
-    )
-
-    format_frame = ctk.CTkFrame(frame_gabor, fg_color="transparent")
-    format_frame.grid(
-        row=gabor_input_start_row + len(editable_gabor_params) + 2,
-        column=0,
-        columnspan=2,
-        pady=(10, 0),
-        sticky="w",
-    )
-    ctk.CTkLabel(format_frame, text="Library format:", text_color=muted_text).pack(side=tk.LEFT)
-
-    def _set_gabor_format(val):
-        """Function for set gabor format.
-
-        Args:
-            val: Input value for this operation.
-        """
-        gabor_format_var.set(val)
-        try:
-            refresh_size_estimates()
-        except NameError:
-            pass
-
-    gabor_format_segment = ctk.CTkSegmentedButton(
-        format_frame,
-        values=["npy", "zarr"],
-        variable=gabor_format_var,
-        command=_set_gabor_format,
-        height=26,
-        corner_radius=6,
-        border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
-        text_color_disabled="#9CA3AF",
-    )
-    gabor_format_segment.pack(side=tk.LEFT, padx=(10, 0))
-    gabor_format_segment.set(gabor_format_var.get())
-    try:
-        gabor_format_var.trace_add("write", lambda *a: refresh_size_estimates())
-    except Exception:
-        pass
-
-    gabor_size_label = ttk.Label(
-        frame_gabor,
-        text="Gabor disk size: enter valid dimensions to calculate",
-        font=main_font,
-        background=frame_color,
-        foreground=text_color,
-    )
-    gabor_size_label.grid(
-        row=gabor_input_start_row + len(editable_gabor_params) + 3,
-        column=0,
-        columnspan=2,
-        sticky="w",
-        pady=(6, 0),
     )
 
     # --- Stimulus wavelet pipeline ---
@@ -8900,6 +8268,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     wavelet_format_segment.pack(side=tk.LEFT, padx=(10, 0))
     wavelet_format_segment.set(wavelet_format_var.get())
+    ctk.CTkLabel(
+        frame_processing,
+        text=(
+            "This controls the durable Coarse RF correlation cache: NPY is one memory-mappable file; "
+            "Zarr is chunked, compressed, and can resume large writes. Convolution power/phase products stay Zarr."
+        ),
+        text_color=muted_text,
+        wraplength=430,
+        justify="left",
+    ).pack(anchor="w", pady=(3, 0))
     try:
         wavelet_format_var.trace_add("write", lambda *a: refresh_size_estimates())
     except Exception:
@@ -9048,9 +8426,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     widget.grid() if visible else widget.grid_remove()
             if source == "data_dir":
                 neural_cache_format_frame.grid()
+                neural_cache_format_note.grid()
                 btn_create_neural_cache.configure(text="Create pos/spikes Cache")
             else:
                 neural_cache_format_frame.grid_remove()
+                neural_cache_format_note.grid_remove()
                 btn_create_neural_cache.configure(text="Validate Existing Neural Cache")
         except Exception:
             pass
@@ -9129,6 +8509,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     neural_cache_format_segment.pack(side=tk.LEFT, padx=(10, 0))
     neural_cache_format_segment.set(neural_cache_format_var.get())
+    neural_cache_format_note = ctk.CTkLabel(
+        frame_neural_cache,
+        text="This chooses the aligned pos/spikes cache: NPY is one memory-mappable file; Zarr is chunked and compressed. It does not affect exports.",
+        text_color=muted_text,
+        wraplength=420,
+        justify="left",
+    ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(3, 0))
 
     btn_create_neural_cache = ctk.CTkButton(
         frame_neural_cache,
@@ -9139,7 +8526,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#1D4ED8",
         command=run_in_thread(create_neural_cache, "Neural cache creation"),
     )
-    btn_create_neural_cache.grid(row=5, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    btn_create_neural_cache.grid(row=6, column=0, columnspan=2, pady=(12, 0), sticky="ew")
     _refresh_neural_source_controls()
 
     # --- Stimulus downsample cache ---
@@ -9346,6 +8733,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     downsample_format_segment.pack(side=tk.LEFT, padx=(10, 0))
     downsample_format_segment.set(downsample_format_var.get())
+    ctk.CTkLabel(
+        frame_downsample,
+        text=(
+            "This applies only to the prepared stimulus cache, not exported graphs: "
+            "NPY is a single memory-mappable file; Zarr is chunked and compressed for larger or resumable caches."
+        ),
+        text_color=muted_text,
+        wraplength=430,
+        justify="left",
+    ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(3, 0))
 
     btn_downsample_video = ctk.CTkButton(
         frame_downsample,
@@ -9356,7 +8753,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color="#1D4ED8",
         command=run_in_thread(create_downsampled_video_cache, "Stimulus video downsampling"),
     )
-    btn_downsample_video.grid(row=8, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    btn_downsample_video.grid(row=9, column=0, columnspan=2, pady=(12, 0), sticky="ew")
     _refresh_sampling_mode()
     _refresh_downsample_controls()
 
@@ -9387,7 +8784,45 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         checkbox_height=18,
     ).pack(side=tk.RIGHT, padx=(12, 0))
 
+    def _run_guided_pipeline():
+        """Run the required Coarse RF stages in dependency order."""
+        steps = (
+            ("Stimulus cache", create_downsampled_video_cache),
+            ("Neural cache", create_neural_cache),
+            ("Coarse RF cache", lambda: run_wavelet("coarse_rf")),
+            ("Coarse RF analysis", plot_data),
+        )
+        for index, (label, action) in enumerate(steps, start=1):
+            _raise_if_cancelled()
+            update_progress(
+                100.0 * (index - 1) / len(steps),
+                "Guided Coarse RF pipeline",
+                f"{label} ({index}/{len(steps)})",
+            )
+            result = action()
+            if result is False:
+                raise RuntimeError(f"Guided pipeline stopped during {label}.")
+        update_progress(100, "Guided Coarse RF pipeline", "Coarse RF results are ready")
+        return True
+
+    def start_guided_pipeline():
+        """Capture current settings and start the guided pipeline in one worker."""
+        run_in_thread(_run_guided_pipeline, "Guided Coarse RF pipeline")()
+
     ttk.Separator(frame_analysis, orient="horizontal").pack(fill=tk.X, pady=8)
+
+    plot_cache_frame = ttk.LabelFrame(frame_analysis, text="Analysis Plot Cache", padding=(10, 8))
+    plot_cache_frame.pack(fill=tk.X, pady=(0, 10))
+    plot_cache_frame.columnconfigure(1, weight=1)
+    add_config_row(
+        plot_cache_frame,
+        "Plot Cache Path",
+        param_defaults.get("Plot Cache Path", ""),
+        param_entries,
+        0,
+        frame_color,
+        ANALYSIS_LABELS,
+    )
 
     model_settings_frame = ttk.LabelFrame(frame_analysis, text="Model Evaluation Settings", padding=(10, 8))
     model_settings_frame.pack(fill=tk.X, pady=(0, 10))
@@ -9403,7 +8838,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         wraplength=680,
     ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
     for row, key in enumerate(
-        ("Sigmas Full Model", "Model Fit Minutes", "Train Trial Indices", "Test Trial Indices", "Use Last Minute Holdout"),
+        (
+            "Sigmas Full Model",
+            "Full Model Save Path",
+            "Model Fit Minutes",
+            "Train Trial Indices",
+            "Test Trial Indices",
+            "Use Last Minute Holdout",
+        ),
         start=1,
     ):
         add_config_row(
@@ -9482,58 +8924,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_export = ttk.LabelFrame(stage_export, text="Export", padding=15)
     frame_export.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-    output_paths_frame = ttk.LabelFrame(frame_export, text="Output Folders", padding=(10, 8))
-    output_paths_frame.pack(fill=tk.X, pady=(0, 8))
-    output_paths_frame.columnconfigure(1, weight=1)
-    output_path_rows = {}
-    for row, (key, default) in enumerate((
-        ("Full Model Save Path", param_defaults.get("Full Model Save Path", "")),
-        ("Plot Cache Path", param_defaults.get("Plot Cache Path", "")),
-    )):
-        output_path_rows[key] = add_config_row(
-            output_paths_frame, key, default, param_entries, row, frame_color, ANALYSIS_LABELS
-        )
-
-    ctk.CTkLabel(
-        frame_export, text="1. Fast export preset", text_color=text_color,
-        font=ctk.CTkFont(size=13, weight="bold"),
-    ).pack(anchor="w", pady=(0, 2))
-    ctk.CTkLabel(
-        frame_export,
-        text="Quick review writes PNGs only. Data bundle keeps PNGs plus one fast .npz per neuron. Full archive preserves every legacy export product.",
-        text_color=muted_text, wraplength=650, justify="left",
-    ).pack(anchor="w", pady=(0, 4))
     configured_export_files = dict(gui_options.get("export_files") or {})
-    profile_default = str(gui_options.get("export_profile", "")).strip()
-    if profile_default not in {"Quick review", "Data bundle", "Full archive"}:
-        profile_default = "Full archive" if not configured_export_files or all(
-            _coerce_runtime_bool(configured_export_files.get(key), default)
-            for key, _label, default in (
-                ("png", "", True), ("svg", "", True), ("data_pickle", "", True),
-                ("figure_pickle", "", True), ("arrays", "", True), ("manifest", "", True),
-            )
-        ) else "Custom"
-    export_profile_var = tk.StringVar(value=profile_default)
-    export_profile_segment = ctk.CTkSegmentedButton(
-        frame_export, values=["Quick review", "Data bundle", "Full archive", "Custom"],
-        variable=export_profile_var, command=_apply_export_profile,
-        height=28, corner_radius=6, selected_color=primary_btn, selected_hover_color="#1D4ED8",
-    )
-    export_profile_segment.pack(fill=tk.X, pady=(0, 8))
-
     ctk.CTkLabel(
-        frame_export, text="2. Files to include", text_color=text_color,
+        frame_export, text="File formats", text_color=text_color,
         font=ctk.CTkFont(size=13, weight="bold"),
     ).pack(anchor="w", pady=(0, 2))
     export_files_wrap = ctk.CTkFrame(frame_export, fg_color="#F8FAFC", corner_radius=8)
     export_files_wrap.pack(fill=tk.X, pady=(0, 8))
     export_file_specs = (
-        ("png", "PNG image", True),
-        ("svg", "SVG vector", True),
-        ("data_pickle", "Data bundle (.pkl)", True),
-        ("figure_pickle", "Matplotlib figure (.pkl; dashboards)", True),
-        ("arrays", "Reusable arrays", True),
-        ("manifest", "Manifest (.json)", True),
+        ("png", "PNG — presentation-ready raster image", True),
+        ("svg", "SVG — editable vector image for publications", True),
+        ("data_pickle", "PKL — graph data and analysis values for Python", True),
     )
     for index, (key, label, default) in enumerate(export_file_specs):
         variable = tk.BooleanVar(value=_coerce_runtime_bool(configured_export_files.get(key), default))
@@ -9541,55 +8942,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ctk.CTkCheckBox(
             export_files_wrap, text=label, variable=variable,
             onvalue=True, offvalue=False, text_color=text_color, height=24,
-            command=_mark_export_profile_custom,
-        ).grid(row=index // 2, column=index % 2, sticky="w", padx=10, pady=3)
+        ).grid(row=index, column=0, sticky="w", padx=10, pady=3)
     export_files_wrap.columnconfigure(0, weight=1)
-    export_files_wrap.columnconfigure(1, weight=1)
-
-    export_array_format_var = tk.StringVar(value=gui_options.get("export_array_format", "npy"))
-    export_format_wrap = ctk.CTkFrame(frame_export, fg_color="transparent")
-    export_format_wrap.pack(fill=tk.X, pady=(0, 5))
-    ctk.CTkLabel(export_format_wrap, text="3. Per-graph array format:", text_color=muted_text).pack(side=tk.LEFT)
-    export_format_segment = ctk.CTkSegmentedButton(
-        export_format_wrap,
-        values=["npy", "zarr", "both"],
-        variable=export_array_format_var,
-        height=26,
-        corner_radius=6,
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-    )
-    export_format_segment.pack(side=tk.LEFT, padx=(10, 0))
-    export_format_segment.set(export_array_format_var.get() if export_array_format_var.get() in {"npy", "zarr", "both"} else "npy")
-
-    configured_numeric_layout = str(gui_options.get("export_numeric_layout", "per_graph")).lower()
-    export_numeric_layout_var = tk.StringVar(
-        value="Per-neuron .npz" if configured_numeric_layout == "per_neuron" else "Per-graph files"
-    )
-    export_numeric_wrap = ctk.CTkFrame(frame_export, fg_color="transparent")
-    export_numeric_wrap.pack(fill=tk.X, pady=(0, 5))
     ctk.CTkLabel(
-        export_numeric_wrap, text="4. Every-neuron numeric data:", text_color=muted_text,
-    ).pack(side=tk.LEFT)
-    export_numeric_segment = ctk.CTkSegmentedButton(
-        export_numeric_wrap, values=["Per-graph files", "Per-neuron .npz"],
-        variable=export_numeric_layout_var, command=_mark_export_profile_custom,
-        height=26, corner_radius=6, selected_color=primary_btn, selected_hover_color="#1D4ED8",
-    )
-    export_numeric_segment.pack(side=tk.LEFT, padx=(10, 0))
-
-    export_packaging_var = tk.StringVar(value=str(gui_options.get("export_packaging", "folder")).lower())
-    if export_packaging_var.get() not in {"folder", "zip", "both"}:
-        export_packaging_var.set("folder")
-    export_delivery_wrap = ctk.CTkFrame(frame_export, fg_color="transparent")
-    export_delivery_wrap.pack(fill=tk.X, pady=(0, 10))
-    ctk.CTkLabel(export_delivery_wrap, text="5. Delivery:", text_color=muted_text).pack(side=tk.LEFT)
-    export_delivery_segment = ctk.CTkSegmentedButton(
-        export_delivery_wrap, values=["folder", "zip", "both"], variable=export_packaging_var,
-        height=26, corner_radius=6, selected_color=primary_btn, selected_hover_color="#1D4ED8",
-    )
-    export_delivery_segment.pack(side=tk.LEFT, padx=(10, 0))
-    export_delivery_segment.set(export_packaging_var.get())
+        frame_export,
+        text="Files are written directly into the folder you choose as shankX_unitX_graph-name.ext. NPY and Zarr are cache formats, not export formats, so they are no longer shown here.",
+        text_color=muted_text,
+        wraplength=650,
+        justify="left",
+    ).pack(anchor="w", pady=(0, 8))
 
     def add_export_checkbox_group(parent, title, selection_name, options):
         """Create a labelled, all-enabled-by-default graph-selection group."""
@@ -9613,7 +8974,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
             checkbox.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 18), pady=2)
             export_selection_widgets[selection_name][kind] = checkbox
-            if selection_name == "current_individual" and is_model_tuning:
+            if selection_name == "all_individual" and is_model_tuning:
                 checkbox.configure(state=tk.DISABLED)
         for column in range(2):
             options_frame.columnconfigure(column, weight=1)
@@ -9623,7 +8984,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         def select_available():
             for kind, variable in variables.items():
                 if (
-                    selection_name != "current_individual"
+                    selection_name != "all_individual"
                     or kind not in model_tuning_export_kinds
                     or model_tuning_export_availability.get(kind, False)
                 ):
@@ -9640,67 +9001,88 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ).pack(side=tk.LEFT, padx=(6, 0))
 
     ctk.CTkLabel(
-        frame_export, text="Section A — Current Display", text_color=text_color,
+        frame_export, text="All Neurons", text_color=text_color,
         font=ctk.CTkFont(size=14, weight="bold"),
     ).pack(anchor="w", pady=(6, 1))
     ctk.CTkLabel(
         frame_export,
-        text="Choose graph types, then export the figures currently visible in the All Neurons and/or Individual Neuron tabs.",
+        text="Choose aggregate graph types, then export the figures currently visible in the All Neurons tab.",
         text_color=muted_text, wraplength=650, justify="left",
     ).pack(anchor="w", pady=(0, 4))
     add_export_checkbox_group(frame_export, "All-neuron graphs to include", "current_all", ALL_NEURON_GRAPH_OPTIONS)
-    add_export_checkbox_group(
-        frame_export, "Current individual-neuron graphs to include", "current_individual",
-        CURRENT_INDIVIDUAL_GRAPH_OPTIONS,
-    )
-    _refresh_model_tuning_export_options()
-    btn_export_all_results = ctk.CTkButton(
-        frame_export,
-        text="Export Current GUI: All + Individual",
-        fg_color="#2563EB",
-        hover_color="#1D4ED8",
-        command=export_current_gui_results,
-    )
-    btn_export_all_results.pack(fill=tk.X, pady=3)
     btn_export_all_neurons = ctk.CTkButton(
         frame_export,
-        text="Export Current Display: All-Neuron Graphs",
+        text="Export All-Neuron Graphs",
         fg_color="#0891B2",
         hover_color="#0E7490",
         command=export_all_neurons_results,
     )
     btn_export_all_neurons.pack(fill=tk.X, pady=3)
-    btn_export_individual_neuron = ctk.CTkButton(
-        frame_export,
-        text="Export Current Display: Individual-Neuron Graphs",
-        fg_color="#7C3AED",
-        hover_color="#6D28D9",
-        command=export_individual_neuron_results,
-    )
-    btn_export_individual_neuron.pack(fill=tk.X, pady=3)
     ctk.CTkLabel(
-        frame_export, text="Section B — Every Analyzed Neuron", text_color=text_color,
+        frame_export, text="Individual Neurons", text_color=text_color,
         font=ctk.CTkFont(size=14, weight="bold"),
     ).pack(anchor="w", pady=(12, 1))
     ctk.CTkLabel(
         frame_export,
         text=(
-            "Exports one graph per folder for every neuron. Run Model and Run Full Model amplitude, phase, and drift choices "
-            "fit that selected model separately for every neuron; Full Model uses the larger full-resolution phase cache. "
-            "A spike train, RF map, azimuth, elevation, and each tuning curve are never combined into one graph-data bundle."
+            "Choose individual graph types. Run Model and Run Full Model options become available after their matching phase caches exist. "
+            "Every output is written directly into the folder you choose with a shankX_unitX file prefix."
         ),
         text_color=muted_text, wraplength=650, justify="left",
     ).pack(anchor="w", pady=(0, 4))
     add_export_checkbox_group(
-        frame_export, "Single graph types to export for every neuron", "all_individual",
+        frame_export, "Individual graph types", "all_individual",
         SINGLE_NEURON_GRAPH_OPTIONS,
     )
+    repeat_individual_export_var = tk.BooleanVar(value=False)
+    ctk.CTkCheckBox(
+        frame_export,
+        text="Repeat these selections for every analyzed neuron",
+        variable=repeat_individual_export_var,
+        onvalue=True,
+        offvalue=False,
+        text_color=text_color,
+    ).pack(anchor="w", pady=(3, 2))
+
+    def export_individual_neuron_section():
+        """Export selected axes for one displayed neuron or for every analyzed neuron."""
+        if repeat_individual_export_var.get():
+            export_all_individual_graph_types_results()
+            return
+        selected_kinds = _selected_export_kinds("all_individual")
+        records = _active_export_records("Individual neuron")
+        if not selected_kinds or not records:
+            messagebox.showinfo("No Individual Graphs", "Run Coarse RF and inspect a neuron before exporting its graphs.")
+            return
+        if not _validate_export_file_selection():
+            return
+        selected_dir = filedialog.askdirectory(title="Select Folder for Individual-Neuron Export")
+        if not selected_dir:
+            return
+        try:
+            snapshots = _snapshot_export_records(records)
+        except Exception as exc:
+            messagebox.showerror("Export Failed", f"Could not prepare individual graphs: {exc}")
+            return
+
+        def write_export():
+            exported = _export_individual_axes(
+                snapshots, selected_dir, selected_kinds, file_options=_selected_export_files(),
+            )
+            print(f"[DONE] Exported {len(exported)} individual graph(s) to: {selected_dir}")
+            schedule_on_ui(
+                lambda: messagebox.showinfo("Export Complete", f"Exported {len(exported)} graph(s).\n\n{selected_dir}")
+            )
+            return True
+
+        run_in_thread(write_export, "Export individual-neuron graphs")()
+
     btn_export_all_individual_graph_types = ctk.CTkButton(
         frame_export,
-        text="Export Selected Single-Graph Files for Every Neuron",
+        text="Export Individual-Neuron Graphs",
         fg_color="#0F766E",
         hover_color="#115E59",
-        command=export_all_individual_graph_types_results,
+        command=export_individual_neuron_section,
     )
     btn_export_all_individual_graph_types.pack(fill=tk.X, pady=3)
     # --- Global Controls ---
@@ -9714,12 +9096,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         btn_submit_wavelet,
         btn_submit_plot,
         btn_runRF,
-        btn_export_all_results,
         btn_export_all_neurons,
-        btn_export_individual_neuron,
         btn_export_all_individual_graph_types,
-        btn_save_state,
-        btn_load_state,
+        btn_run_guided_pipeline,
     ]
 
     def _set_grid_row_visible(row_widgets, visible):
@@ -9737,7 +9116,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             _set_grid_row_visible(row_widgets, visible)
         _set_grid_row_visible(coarse_wavelet_path_row, True)
         _set_grid_row_visible(full_wavelet_path_row, True)
-        _set_grid_row_visible(output_path_rows["Full Model Save Path"], True)
         # The selector must remain visible whenever decomposition is available.
         format_frame_wavelet.pack(anchor="w", pady=(10, 0), before=wavelet_size_label)
 

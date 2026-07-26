@@ -9,6 +9,8 @@ import time
 
 import numpy as np
 
+from ..runtime.task_control import check_cancelled
+
 
 def _selected_feature_cache_signature(wavelets, maxes, n_frames, n_neurons, n_orientations):
     """Return a stable identity for the compact preferred-feature cache.
@@ -715,6 +717,7 @@ def orientation_tuning_bundle(
     rfs,
     angles_deg=None,
     tuning_cache_path=None,
+    cancel_event=None,
 ):
     """Precompute firing-rate and correlation tuning in one wavelet pass.
 
@@ -734,6 +737,7 @@ def orientation_tuning_bundle(
     in a compact Zarr layout.  Later runs reuse that layout without traversing
     the large spatial RF-power cache again.
     """
+    check_cancelled(cancel_event)
     raw_responses = np.asarray(spikes, dtype=float)
     rate_trial_responses = raw_responses if raw_responses.ndim == 3 else None
     if raw_responses.ndim == 3:
@@ -781,6 +785,7 @@ def orientation_tuning_bundle(
     chunk_groups = {}
     mean_tuning = np.full((n_neurons, n_orientations), np.nan, dtype=float)
     for neuron_idx in range(n_neurons):
+        check_cancelled(cancel_event)
         x, y, _orientation, sigma_idx, frequency_idx = maxes[:5, neuron_idx]
         if not (
             0 <= x < wavelet_shape[1]
@@ -844,6 +849,7 @@ def orientation_tuning_bundle(
     )
     if cache_reused:
         for time_start in range(0, n_frames, time_chunk):
+            check_cancelled(cancel_event)
             time_end = min(n_frames, time_start + time_chunk)
             read_started = time.perf_counter()
             raw_features = np.asarray(selected_feature_cache[time_start:time_end, :, :])
@@ -872,6 +878,7 @@ def orientation_tuning_bundle(
         for group_number, ((x_group, y_group, sigma_group, frequency_group), neuron_ids) in enumerate(
             chunk_groups.items(), start=1
         ):
+            check_cancelled(cancel_event)
             neuron_ids = np.asarray(neuron_ids, dtype=int)
             feature_indices = maxes[:5, neuron_ids]
             x0, y0 = x_group * x_chunk, y_group * y_chunk
@@ -890,6 +897,7 @@ def orientation_tuning_bundle(
             local_sigma = feature_indices[3] - sigma0
             local_frequency = feature_indices[4] - frequency0
             for time_start in range(0, n_frames, time_chunk):
+                check_cancelled(cancel_event)
                 time_end = min(n_frames, time_start + time_chunk)
                 read_started = time.perf_counter()
                 if len(wavelet_shape) == 5:
@@ -909,6 +917,7 @@ def orientation_tuning_bundle(
                     try:
                         cached_values = np.asarray(raw_features, dtype=np.float32)
                         for local_neuron, neuron_id in enumerate(neuron_ids):
+                            check_cancelled(cancel_event)
                             selected_feature_cache[time_start:time_end, int(neuron_id), :] = cached_values[
                                 :, local_neuron, :
                             ]

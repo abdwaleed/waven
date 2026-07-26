@@ -22,30 +22,16 @@ class PlotBackend:
 
 
 @dataclass(frozen=True)
-class GaborBuilders:
-    """Gabor-kernel library builders used by the GUI's cache actions."""
-
-    make_filter_library: Callable[..., Any]
-    make_filter_library2: Callable[..., Any]
-    make_gabor_filter: Callable[..., Any]
-
-
-@dataclass(frozen=True)
 class WaveletOperations:
     """Disk-backed stimulus and wavelet cache operations."""
 
-    coarse_wavelet: Callable[..., Any]
     build_convolution_kernel_cache: Callable[..., Any]
     convolution_kernel_cache_path: Callable[..., Any]
     downsample_video_binary: Callable[..., Any]
-    wavelet_decomposition: Callable[..., Any]
-    wavelet_decomposition_conv: Callable[..., Any]
     wavelet_power_decomposition_conv: Callable[..., Any]
-    wavelet_decomposition_full: Callable[..., Any]
     wavelet_decomposition_full_conv: Callable[..., Any]
     coarse_rf_zarr_layout: Callable[..., Any]
     video_downsample_chunk_size: Callable[..., Any]
-    convert_npy_to_zarr: Callable[..., Any]
 
 
 @dataclass(frozen=True)
@@ -81,44 +67,26 @@ def load_plot_backend() -> PlotBackend:
 
 
 @lru_cache(maxsize=1)
-def load_gabor_builders() -> GaborBuilders:
-    """Load Gabor construction functions on first use."""
-    from ..wavelets.filters import makeFilterLibrary, makeFilterLibrary2, makeGaborFilter
-
-    return GaborBuilders(makeFilterLibrary, makeFilterLibrary2, makeGaborFilter)
-
-
-@lru_cache(maxsize=1)
 def load_wavelet_operations() -> WaveletOperations:
     """Load wavelet generation and storage operations on first use."""
-    from ..stimulus import coarseWavelet
     from ..runtime.performance import video_downsample_chunk_size
-    from ..storage.wavelet_zarr import convert_npy_to_zarr
     from ..wavelets.decomposition import (
         build_convolution_kernel_cache,
         coarse_rf_zarr_layout,
         convolution_kernel_cache_path,
         downsample_video_binary,
-        waveletDecomposition,
-        waveletDecompositionConv,
-        waveletDecompositionFull,
         waveletDecompositionFullConv,
         waveletPowerDecompositionConv,
     )
 
     return WaveletOperations(
-        coarseWavelet,
         build_convolution_kernel_cache,
         convolution_kernel_cache_path,
         downsample_video_binary,
-        waveletDecomposition,
-        waveletDecompositionConv,
         waveletPowerDecompositionConv,
-        waveletDecompositionFull,
         waveletDecompositionFullConv,
         coarse_rf_zarr_layout,
         video_downsample_chunk_size,
-        convert_npy_to_zarr,
     )
 
 

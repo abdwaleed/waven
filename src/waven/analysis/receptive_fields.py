@@ -2,6 +2,7 @@
 from .common import *
 from .rf_correlation import streaming_cross_correlation as _safe_chunked_cross_corr
 from ..runtime.performance import resolve_compute_device
+from ..runtime.task_control import check_cancelled
 
 def wavelet_feature_dims(wavelets_r, sigmas=None, frequencies=None):
     """Infer spatial and feature dimensions from a full-model wavelet tensor."""
@@ -162,6 +163,7 @@ def PearsonCorrelationPinkNoise(
     stim, resp, neuron_pos, nx, ny, ns, nf, visual_coverage, screen_ratio,
     sigmas, frequencies, n_orientations=8, fil=[0], absolute=False,
     plotting=False, n_time=None, rf_output_path=None, paired_frequencies=None,
+    cancel_event=None,
 ):
     """Compute a chunked RF-correlation tensor and preferred feature indices.
 
@@ -208,6 +210,7 @@ def PearsonCorrelationPinkNoise(
         # established flattened write layout and are reshaped below.
         structured_output=True,
         output_feature_shape=(nx, ny, n_orientations, ns, nf),
+        cancel_event=cancel_event,
     )
     expected_shape = (rfs.shape[0], nx, ny, n_orientations, ns, nf)
     is_structured_output = tuple(rfs.shape) == tuple(expected_shape)
@@ -220,6 +223,7 @@ def PearsonCorrelationPinkNoise(
     output_chunks = getattr(rfs, "chunks", None)
     neuron_block = int(output_chunks[0]) if output_chunks else 1
     for start in range(0, rfs.shape[0], max(1, neuron_block)):
+        check_cancelled(cancel_event)
         stop = min(rfs.shape[0], start + max(1, neuron_block))
         rows = np.asarray(rfs[start:stop])
         rows[rows >= 0.99] -= 1.0

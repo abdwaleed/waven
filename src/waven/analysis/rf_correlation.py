@@ -23,6 +23,7 @@ from ..runtime.performance import (
     gpu_available_vram_bytes,
     has_enough_ram,
 )
+from ..runtime.task_control import check_cancelled
 
 
 def _is_zarr_output_path(output_path) -> bool:
@@ -274,6 +275,7 @@ def _chunk_aligned_structured_correlation(
     output_path=None,
     structured_output=False,
     output_feature_shape=None,
+    cancel_event=None,
 ):
     """Correlate a 5/6-D tensor with stable, chunk-aligned covariance updates.
 
@@ -343,6 +345,7 @@ def _chunk_aligned_structured_correlation(
     response_m2 = np.zeros(n_neurons, dtype=np.float64)
     response_seen = 0
     for time_start in range(0, n_time, time_chunk):
+        check_cancelled(cancel_event)
         time_end = min(n_time, time_start + time_chunk)
         response_block = response[time_start:time_end]
         batch_size = time_end - time_start
@@ -404,8 +407,10 @@ def _chunk_aligned_structured_correlation(
     )
     try:
         for x_start in range(0, nx, x_chunk):
+            check_cancelled(cancel_event)
             x_end = min(nx, x_start + x_chunk)
             for y_start in range(0, ny, y_chunk):
+                check_cancelled(cancel_event)
                 y_end = min(ny, y_start + y_chunk)
                 tile_features = (x_end - x_start) * (y_end - y_start) * features_per_pixel
                 feature_mean = np.zeros(tile_features, dtype=np.float64)
@@ -471,6 +476,7 @@ def _chunk_aligned_structured_correlation(
                 )
                 seen = 0
                 for schedule_index, schedule_item in enumerate(response_schedule):
+                    check_cancelled(cancel_event)
                     (
                         time_start,
                         time_end,
@@ -632,6 +638,7 @@ def streaming_cross_correlation(
     output_path: Optional[str] = None,
     structured_output: bool = False,
     output_feature_shape: Optional[Tuple[int, ...]] = None,
+    cancel_event=None,
 ) -> Any:
     """Return Pearson correlations while reading a disk-backed stimulus in blocks.
 
@@ -643,6 +650,7 @@ def streaming_cross_correlation(
     ``output_feature_shape`` optionally adds a logically singleton feature axis
     (for example, the coarse-model frequency axis) without changing values.
     """
+    check_cancelled(cancel_event)
     stimulus_shape = tuple(int(dim) for dim in stimulus.shape)
     if len(stimulus_shape) < 2:
         raise ValueError(
@@ -689,6 +697,7 @@ def streaming_cross_correlation(
             output_path=output_path,
             structured_output=structured_output,
             output_feature_shape=output_feature_shape,
+            cancel_event=cancel_event,
         )
 
     response -= response.mean(axis=0, keepdims=True)
@@ -701,6 +710,7 @@ def streaming_cross_correlation(
     def feature_blocks() -> Iterator[Tuple[int, int, Any]]:
         if len(stimulus_shape) == 2:
             for start in range(0, n_features, chunk_size):
+                check_cancelled(cancel_event)
                 end = min(start + chunk_size, n_features)
                 yield start, end, stimulus[:n_time, start:end]
             return
@@ -714,7 +724,9 @@ def streaming_cross_correlation(
         features_per_pixel = int(np.prod(stimulus_shape[3:], dtype=np.int64))
         pixels_per_block = max(1, chunk_size // max(1, features_per_pixel))
         for x in range(nx):
+            check_cancelled(cancel_event)
             for y_start in range(0, ny, pixels_per_block):
+                check_cancelled(cancel_event)
                 y_end = min(y_start + pixels_per_block, ny)
                 start = (x * ny + y_start) * features_per_pixel
                 end = (x * ny + y_end) * features_per_pixel

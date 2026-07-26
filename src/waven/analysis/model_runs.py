@@ -9,6 +9,7 @@ from .nonlinear_models import *
 from .trial_stats import *
 from .rf_correlation import streaming_cross_correlation
 from ..runtime.performance import cpu_inner_thread_count
+from ..runtime.task_control import check_cancelled
 from ..storage.array_store import load_array_with_ram_acceleration, read_first_axis_indices
 from joblib import parallel_config
 
@@ -184,7 +185,7 @@ def _paper_model_diagnostics(response_tuning):
     return diagnostics
 
 
-def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, lastmin=False, show_sem_errorbars=False, return_diagnostics=False):
+def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min, double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute, lastmin=False, show_sem_errorbars=False, return_diagnostics=False, cancel_event=None):
     """Function for process single neuron.
 
     Args:
@@ -207,6 +208,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
     Returns:
         Result produced by the operation.
     """
+    check_cancelled(cancel_event)
     x = int(np.round(maxes0[0, idx]))
     y = int(np.round(maxes0[1, idx]))
     o = int(np.round(maxes0[2, idx]))
@@ -291,6 +293,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
         ax.set_ylabel("Phase phi (rad)")
         ax.set_zlabel("Drift dphi (Hz)")
 
+    check_cancelled(cancel_event)
     vis_resp, a, nonlinparams, rhophiparams, plots, unrectified, w, interp = GetNeuronVisresponse(idx, w_i, w_r, w_i_inhib,
                                                                                           w_r_inhib,
                                                                                           dphi.reshape(-1, 1),
@@ -311,7 +314,7 @@ def _process_single_neuron(idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt
 def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
                n_min=5, double_wavelet_model=True, train_idx=[0, 2],
                test_idx=[1, 3], lastmin=False, plotting=False, frames_per_minute=None,
-               show_sem_errorbars=False, return_diagnostics=False):
+               show_sem_errorbars=False, return_diagnostics=False, cancel_event=None):
     """Fit the coarse nonlinear Gabor-wavelet model for one or more neurons.
 
     Args:
@@ -342,6 +345,7 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
     Raises:
         ValueError: If cache axes, RF indices, trial splits, or shared frame length are incompatible.
     """
+    check_cancelled(cancel_event)
     if wavelets_i.ndim != 5 or wavelets_r.ndim != 5:
         raise ValueError(
             "run_Model expects 5D coarse wavelets with shape "
@@ -411,15 +415,16 @@ def run_Model(maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1=9000,
     # A selected GUI neuron is a one-neuron job.  Keep it serial so disk-backed
     # Zarr inputs are not pickled into a worker process. Plotting is serial too.
     if plotting or num_neurons == 1:
-        parallel_results = [
-            _process_single_neuron(
+        parallel_results = []
+        for idx in range(num_neurons):
+            check_cancelled(cancel_event)
+            parallel_results.append(_process_single_neuron(
                 idx, maxes0, maxes1, spks, wavelets_i, wavelets_r, dt1, n_min,
                 double_wavelet_model, train_idx, test_idx, plotting, frames_per_minute,
                 lastmin=lastmin, show_sem_errorbars=show_sem_errorbars,
                 return_diagnostics=return_diagnostics,
-            )
-            for idx in range(num_neurons)
-        ]
+                cancel_event=cancel_event,
+            ))
     else:
         n_jobs = model_parallel_jobs()
         # Each process may enter NumPy/SciPy/BLAS.  Limit its inner native
@@ -461,7 +466,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
                    savepath='outputs', n_min=5, tt=None,
                    memmapping=True, train_idx=None, test_idx=None, double_wavelet_model=False, lastmin=False,
                    plotting=False, frames_per_minute=None, coarse_shape=None,
-                   hz=None, show_sem_errorbars=False, return_diagnostics=False):
+                   hz=None, show_sem_errorbars=False, return_diagnostics=False, cancel_event=None):
     """Refine coarse RF seeds against full-model real/imaginary wavelets.
 
     Args:
@@ -502,6 +507,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
     Raises:
         ValueError: If phase cache axes, trial splits, frame range, or coarse seed coordinates are incompatible.
     """
+    check_cancelled(cancel_event)
     if tt is None:
         tt = [0, 18000]
     if train_idx is None:
@@ -726,8 +732,12 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
             # x/y window.  The lazy view delegates to chunk-aligned RF
             # sufficient statistics instead.
             response_matrix = np.asarray(response, dtype=np.float32).reshape(-1, 1)
-            corr_real = streaming_cross_correlation(real_features, response_matrix).reshape(output_shape)
-            corr_imag = streaming_cross_correlation(imag_features, response_matrix).reshape(output_shape)
+            corr_real = streaming_cross_correlation(
+                real_features, response_matrix, cancel_event=cancel_event,
+            ).reshape(output_shape)
+            corr_imag = streaming_cross_correlation(
+                imag_features, response_matrix, cancel_event=cancel_event,
+            ).reshape(output_shape)
         else:
             corr_real = _corr_features(real_features, response).reshape(output_shape)
             corr_imag = _corr_features(imag_features, response).reshape(output_shape)
@@ -801,6 +811,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
         y_global = y_start + y_local
 
         for iteration in range(10):
+            check_cancelled(cancel_event)
             phase, cc_f_1, osf_best = _best_phase_correlation(
                 np.asarray(wavelets_r[t_start:t_end, x_global, y_global, :, :, :]),
                 np.asarray(wavelets_i[t_start:t_end, x_global, y_global, :, :, :]),
@@ -888,6 +899,7 @@ def run_Full_Model(maxes0, maxes1, spks, idxs, thetas, sigmas, frequencies, visu
 
     list_neurons = selected_indices
     for idx in list_neurons:  # np.asarray(neuron_pos[:, 1]>600).nonzero()[0]:[1024, 732, 1789, 3279, 614]:#
+        check_cancelled(cancel_event)
         x, y, o, s = maxes1[:4, idx]
 
         x1, y1, o1, s1 = maxes0[:4, idx]

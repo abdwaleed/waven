@@ -1,9 +1,8 @@
 """Pure helpers for filtering GUI graph exports.
 
-The GUI deliberately keeps these rules separate from Tk widgets so the same
-checkbox selection works for the current display and for the all-neuron batch
-export. In particular, a batch export can identify one visual axis and retain
-only the payload values that belong to that graph.
+The GUI deliberately keeps these rules separate from Tk widgets so the two
+export sections can identify the requested visual axes and retain only the
+payload values that belong to each graph.
 """
 from __future__ import annotations
 
@@ -15,19 +14,6 @@ ALL_NEURON_GRAPH_OPTIONS = (
     ("retinotopy", "Population retinotopy"),
     ("selectivity", "Orientation selectivity"),
     ("other", "Other all-neuron graphs"),
-)
-
-CURRENT_INDIVIDUAL_GRAPH_OPTIONS = (
-    ("spike_train", "Spike train"),
-    ("tuning_dashboard", "Tuning dashboard"),
-    ("sta", "PSTH-weighted STA lag maps"),
-    ("run_model_amplitude", "Run Model amplitude tuning (when generated)"),
-    ("run_model_phase", "Run Model phase tuning (when generated)"),
-    ("run_model_drift", "Run Model drift tuning (when generated)"),
-    ("run_full_model_amplitude", "Run Full Model amplitude tuning (when generated)"),
-    ("run_full_model_phase", "Run Full Model phase tuning (when generated)"),
-    ("run_full_model_drift", "Run Full Model drift tuning (when generated)"),
-    ("other", "Other individual-neuron graphs"),
 )
 
 SINGLE_NEURON_GRAPH_OPTIONS = (

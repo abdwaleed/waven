@@ -28,6 +28,7 @@ from ..runtime.performance import (
     cpu_threadpool_scope,
     two_photon_io_worker_count,
 )
+from ..runtime.task_control import check_cancelled
 
 
 def resolve_suite2p_output_dir(path, n_planes):
@@ -238,12 +239,13 @@ def align_rotary_encoder(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, 
     return rotary_encoder_vals
 
 
-def align_datas(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, threshold=1.25, methods='frame2ttl', exptype='zebra', plotting=False):
+def align_datas(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, threshold=1.25, methods='frame2ttl', exptype='zebra', plotting=False, cancel_event=None):
     """Segment neural activity into stimulus trials and resample onto frame grid.
 
     Uses photodiode or TTL edges from ``Timeline.mat`` to delimit trials, then
     interpolates z-scored spike traces onto ``Nb_frames`` bins per trial.
     """
+    check_cancelled(cancel_event)
     tl, frame_times, input_ind, syncEcho_thresh = _extract_timeline_sync(exp_info, dirs, threshold, methods)
     
     print(methods, syncEcho_thresh)
@@ -284,6 +286,7 @@ def align_datas(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, th
     tt = True
     t = 1
     while tt:
+        check_cancelled(cancel_event)
         try:
             if t == 1:
                 print('trial', t)
@@ -319,6 +322,7 @@ def align_datas(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, th
     if plotting:
         plt.figure()
     for i, trial in enumerate(trials):
+        check_cancelled(cancel_event)
         print(i, trial.shape, spks.shape, np.max(np.asarray(trial != 0).nonzero()[0]))
 
         if exptype == 'zebra' or exptype == 'sparse':
@@ -369,7 +373,7 @@ def align_datas(exp_info, dirs, spks, Nb_frames, nb_plane=1, plane=-1, w=0.0, th
 
 
 # Updated defaults: Nb_plane=1, Nb_frames=18000
-def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=18000, first=False, last=True, threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra', w=0.0, plotting=False):
+def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=18000, first=False, last=True, threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra', w=0.0, plotting=False, cancel_event=None):
     """Shared loader for fluorescence and deconvolved spike mesoscope data.
 
     Reads suite2p plane outputs with memory mapping, extracts ROI positions from
@@ -378,6 +382,7 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
     
     def load_plane_data(p, start_idx, end_idx):
         """Load one plane without materialising unselected Suite2p ROIs."""
+        check_cancelled(cancel_event)
         mask = np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)
         if data_type == 'fluo':
             F = np.load(path + '/plane%d/F.npy' % p, mmap_mode='c')[mask]
@@ -388,6 +393,7 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
 
     def load_plane_payload(p):
         """Read one independent Suite2p plane and its selected ROI positions."""
+        check_cancelled(cancel_event)
         activity = load_plane_data(p, None, None)
         mask = np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)
         stat = np.load(path + '/plane%d/stat.npy' % p, allow_pickle=True)
@@ -396,6 +402,7 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
             positions = positions + np.asarray((1, p * 512))
         return activity, positions
 
+    check_cancelled(cancel_event)
     if first:
         print('first session')
         slice_start, slice_end = None, block_end
@@ -418,6 +425,7 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
         source_name = 'F.npy' if data_type == 'fluo' else 'spks.npy'
         temporary_factor = 3 if data_type == 'fluo' else 1
         for p in plane_ids:
+            check_cancelled(cancel_event)
             mask = np.load(path + '/plane%d/iscell.npy' % p, mmap_mode='r')[:, 0].astype(bool)
             source = np.load(path + '/plane%d/' % p + source_name, mmap_mode='r')
             per_plane_bytes.append(int(mask.sum()) * int(source.shape[1]) * source.dtype.itemsize * temporary_factor)
@@ -432,8 +440,12 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
         with cpu_threadpool_scope(workers), ThreadPoolExecutor(max_workers=workers) as executor:
             payloads = list(executor.map(load_plane_payload, plane_ids))
     else:
-        payloads = [load_plane_payload(p) for p in plane_ids]
+        payloads = []
+        for p in plane_ids:
+            check_cancelled(cancel_event)
+            payloads.append(load_plane_payload(p))
 
+    check_cancelled(cancel_event)
     plane_activity = [activity for activity, _positions in payloads]
     plane_positions = [positions for _activity, positions in payloads]
     if len(plane_activity) > 1:
@@ -451,7 +463,8 @@ def _base_load_mesoscope(data_type, exp_info, dirs, path, block_end, Nb_plane=1,
     print('neuron_pos spks : ', neuron_pos.shape)
 
     resps_all, resps_all2 = align_datas(exp_info, dirs, spks, Nb_frames, nb_plane=Nb_plane, threshold=threshold,
-                                        plane=plane, methods=method, exptype=exptype, w=w, plotting=plotting)
+                                         plane=plane, methods=method, exptype=exptype, w=w, plotting=plotting,
+                                         cancel_event=cancel_event)
     print('data aligned')
     resps_all = np.array(resps_all)
     resps_all = np.nan_to_num(resps_all)
@@ -489,7 +502,7 @@ def _extract_timeline_sync(exp_info, dirs, threshold, methods):
 
 # Updated defaults: Nb_plane=1, Nb_frames=18000
 def loadFluoMesoscope(exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=18000, first=False, last=True,
-                      threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra'):
+                       threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra', cancel_event=None):
     """Function for loadFluoMesoscope.
 
     Args:
@@ -510,12 +523,14 @@ def loadFluoMesoscope(exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=180
         Result produced by the operation.
     """
     return _base_load_mesoscope('fluo', exp_info, dirs, path, block_end, Nb_plane, Nb_frames, 
-                                first, last, threshold, plane, method, exptype, w=0.0, plotting=False)
+                                first, last, threshold, plane, method, exptype, w=0.0, plotting=False,
+                                cancel_event=cancel_event)
 
 
 # Updated defaults: Nb_plane=1, Nb_frames=18000
 def loadSPKMesoscope(exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=18000, first=False, last=True, 
-                     threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra', w=0, plotting=False):
+                     threshold=1.25, plane=-1, method='frame2ttl', exptype='zebra', w=0, plotting=False,
+                     cancel_event=None):
     """Function for loadSPKMesoscope.
 
     Args:
@@ -538,7 +553,8 @@ def loadSPKMesoscope(exp_info, dirs, path, block_end, Nb_plane=1, Nb_frames=1800
         Result produced by the operation.
     """
     return _base_load_mesoscope('spk', exp_info, dirs, path, block_end, Nb_plane, Nb_frames, 
-                                first, last, threshold, plane, method, exptype, w=w, plotting=plotting)
+                                first, last, threshold, plane, method, exptype, w=w, plotting=plotting,
+                                cancel_event=cancel_event)
 
 
 # Added n_planes parameter to bypass the 3-plane math if you only have 1 plane
