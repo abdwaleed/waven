@@ -1,252 +1,124 @@
-# Prepare configuration
+# `pipeline_config.json` and scientific settings
 
-!!! note "Optional for the GUI"
-    `pipeline_config.json` is not required to launch `python ui.py`. Missing
-    keys and values written as `""` appear as blank GUI fields. The typed
-    scripted pipeline still validates required values when it is constructed,
-    and GUI actions validate the fields they consume when clicked.
+`pipeline_config.json` is an optional, portable record of GUI inputs. The GUI can launch without it; missing keys use the normal GUI defaults and each action validates the fields it needs. The safest workflow is:
 
-The easiest starting point is `pipeline_config.json`. Most values in the example
-file are strings because the same values can be loaded into the GUI text fields.
-The parser then converts those strings into integers, floats, booleans, lists,
-tuples, or paths.
+1. Fill out one working session in the GUI.
+2. Click **Save pipeline_config.json** in System Configuration.
+3. Store that file with the experiment or copy it as a starting point for the next one.
+4. Use **Load pipeline_config.json** to restore it later. Save and load stay enabled while a long task is running.
 
-## Project root placeholder
-
-Use `{PROJECT_ROOT}` when you want paths to be portable across machines:
+The checked-in root-level file is an example of the current save format. JSON paths can use `{PROJECT_ROOT}`; Waven resolves it relative to the repository directory that contains `ui.py`.
 
 ```json
-"Project Root": "{PROJECT_ROOT}/your_experiment",
-"Movie Path": "{PROJECT_ROOT}/your_experiment/input/stimulus_movie"
-```
-
-When `PipelineConfig.from_json()` loads the file, it replaces `{PROJECT_ROOT}`
-with the current working directory of the Python process. In practice, run your
-script from the repository or project folder you want to be treated as the root:
-
-```bash
-cd C:/path/to/waven_jul1
-python my_analysis_script.py
-```
-
-Use forward slashes in JSON paths even on Windows. Python accepts them, and they
-avoid escaping every backslash.
-
-## Typing rules
-
-| What you need | Safe value to type | Notes |
-| --- | --- | --- |
-| folder path | `"{PROJECT_ROOT}/your_experiment/cache/wavelets/coarse"` | Use quotes. GUI path fields are folders; the code discovers files inside the final folder. |
-| integer | `"18000"` | Quotes are fine; the parser converts to `int`. |
-| float | `"1.3671"` | Quotes are fine; the parser converts to `float`. |
-| list of numbers | `"[2, 4, 8, 12]"` | Keep brackets and commas. |
-| tuple/list with labels | `"('mouse01', '2026-05-23', 3)"` | Used by `Experiment Info`. |
-| boolean | `"True"` or `"False"` | Also accepts `true`/`false`, `1`/`0`, `yes`/`no`. |
-| intentionally missing optional path | `"None"` or `""` | Use only for optional fields such as `Spks Path`. |
-
-Required input folders should contain the relevant input before you run
-analysis. Output/cache folders can be missing; `waven` creates them when it
-writes outputs.
-
-## Project layout
-
-The GUI uses a strict layout under `Project Root`. The most common tree is:
-
-```text
-your_experiment/
-  input/raw_data/
-  input/stimulus_movie/
-  input/neural_cache/
-  cache/gabor/coarse/
-  cache/gabor/full/
-  cache/gabor/kernels/
-  cache/wavelets/coarse/
-  cache/wavelets/full/
-  output/plots/
-  output/recovery_cache/
-  output/models/
-```
-
-Path parameters point to these folders. If you browse to an external source
-folder, the GUI stores a `.waven_reference.json` pointer inside the conventional
-folder and keeps the GUI field pointed at the conventional folder.
-
-## File structure
-
-The JSON file has four main sections:
-
-| Section | Required? | Meaning |
-| --- | --- | --- |
-| `workflow` | optional for GUI | `"2p"` for two-photon or `"ephys"` for electrophysiology. |
-| `gui` | optional | Initial scale, backend, fresh/continue source, output-format selectors, optional Suite2p discovery roots, and runtime scheduling choices. |
-| `gabor_param` | optional for launch | Filter axes and coarse/full cache folders. Grid dimensions are read from movie metadata. |
-| `common` | optional for launch | Stimulus, timing, coverage, and shared folder settings. |
-| `two_photon` / `ephys` | optional for launch | Workflow-specific acquisition settings. |
-
-The checked-in `pipeline_config.json` uses the exact schema written by the GUI's
-**Save Configuration** button. Older `analysis`, `param_defaults`, `gabor`, and
-`save_options` sections remain loadable for compatibility.
-
-## `gui`
-
-| Field | Accepted values | Effect |
-| --- | --- | --- |
-| `wavelet_backend` | `"legacy"`, `"convolution"` | Selects the decomposition implementation. |
-| `neural_source` | `"data_dir"`, `"spks_path"` | `data_dir` means fresh/raw acquisition; `spks_path` means continue from an existing cache. |
-| `downsample_percent` | number from 0 through 100 | Spatial percentage applied to movie-metadata width and height. Coarse RF, Run Model, and Run Full Model all share this one grid. |
-| `gabor_format`, `downsample_format`, `neural_cache_format`, `wavelet_format` | `"npy"` or `"zarr"` | Initial cache formats for the corresponding stage. `wavelet_format` controls the three consumer-specific wavelet-product buttons. |
-| `performance` | object of booleans | GUI runtime choices: `autotune`, `prefetch`, `async_writer`, `time_major_conv`, `rf_gpu`, `multi_gpu`, `torch_compile`, and `amp`. They control scheduling/hardware only; `amp` is explicitly a fast-precision convolution option. |
-| `suite2p_subject_dirs` | string | Optional two-photon timeline dataset roots, separated by the platform path separator (`;` on Windows, `:` on Linux/macOS). Leave `""` unless Suite2p timeline discovery needs folders outside `Dir`. |
-
-Example performance block:
-
-```json
-"performance": {
-  "autotune": true,
-  "prefetch": true,
-  "async_writer": true,
-  "time_major_conv": true,
-  "rf_gpu": true,
-  "multi_gpu": false,
-  "torch_compile": false,
-  "amp": false
+{
+  "workflow": "ephys",
+  "gui": {"downsample_percent": 11, "wavelet_format": "zarr"},
+  "gabor_param": {"N_thetas": "12", "Sigmas": "[2, 4, 8]"},
+  "common": {"Project Root": "{PROJECT_ROOT}/your_experiment"},
+  "ephys": {"Sampling Rate (samples / sec)": "30000"}
 }
 ```
 
-Enable `multi_gpu` only when using the convolution backend with at least two
-CUDA GPUs dedicated to Waven. The GUI automatically excludes mixed or markedly
-unequal cards from synchronous DataParallel work and explains its one-GPU
-fallback in the terminal.
+Values may be stored as strings because they populate text fields. Waven parses numbers, lists, tuples, booleans, and paths when the relevant action runs.
 
-`suite2p_subject_dirs` is intentionally empty in the portable example
-configuration. It is a machine-specific data-discovery convenience, not a
-project-relative input or an analysis parameter. The GUI's **Advanced
-2-photon data discovery** card can apply it for the current process and stores
-it with the rest of the current GUI inputs when you save them.
+## Top-level sections
 
-## `gabor_param`
-
-These fields define the Gabor filters before they are applied to the movie.
-
-| Field | Type to type | Units | File or dir? | Element meaning |
-| --- | --- | --- | --- | --- |
-| `N_thetas` | integer string, e.g. `"18"` | orientation bins | no | Number of orientations between 0 inclusive and 180 exclusive. `18` means 10-degree spacing. |
-| `Sigmas` | list string, e.g. `"[2, 4, 8, 12]"` | analysis pixels | no | Gaussian envelope sizes for the coarse Gabor filters. Larger values mean broader filters. |
-| `Frequencies` | list string, e.g. `"[0.02, 0.06, 0.1]"` | cycles per analysis pixel | no | Spatial-frequency bins for the fine/full model. Multiple values create the frequency axis. |
-| `Phases` | list string, e.g. `"[0, 90]"` | degrees | no | Gabor phase offsets. The GUI converts degrees to radians immediately before Gabor-kernel construction. |
-| `Coarse Library Path` | folder path | path | directory | Folder shown and used in coarse mode. |
-| `Fine Library Path` | folder path | path | directory | Folder shown and used in full mode. |
-
-## `common` paths
-
-| Field | Type to type | File or dir? | Required? | Meaning |
-| --- | --- | --- | --- | --- |
-| `Project Root` | path string | directory | yes | Root that owns the strict `input/`, `cache/`, and `output/` tree. |
-| `Dir` | path string | directory | yes | Conventional raw-data folder, usually `input/raw_data`. It may contain a `.waven_reference.json` pointing to external raw data. |
-| `Path Directory` | path string | directory | yes | Coarse wavelet cache folder, usually `cache/wavelets/coarse`. |
-| `Movie Path` | path string | directory | yes | Stimulus movie folder, usually `input/stimulus_movie`. Put exactly one compatible movie file in this folder. |
-| `Spks Path` | path string | directory | required only for Continue / existing cache | Neural cache folder, usually `input/neural_cache`. Exact `spikes`/`pos` names are preferred, but semantic stems such as `my_spikes.npy` and `cell_positions.npy` are accepted when unambiguous. Fresh/raw processing writes this pair here. |
-| `Full Model Wavelet Path` | path string | directory | yes for full mode | Full-model wavelet folder, usually `cache/wavelets/full`. |
-| `Full Model Save Path` | path string | directory | yes for full model outputs | Model output folder, usually `output/models`. |
-| `Plot Cache Path` | path string | directory | optional | Plot cache folder, usually `output/plots`; the GUI writes `plot_cache.pkl.gz` inside it. |
-| `Recovery Cache Directory` | path string | directory | optional | Checkpoint directory for resumable long GUI tasks, usually `output/recovery_cache`. |
-
-## `common` identifiers and acquisition timing
-
-| Field | Type to type | Units | Element meaning |
+| Section | Type | Required? | Description |
 | --- | --- | --- | --- |
-| `Experiment Info` | tuple/list string, e.g. `"('CnL43', '2026-05-23', 3)"` | labels | `(subject_or_mouse_id, date_string, experiment_number)`. The date is a label used in paths; use your lab's folder convention. |
-| `Block End` | integer string | acquisition block index | Last block considered during alignment. Use `"0"` when your workflow does not need a later block. |
-| `Train Trial Indices` | `"auto"` or list string | zero-based trial indices | Training trials for model fitting. Example `"[0, 2]"` means first and third retained trials. |
-| `Test Trial Indices` | `"auto"` or list string | zero-based trial indices | Held-out trials. `"auto"` means every retained trial not used for training. |
-| `Use Last Minute Holdout` | boolean string | yes/no | If true, model evaluation reserves the final minute of frames. |
+| `workflow` | `"2p"` or `"ephys"` | Optional at launch | Selects workflow-specific fields. |
+| `gui` | object | Optional | Saved GUI choices: sampling, cache format, optional model flags, hardware controls, and export file types. |
+| `gabor_param` | object | Required before kernel preparation | Orientation, scale, frequency, phase, and kernel-cache folder inputs. |
+| `common` | object | Required before a complete analysis | Shared paths, coverage, training/holdout options, and full-model settings. |
+| `two_photon` / `ephys` | object | Required for fresh data in the chosen workflow | Workflow-specific acquisition values. |
 
-## `common` spatial fields
+Do not add a `wavelet_backend` field: the GUI is convolution-only. Older files may load compatibility values, but the current GUI neither displays nor uses a legacy backend choice.
 
-| Field | Type to type | Units | Element meaning |
+## Shared paths and acquisition inputs (`common`)
+
+| Field | Type | Required? | Description |
 | --- | --- | --- | --- |
-| `Visual Coverage` | four-number list string | visual degrees | `[azimuth_left, azimuth_right, elevation_top, elevation_bottom]` for the full stimulus field. Preserve this order. |
-| `Analysis Coverage` | four-number list string | visual degrees | Same four-element order, but for the crop you want to analyze. It should lie inside `Visual Coverage`. |
-| `Sigmas Full Model` | list string | analysis pixels | Full-model Gabor sizes. These are merged with `gabor_param.Sigmas` when building the fine library. |
+| Project Root | directory | Yes | Owns the conventional experiment tree. |
+| Dir | directory | Fresh alignment only | Raw acquisition root or conventional reference folder. |
+| Movie Path | directory | Yes | Contains the stimulus movie used to derive metadata. |
+| Spks Path | directory | Continue cache only; fresh output location | Existing or generated aligned neural cache pair. |
+| Path Directory | directory | Yes for Coarse RF work | Coarse stimulus/wavelet cache folder. |
+| Full Model Wavelet Path | directory | Only when preparing model phase caches | Folder for Run Model/Full Model phase products. |
+| Full Model Save Path | directory | Optional | Intended model-result location. |
+| Plot Cache Path | directory | Optional | Folder for the GUI plot cache. |
+| Recovery Cache Directory | directory | Recommended | Checkpoint location for long tasks. |
+| Experiment Info | tuple/list text | Fresh alignment when the workflow uses it | Experiment identifier, for example `('mouse01', '2026-05-23', 3)`. |
+| Block End | integer | Workflow-dependent | Last acquisition block considered during alignment. |
+| Train Trial Indices | `"auto"` or zero-based list | Optional | Model fitting trial selection. |
+| Test Trial Indices | `"auto"` or zero-based list | Optional | Held-out trial selection. |
+| Use Last Minute Holdout | boolean | Optional | Reserves the final minute for model evaluation when enabled. |
 
-`NX`, `NY`, coarse `Sigmas`, and `Frequencies` have one owner in the GUI:
-`gabor_param`. Legacy duplicates in `common` are accepted by the typed parser but
-are intentionally not displayed.
+### Coverage
 
-Coverage lists are easy to mistype. Keep the same left/right/top/bottom order in
-both fields. If your full stimulus spans `-69` to `69` degrees azimuth and `56`
-to `-56` degrees elevation, type:
+| Field | Type / units | Required? | Description |
+| --- | --- | --- | --- |
+| Visual Coverage | `[left, right, top, bottom]` in visual degrees | Yes | Angular bounds of the full movie. |
+| Analysis Coverage | same four-number order | Yes | Angular crop to analyse; must lie within Visual Coverage. |
 
-```json
-"Visual Coverage": "[-69, 69, 56, -56]"
-```
+For example, a movie spanning azimuth `-69` to `69` degrees and elevation `56` to `-56` degrees is written as `[-69, 69, 56, -56]`. Preserve this order. Changing either coverage invalidates dependent stimulus and wavelet caches.
 
-If you only want to analyze the central visual field, type a smaller crop:
+## Sampling: choose the grid before choosing filters
 
-```json
-"Analysis Coverage": "[-35, 35, 35, -35]"
-```
+The movie metadata, Analysis Coverage, and selected sampling mode determine the analysis grid. Never enter movie width, height, frame rate, `NX`, or `NY` in the GUI: Waven derives them.
 
-The stimulus cache converts these coverage limits to pixel bounds before
-resizing. Changing either coverage field invalidates the prepared stimulus
-cache; run **Prepare Stimulus Cache** again before rerunning the wavelets or
-STA.
+| GUI setting (`gui`) | Type | Use when | Reasoning |
+| --- | --- | --- | --- |
+| `sampling_mode: "Target degrees/pixel"` + `target_degrees_per_pixel` | positive degrees/pixel | You know the visual-angle resolution required. | Smaller degrees/pixel means more pixels and a higher Nyquist limit, with larger caches. |
+| `sampling_mode: "Retain up to cpd"` + `maximum_spatial_frequency_cpd` | positive cycles/degree | You know the highest meaningful stimulus frequency. | Waven requests a grid with a 1.5× margin above that frequency's Nyquist boundary. |
+| `sampling_mode: "Compatibility percent"` + `downsample_percent` | 1–100 | You need a direct legacy-style sampling fraction. | Useful for matching an earlier grid, but not a physical resolution target. |
+
+Use the GUI's displayed Nyquist value to check the choice. If the highest frequency of interest approaches Nyquist, increase sampling or lower the frequency list. A larger grid raises storage and convolution roughly in proportion to its number of pixels.
+
+## Gabor settings (`gabor_param`)
+
+| Field | Type / units | Required? | What it controls | Practical starting rule |
+| --- | --- | --- | --- | --- |
+| N_thetas | positive integer | Yes | Orientation samples on `[0°, 180°)`. | `12` gives 15° spacing; use more only for a finer orientation hypothesis. |
+| Sigmas | list of analysis pixels | Yes | Coarse RF Gaussian-envelope sizes. | Use a short increasing list covering expected RF scales. |
+| Frequencies | list of cycles per analysis pixel | Full Model only | Full-model spatial-frequency samples. | Keep values below the grid's Nyquist limit; use a sparse roughly logarithmic list for broad ranges. |
+| Phases | list of degrees | Yes | Gabor phase offsets. | `[0, 90]` provides phase-quadrature information for real/imaginary model products. |
+| Coarse Library Path | directory | Yes | Coarse kernel/cache folder setting. | Keep it under `cache/gabor/coarse`. |
+| Fine Library Path | directory | Full-model preparation | Full kernel/cache folder setting. | Keep it under `cache/gabor/full`. |
+
+`Sigmas Full Model` lives in `common`. It is a list of analysis pixels used for the full-resolution phase bank and is merged with the coarse sigma values. Every extra orientation, sigma, frequency, or phase expands the feature space; start with the smallest scientifically defensible set and refine after a pilot run.
+
+## GUI state (`gui`)
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `coarse_rf_frequency_mode` | `"coupled"` or `"frequency_list"` | Whether Coarse RF couples size/frequency or uses an independent frequency list. |
+| `downsample_format` | `"npy"` or `"zarr"` | Format for the prepared stimulus cache. |
+| `neural_source` | `"data_dir"` or `"spks_path"` | Fresh/raw alignment or an existing neural cache. |
+| `neural_cache_format` | `"npy"` or `"zarr"` | Format written for fresh aligned neural data. |
+| `wavelet_format` | `"npy"` or `"zarr"` | Preferred durable Coarse RF correlation-result storage; convolution phase/power products remain Zarr. |
+| `run_model_on_inspect` | boolean | Opt-in Run Model curves after basic individual-neuron inspection. |
+| `run_full_model_on_inspect` | boolean | Opt-in Full Model curves after basic inspection. |
+| `performance` | object | Optional hardware/speed controls described below. |
+| `suite2p_subject_dirs`, `suite2p_output_dir` | strings | Optional two-photon discovery overrides. Leave blank unless needed. |
+| `export_files` | object | Selected `png`, `svg`, and `data_pickle` output types. |
+
+## Optional performance controls (`gui.performance`)
+
+These choices change scheduling or precision, not scientific parameter axes. They are available under **Performance & Hardware (advanced)** in System Configuration.
+
+| Field | Default | Benefit | Use with care |
+| --- | --- | --- | --- |
+| `ram_acceleration_cache` | `false` | Retains safely sized, reusable model-phase and PSTH/STA inputs in RAM for later analysis. | Leave off if other software needs RAM; oversized arrays remain disk-backed either way. |
+| `multi_gpu` | `false` | Batch-parallel convolution across compatible CUDA GPUs. | Enable only for comparable GPUs with sufficient free memory. |
+| `torch_compile` | `false` | May accelerate repeated stable convolution kernels after a one-time warm-up. | Experimental; Waven falls back safely if compilation fails. |
+| `amp` | `false` | Uses CUDA float16 autocast for wavelet convolution. | Faster on appropriate Tensor Core hardware; Coarse RF statistics retain their established precision. |
 
 ## Workflow-specific sections
 
-| Workflow | Section | Field | Type to type | Units | Meaning |
-| --- | --- | --- | --- | --- | --- |
-| `2p` | `two_photon` | `Resolution` | float string | micrometers per pixel | Imaging-plane spatial scale used for neuron positions. |
-| `2p` | `two_photon` | `Number of Planes` | integer string | imaging planes | Number of imaging planes in the recording. |
-| `ephys` | `ephys` | `Sampling Rate (samples / sec)` | float string | samples per second | Electrophysiology acquisition sampling rate, e.g. `"30000"`. |
-| `ephys` | `ephys` | `Photodiode Port` | non-negative integer string | Trodes digital-input port | Digital input that carries the stimulus photodiode/TTL signal, e.g. `"3"`. The GUI provides a menu and **Find ports** button; do not assume the default is the correct wire. |
+| Workflow | Field | Type / units | Required? | Description |
+| --- | --- | --- | --- | --- |
+| `two_photon` | Resolution | positive micrometers/pixel | Fresh 2-photon | Spatial scale for neural positions. |
+| `two_photon` | Number of Planes | positive integer | Fresh 2-photon | Number of imaging planes. |
+| `ephys` | Sampling Rate (samples / sec) | positive Hz | Fresh ephys | Acquisition sampling rate, for example `30000`. |
+| `ephys` | Photodiode Port | non-negative integer | Fresh ephys | Trodes digital port carrying the photodiode/TTL signal. |
 
-For ephys folder discovery, Waven does not require a folder named `.DIO`.
-It scans below `Dir` for Trodes filenames ending in `Din<port>.dat` and uses
-only the folders containing the selected port. For split recordings, folders
-with a `.partN` path component are concatenated in part order. **Find ports**
-can populate the GUI menu from this scan, but the acquisition wiring is still
-the authority for which port is the photodiode.
-
-Programmatic loading:
-
-```python
-from pathlib import Path
-
-import waven
-
-config = waven.PipelineConfig.from_json(Path("pipeline_config.json"))
-```
-
-## Shape consequences
-
-Configuration fields are not just metadata. They directly determine array size:
-
-| Axis | Comes from | Appears in |
-| --- | --- | --- |
-| `n_frames` | movie metadata | downsampled movies, wavelets, spikes |
-| `n_trials` | repeats discovered during neural alignment | `spikes` |
-| `n_neurons` | Suite2p/ephys input | `spikes`, RF tensors, plots |
-| `analysis_x`, `analysis_y` | movie metadata × `downsample_percent` | Gabor assets, wavelets, RF tensor |
-| coarse `x`, `y` | derived from the shared analysis grid | coarse assets, Coarse RF cache, RF tensor |
-| `n_orientations` | `N_thetas` | Gabor libraries, wavelets, RF tensor, OSI/gOSI |
-| `n_sigmas` | `Sigmas` or `Sigmas Full Model` | Gabor libraries, wavelets, RF tensor |
-| `n_frequencies` | `Frequencies` | fine library, full wavelets, RF tensor when present |
-
-When a run is expensive, start by estimating the largest output. Full-model
-wavelets are usually the limiting object because each phase is a dense
-`float32` tensor:
-
-```text
-bytes_per_phase = n_frames * analysis_x * analysis_y * n_orientations * n_sigmas * n_frequencies * 4
-```
-
-This is the uncompressed `float32` upper-bound calculation for one phase. The
-GUI reports product-specific estimates before runs; retain free local disk
-beyond the estimate for temporary chunks, metadata, and other products. GPU is
-optional, while RAM and CPU determine practical chunk size and throughput. See
-the [first GUI analysis quickstart](../tutorials/first-gui-analysis.md) for a
-first-run hardware and storage check.
-
-Coarse RF search is intentionally smaller because it uses the derived coarse
-grid and usually one coupled size/frequency relationship.
+See [Cache Storage and Disk Planning](../reference/storage.md) before preparing large phase products, and [GUI Workflow](../reference/gui.md) for the exact buttons that consume these values.

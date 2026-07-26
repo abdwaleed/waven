@@ -57,51 +57,20 @@ markdown_extensions:
       alternate_style: true
 
 nav:
-  - Home: index.md
-  - Tutorials:
-      - tutorials/index.md
+  - Start Here: index.md
+  - Onboarding:
       - First GUI Analysis: tutorials/first-gui-analysis.md
-      - Scripted Pipeline: tutorials/scripted-pipeline.md
-  - How-To:
-      - how-to/index.md
-      - Install waven: how-to/install.md
-      - Prepare Configuration: how-to/prepare-configuration.md
-      - Build Gabor Libraries: how-to/build-gabor-libraries.md
-      - Run Wavelet Decomposition: how-to/run-wavelet-decomposition.md
-      - Run RF Analysis: how-to/run-rf-analysis.md
-      - Interpret Analysis Graphs: how-to/interpret-analysis-graphs.md
+      - Install and Launch: how-to/install.md
+      - Experiment Folder: reference/project-layout.md
+  - Configure:
+      - pipeline_config.json and Scientific Settings: how-to/prepare-configuration.md
+      - Cache Storage and Disk Planning: reference/storage.md
+  - Run and Export:
+      - GUI Workflow and System Configuration: reference/gui.md
+      - Inputs, Outputs, and Cache Contracts: reference/data-contracts.md
       - Export Results: how-to/export-results.md
-      - Build The Documentation: how-to/build-docs.md
-  - Explanation:
-      - explanation/index.md
-      - Pipeline Intuition: explanation/pipeline-intuition.md
-      - Code Mindmap: explanation/code-mindmap.md
-      - Trace an Analysis: explanation/code-tracing.md
-      - Code Organization: explanation/maintainability.md
-      - Two-Photon Pipeline Mindmap: explanation/pipeline-2p.md
-      - Ephys Pipeline Mindmap: explanation/pipeline-ephys.md
-      - Methods Transparency: explanation/methods-transparency.md
-      - Orientation Selectivity: explanation/orientation-selectivity.md
-      - File Lifecycle: explanation/file-lifecycle.md
-  - Reference:
-      - reference/index.md
-      - Project Layout: reference/project-layout.md
-      - Configuration: reference/config.md
-      - Pipeline: reference/pipeline.md
-      - Data Contracts and Scientific Interpretation: reference/data-contracts.md
+  - Understand and Maintain:
+      - Scientific Intuition: explanation/pipeline-intuition.md
       - Source Architecture and Ownership: reference/source-architecture.md
-      - Wavelets: reference/wavelets.md
-      - Stimulus: reference/stimulus.md
-      - Analysis: reference/analysis.md
-      - Model Input, Output, and Scientific Contracts: reference/model-input-output-contracts.md
-      - GUI: reference/gui.md
-      - Storage: reference/storage.md
-      - Runtime: reference/runtime.md
-      - Time Alignment: reference/time-alignment.md
-      - PSTH-weighted Spike-Triggered Averaging: reference/psth-spike-triggered-averaging.md
-      - Neural Data: reference/neural-data.md
-      - Plotting: reference/plotting.md
-      - Compatibility Modules: reference/compatibility.md
-  - Examples:
-      - examples/index.md
+      - Maintainability Guide: explanation/maintainability.md
   - FAQ: faq.md

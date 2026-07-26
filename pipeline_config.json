@@ -1,21 +1,20 @@
 {
   "workflow": "ephys",
   "gui": {
-    "wavelet_backend": "convolution",
     "coarse_rf_frequency_mode": "coupled",
     "neural_source": "data_dir",
     "downsample_percent": 11,
     "downsample_format": "zarr",
     "neural_cache_format": "zarr",
-    "gabor_format": "zarr",
     "wavelet_format": "zarr",
+    "run_model_on_inspect": false,
+    "run_full_model_on_inspect": false,
     "suite2p_subject_dirs": "",
     "performance": {
-      "autotune": true,
-      "prefetch": true,
-      "async_writer": true,
-      "rf_gpu": true,
-      "multi_gpu": true
+      "ram_acceleration_cache": false,
+      "multi_gpu": false,
+      "torch_compile": false,
+      "amp": false
     }
   },
   "gabor_param": {

@@ -1,59 +1,29 @@
 # FAQ
 
-## Where should I save movies and wavelet files?
+## Do I need a CUDA GPU?
 
-Use local storage. Reading and writing from a server or network drive can make
-wavelet decomposition and model fitting much slower.
+No. Waven falls back to CPU. A compatible CUDA GPU accelerates convolution and some analysis work. Enable multi-GPU only for comparable GPUs; a slower card can reduce batch throughput.
 
-## Can Gabor libraries be reused?
+## How much RAM and free disk do I need?
 
-Yes. Reuse them when the movie metadata, downsampling percentage, orientations,
-sigmas, phases, frequencies, and backend match the experiment configuration.
-The GUI checks output shapes and parameter fingerprints before reuse.
+32 GB RAM or more is recommended for large experiments. Reserve at least twice the GUI estimate of the largest cache product, plus the raw movie, neural cache, and any products you will retain. See [Cache Storage and Disk Planning](reference/storage.md).
 
-## Why does preprocessing take so long?
+## NPY or Zarr?
 
-Wavelet decomposition projects every stimulus frame onto many filters. The first
-run is expensive, but durable `.npy` or `.zarr` outputs are reused by later runs.
+Choose NPY for a simple memory-mappable file. Choose Zarr for large chunked, compressed, resumable caches. This choice applies to caches, not exported graphs. Convolutional phase and power products use Zarr.
 
-## What should I export for a paper figure?
+## Why is a button disabled or unavailable?
 
-Use the GUI export buttons. They save the rendered figure and a data bundle with
-numeric arrays and metadata.
+An upstream input/cache is missing or incompatible. Work from the top of the GUI workflow: valid movie/sampling, matching neural cache, convolution kernels, the cache needed by the desired analysis, then Coarse RF analysis.
 
-## What is the difference between OSI and gOSI?
+## Why did Inspect Single Neuron take a long time?
 
-OSI compares the preferred and orthogonal orientation responses. gOSI summarizes
-the whole orientation tuning curve with a vector sum.
+Basic inspection renders Coarse RF and STA data. The optional Run Model and Full Model checkboxes add phase-aware model fitting and amplitude/phase/drift graphs. Leave them off for routine inspection; a recently inspected neuron's STA is cached for faster revisits.
 
-## Why does a movie shape look like `(frames, y, x)` but wavelets use `(frames, x, y, ...)`?
+## Can I cancel without losing everything?
 
-Downsampled movies are image arrays, so their spatial axes are row then column:
-`(y, x)`. Gabor libraries and RF tensors use feature coordinates: `(x, y)`.
-Both are expected. The safest check is to compare the file with the documented
-stage that produced it.
+Yes. Cancel requests safe cooperative stopping at chunk, neuron, or iteration boundaries. Valid completed tiles/caches remain reusable. Force-closing the process is more likely to leave work incomplete.
 
-## Why are `.npy` wavelets so large?
+## What does Save/Load pipeline_config.json do?
 
-Wavelet arrays are dense `float32` tensors. Every extra frame, grid point,
-orientation, sigma, and frequency multiplies the total size. One full-model
-phase is:
-
-```text
-n_frames * analysis_x * analysis_y * n_orientations * n_sigmas * n_frequencies * 4 bytes
-```
-
-Real and imaginary phases are separate files.
-
-## When should I use Zarr?
-
-Use Zarr for full-model wavelets when the logical array is too large to handle
-comfortably as one `.npy` file, when you want chunked access, or when compression
-is useful. Zarr does not change the scientific shape or dtype; it changes how
-the same array is stored on disk.
-
-## Can a high OSI be misleading?
-
-Yes. OSI and gOSI summarize the orientation tuning curve, but they do not prove
-that the neuron is reliable. Inspect repeatability, skewness, the RF map, and
-the raw tuning curve before treating a selectivity value as biologically strong.
+It records/restores GUI inputs and optional runtime choices for later actions. It does not alter a background task that has already captured its settings.

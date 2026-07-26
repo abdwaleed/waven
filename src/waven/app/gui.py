@@ -305,6 +305,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ("neural_source_display", neural_source_display_var),
             ("prepare_full_model_cache", prepare_full_model_cache_var),
             ("prepare_run_model_cache", prepare_run_model_cache_var),
+            ("run_model_on_inspect", run_model_on_inspect_var),
             ("run_full_model_on_inspect", run_full_model_on_inspect_var),
             ("sampling_mode", sampling_mode_var),
             ("suite2p_output_dir", suite2p_output_dir_var),
@@ -6772,6 +6773,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "downsample_format": _selected_downsample_format(),
                 "neural_source": _selected_neural_source(),
                 "neural_cache_format": _selected_neural_cache_format(),
+                "run_model_on_inspect": bool(run_model_on_inspect_var.get()),
+                "run_full_model_on_inspect": bool(run_full_model_on_inspect_var.get()),
                 "performance": _runtime_control_values(),
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
                 "suite2p_output_dir": suite2p_output_dir_var.get().strip(),
@@ -6878,6 +6881,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             neural_cache_format = save_options.get("neural_cache_format")
             if neural_cache_format in {"npy", "zarr"}:
                 neural_cache_format_var.set(neural_cache_format)
+            for state_key, variable in (
+                ("run_model_on_inspect", run_model_on_inspect_var),
+                ("run_full_model_on_inspect", run_full_model_on_inspect_var),
+            ):
+                if state_key in save_options:
+                    variable.set(_coerce_runtime_bool(save_options[state_key], bool(variable.get())))
             export_file_options = save_options.get("export_files") or {}
             for key, variable in export_file_vars.items():
                 if key in export_file_options:

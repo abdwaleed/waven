@@ -1,93 +1,49 @@
-# Pipeline intuition
+# Scientific intuition
 
-The core idea is to express a visual stimulus in a feature space that resembles
-localized oriented filters. Each Gabor filter asks: "Was there structure at this
-location, orientation, size, phase, and frequency at this time?"
+Waven asks a structured question: *which localized visual pattern, at which place and time, best explains a neuron's aligned response?* It does not infer that answer from raw movie pixels alone. Instead it describes every movie frame with a bank of convolutional Gabor features and aligns those features to the same frame clock as the neural data.
 
-The workflow then compares those feature time courses to neural activity. A
-single neuron is not asked to explain the raw movie pixel by pixel. Instead, it
-is compared with many candidate visual features: a dark/light edge here, at this
-angle, with this spatial scale, changing over the same stimulus frames as the
-recorded response.
+## From visual angle to an analysis grid
 
-1. **Gabor libraries** define candidate visual features.
-2. **Wavelet decomposition** projects the movie onto those features over time.
-3. **Coarse RF analysis** finds the feature that best correlates with each
-   neuron.
-4. **Tuning curves** slice the RF tensor around the preferred feature.
-5. **OSI/gOSI** summarize orientation tuning strength.
-6. **Simple and full models** fit nonlinear relationships between selected
-   wavelet variables and neural responses.
+The movie has source pixels, but receptive fields are interpreted in visual space. **Visual Coverage** says which visual degrees the movie spans; **Analysis Coverage** selects the region tested. Waven resamples that crop onto an analysis grid and reports degrees per pixel and a Nyquist spatial-frequency limit.
 
-The coarse path is designed to be fast enough for screening. The full model is
-more expensive but searches at higher spatial and feature resolution.
+Choose the grid from the signal you need to preserve:
 
-## Why Gabor filters?
+- To distinguish fine gratings, use enough pixels that the reported Nyquist limit is comfortably above the highest cycles/degree of interest.
+- To study broad, low-frequency structure, a coarser grid is appropriate and substantially reduces disk and convolution cost.
+- The percentage slider is a compatibility representation of that choice; the degrees/pixel and retained-cpd modes make the decision physically interpretable.
 
-Gabor filters are localized sinusoids under a Gaussian envelope. They are useful
-for visual neuroscience because they provide a compact vocabulary for oriented
-contrast: location, orientation, size, phase, and spatial frequency. That
-vocabulary is not a claim that neurons are literally Gabors; it is a practical
-coordinate system for asking whether neural activity follows oriented visual
-structure in the stimulus.
+## Why Gabor features
 
-`waven` stores two phases for each filter, real and imaginary. The phases are
-90 degrees apart, so together they reduce sensitivity to whether a feature is
-bright-on-dark or dark-on-bright at exactly one pixel alignment. The coarse
-cache also stores a combined coefficient derived from the two phases, which is
-the array used by the coarse RF search.
+A Gabor filter is a local sinusoidal pattern inside a Gaussian envelope. Its parameters map to common visual hypotheses:
 
-## Coarse versus full paths
+| Parameter | Question it asks |
+| --- | --- |
+| Position `(x, y)` | Where in the analysed field is the feature relevant? |
+| Orientation | Which edge/grating direction is preferred? |
+| Sigma | Over what spatial extent should the feature be pooled? |
+| Frequency | How fine is the grating pattern? |
+| Phase | Where does the light/dark cycle fall inside the envelope? |
 
-The coarse path reduces the metadata-derived analysis grid before correlation.
-The user chooses one downsampling percentage; movie width and height determine
-the shared grid, and the coarse grid is derived from it. There are no GUI
-entries for `NX`, `NY`, movie FPS, or a fixed movie duration. This stage is
-meant to answer:
+The convolution kernel cache stores those filters compactly. Applying them to the binary stimulus movie produces features over time without repeatedly building the filters.
 
-- where is the receptive field approximately?
-- which orientation and size look plausible?
-- which neurons are reliable enough to inspect?
+## Coarse RF first
 
-The full path keeps the configured grid and allows the model to use independent
-spatial frequencies. This is much larger because the output grows with every
-axis:
+Coarse RF uses the phase-insensitive power product. It correlates each neuron's aligned response with candidate local feature time courses and identifies a preferred location/orientation/size (and frequency where applicable). This is a screening step: it narrows a large visual feature space to a plausible seed for inspection and optional nonlinear modelling.
 
-```text
-n_frames * full_x * full_y * n_orientations * n_sigmas * n_frequencies
-```
+Correlation maps and RF tuning curves are therefore *diagnostics of covariation*, not firing-rate units. A strong correlation says that a feature's variation over the movie tracks the response; it does not alone establish causality.
 
-That value is per phase. Real and imaginary full-model outputs are separate
-files, so the storage requirement is effectively doubled when both are kept as
-plain `.npy`.
+## Orientation selectivity is a different quantity
 
-## What correlations mean
+Waven also reports orientation tuning, OSI, and gOSI from aligned neural activity at the selected feature. These measure response selectivity from the neural response/firing-rate cache, not from correlation values. Keeping the two quantities separate avoids conflating a feature-search statistic with an activity-based selectivity statistic.
 
-The coarse RF tensor stores Pearson correlations between each wavelet feature
-time course and each neuron's trial-averaged response. Positive values mean the
-neuron tends to be active when that feature is strong. Negative values mean the
-neuron tends to be less active when that feature is strong. The preferred
-feature is selected by maximum absolute correlation so strongly negative
-relationships are still visible instead of being discarded.
+## Why the two optional models exist
 
-The individual RF orientation curve is a correlation slice through the RF
-tensor at the preferred position, size, and frequency. It is useful for
-understanding why that feature was selected, but it is **not** used for OSI or
-gOSI. Those metrics first use the RF search to choose the preferred feature
-location, then form an orientation-by-orientation weighted mean from the
-aligned firing-rate array. This keeps the selectivity measurement in neural
-response units rather than correlation units.
+**Run Model** uses a compact coarse real/imaginary phase pair. It starts from the Coarse RF seed and adds amplitude, phase, and drift tuning graphs when the extra detail is useful.
 
-For each orientation \(o\), Waven computes a non-negative weighted mean
-firing rate \(R_o\):
+**Run Full Model** uses the larger full-resolution real/imaginary phase pair, including its full sigma and frequency axes. It supports a more detailed local refinement, so it has the largest optional cache and computation cost.
 
-```text
-R_o = sum_t(power[t, preferred_x, preferred_y, o, preferred_size] * rate[t])
-      / sum_t(power[t, preferred_x, preferred_y, o, preferred_size])
-```
+Neither model is required to inspect a neuron. The default Inspect Single Neuron view remains useful for quality control and scientific exploration without either phase bank.
 
-OSI compares the preferred orientation with its orthogonal orientation; gOSI
-is the magnitude of the doubled-angle vector sum of the same rates. Both range
-from zero (no orientation preference) toward one (strong preference). They are
-descriptive statistics, not a replacement for repeatability, signal quality,
-or model performance.
+## Time alignment matters as much as filtering
+
+Every feature time course must refer to the same frames as `spikes`. Fresh 2-photon/ephys processing creates an aligned neural cache; existing caches are validated against the prepared movie. This is why changing the movie, crop, or grid invalidates downstream reuse: a visually plausible result with a mismatched time axis is not a scientifically valid result.

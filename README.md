@@ -1,11 +1,13 @@
 # waven
 
-`waven` relates time-aligned neural responses to localized Gabor-wavelet
-features extracted from a visual stimulus movie. Its GUI leads a new user from
-movie metadata through neural alignment, Gabor assets, consumer-specific
-wavelet caches, receptive fields, and nonlinear models.
+`waven` relates time-aligned neural responses to localized, convolutional
+Gabor-wavelet features from a visual stimulus movie. Its desktop GUI builds a
+durable cache at each stage, so an experiment can be resumed, inspected, and
+exported without repeating every calculation.
 
-## Start here
+## Launch
+
+From the repository root:
 
 ```bash
 conda env create --solver libmamba -f environment.yml
@@ -14,54 +16,58 @@ python -m pip install -e .
 python ui.py
 ```
 
-The full setup guide, including CUDA and developer instructions, is in
-[docs/how-to/install.md](docs/how-to/install.md). Use `python ui.py` from the
-repository root so the bundled `pipeline_config.json` and project-relative
-paths resolve correctly.
+`environment.yml` is the CUDA-enabled environment. For a CPU-only machine,
+create a Python 3.10 conda environment and install `requirements-cpu.txt`
+instead. Launch `ui.py` from the repository root so its default
+`pipeline_config.json` and `{PROJECT_ROOT}` paths resolve correctly.
 
-## GUI workflow
+## What to expect
 
-1. **Stimulus & Metadata** — select one movie, choose a downsampling
-   percentage, and prepare the binary stimulus cache. Movie metadata is the
-   authoritative source for width, height, frame count, FPS, and duration.
-2. **Session Setup** — create an aligned neural cache from raw data or validate
-   an existing cache. Ephys caches hold frame-bin firing rate in Hz.
-3. **Gabor** — build legacy filter libraries or compact convolution kernels.
-   Gabor phases are entered in degrees.
-4. **Wavelet Products** — prepare the cache needed by the next analysis:
-   Coarse RF power, Run Model real/imaginary phases, or Run Full Model
-   real/imaginary phases.
-5. **Analysis** — run Coarse RF, then Run Model and/or Run Full Model.
+The supported GUI workflow is convolution-only:
 
-There are no GUI fields for `NX`, `NY`, manual movie FPS, or hardcoded
-duration. The selected movie and one percentage determine the shared spatial
-grid throughout the application.
+1. Prepare the cropped/downsampled stimulus cache.
+2. Create or validate aligned neural `spikes` and `pos` caches.
+3. Prepare convolution kernels and the cache needed by the next analysis.
+4. Run Coarse RF analysis.
+5. Inspect individual neurons; Run Model and Run Full Model tuning curves are
+   optional additions.
+6. Export selected all-neuron or individual-neuron graphs as PNG, SVG, and/or
+   PKL.
 
-## Important arrays
+Use **Run Guided Coarse RF Pipeline** in System Configuration to run steps
+1–4 after the inputs are configured. **Save pipeline_config.json** records the
+current GUI settings; **Load pipeline_config.json** restores them and remains
+available while long tasks run.
 
-| Artifact | Shape | Purpose |
-| --- | --- | --- |
-| aligned neural cache | `(trials, frames, neurons)` | Ephys values are firing rate in Hz; two-photon values are aligned activity. |
-| downsampled movie | `(frames, y, x)` | Disk-backed binary movie used to make wavelets. |
-| Coarse RF power | `(frames, x, y, orientations, sigmas)` | Zarr input to Coarse RF correlation. |
-| coarse model phases | `(frames, x, y, orientations, sigmas)` each | Real/imaginary inputs to Run Model. |
-| full model phases | `(frames, x, y, orientations, sigmas, frequencies)` each | Real/imaginary inputs to Run Full Model. |
-| RF tensor | `(neurons, x, y, orientations, sigmas, frequencies)` | Correlation map used to select and inspect features. |
+For a new experiment, start with the ordered
+[First GUI Analysis guide](docs/tutorials/first-gui-analysis.md). It covers
+inputs, folder layout, scientific sampling, Gabor settings, hardware, cache
+storage, and disk planning without duplicating information across pages.
 
-The Individual Neuron RF curves are correlation diagnostics. OSI and gOSI are
-calculated from the aligned neural response/firing-rate cache at each neuron's
-preferred RF feature—not from correlation values.
+## Resources at a glance
+
+- **RAM:** 32 GB or more is recommended. Waven keeps durable arrays disk-backed;
+  the optional RAM acceleration cache is bounded and only keeps safe reusable
+  inputs resident.
+- **Disk:** use local SSD/NVMe storage and reserve at least twice the GUI's
+  estimated largest cache product, plus the raw movie and existing cache
+  products. Run Full Model phase caches are usually the largest artifacts.
+- **GPU:** an NVIDIA CUDA GPU is optional. Comparable GPUs can be combined for
+  convolution; a substantially slower card can reduce throughput, so the GUI
+  excludes unsuitable mixed sets.
 
 ## Documentation
 
-- [First GUI analysis](docs/tutorials/first-gui-analysis.md)
-- [Prepare configuration](docs/how-to/prepare-configuration.md)
-- [Prepare wavelet products](docs/how-to/run-wavelet-decomposition.md)
-- [Run RF analysis](docs/how-to/run-rf-analysis.md)
-- [Pipeline intuition](docs/explanation/pipeline-intuition.md)
-- [Code organization](docs/explanation/maintainability.md)
+The documentation site has one ordered path:
 
-Build the local documentation site with:
+- [Onboarding and first analysis](docs/tutorials/first-gui-analysis.md)
+- [Configuration and scientific settings](docs/how-to/prepare-configuration.md)
+- [Storage, caches, and disk planning](docs/reference/storage.md)
+- [GUI workflow and optional speed settings](docs/reference/gui.md)
+- [Inputs, outputs, and scientific contracts](docs/reference/data-contracts.md)
+- [Source architecture](docs/reference/source-architecture.md)
+
+To preview the documentation locally:
 
 ```bash
 python -m pip install -e ".[docs]"

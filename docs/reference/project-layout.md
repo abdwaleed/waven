@@ -1,69 +1,69 @@
-# Project layout
+# Experiment folder
 
-`waven` now treats one **Project Root** as the anchor for all input folders,
-generated caches, and analysis outputs. GUI path fields are folders, not files.
-When a folder contains the expected artifact, the file name can be arbitrary
-unless the artifact has a semantic pair such as `spikes` and `pos`.
+`Project Root` is the writable `your_experiment` directory. Keeping one
+experiment's inputs, caches, and outputs below it makes cache provenance clear
+and lets `pipeline_config.json` use portable `{PROJECT_ROOT}` paths.
 
 ```text
 your_experiment/
-  input/
-    raw_data/
-    stimulus_movie/
-    neural_cache/
-  cache/
-    gabor/
-      coarse/
-      full/
-      kernels/
-    wavelets/
-      coarse/
-      full/
-  output/
-    plots/
-    recovery_cache/
-    models/
+├── input/
+│   ├── raw_data/
+│   ├── stimulus_movie/
+│   └── neural_cache/
+├── cache/
+│   ├── gabor/
+│   │   ├── coarse/
+│   │   ├── full/
+│   │   └── kernels/
+│   └── wavelets/
+│       ├── coarse/
+│       └── full/
+└── output/
+    ├── plots/
+    ├── models/
+    └── recovery_cache/
 ```
 
-## Input folders
+| Location | Owner | Input or output? | Content | Required? |
+| --- | --- | --- | --- | --- |
+| `input/raw_data/` | User or a Waven folder reference | Input | Raw ephys/2-photon source material. | Required for fresh alignment only. |
+| `input/stimulus_movie/` | User | Input | One supported stimulus movie. | Yes. |
+| `input/neural_cache/` | Waven or user | Input/output | Matching aligned `spikes` and `pos` arrays; ephys may also carry unit metadata. | Required to continue from cache; created for fresh alignment. |
+| `cache/gabor/` | Waven | Output/reusable input | Compact convolution-kernel cache keyed by grid and Gabor settings. | Created before wavelet preparation. |
+| `cache/wavelets/coarse/` | Waven | Output/reusable input | Downsampled stimulus and Coarse RF power cache. | Required for Coarse RF analysis. |
+| `cache/wavelets/full/` | Waven | Output/reusable input | Run Model and/or Full Model real/imaginary phase pairs. | Optional; only for model tuning. |
+| `output/plots/` | Waven | Output | Optional GUI plot cache. | Optional. |
+| `output/models/` | Waven | Output | Configured model-result location. | Optional unless a workflow writes model outputs there. |
+| `output/recovery_cache/` | Waven | Output | Resumable work/checkpoint data for long tasks. | Optional but recommended. |
 
-| Folder | Put here | Discovery rule |
-| --- | --- | --- |
-| `input/raw_data/` | Raw two-photon or ephys acquisition files. | Alignment code reads this folder, or a reference stored in it. |
-| `input/stimulus_movie/` | One stimulus movie, such as `.mp4`, `.avi`, `.mov`, `.mkv`, `.wmv`, or `.m4v`. | The GUI searches the folder and requires exactly one movie candidate. |
-| `input/neural_cache/` | Existing or generated aligned neural arrays. | Exact `spikes.npy`/`pos.npy` or `.zarr` names are preferred. If absent, one array with `spike`/`spks` in the stem and one with `pos`/`position` in the stem can be used. |
+## Path rules
 
-If a large input lives elsewhere, use the GUI browse button for that folder. The
-GUI writes a lightweight `.waven_reference.json` into the strict folder and
-keeps the visible field pointed at the strict folder. This preserves a stable
-project tree without copying large source data.
+- GUI path fields name **folders**, not individual files.
+- The movie folder should contain one intended movie so metadata discovery is
+  unambiguous.
+- For a fresh session, Waven writes the aligned neural pair to `Spks Path`.
+  For a continue session, point `Spks Path` at an existing matching pair.
+- If a raw-data directory lives outside the project, Waven can store a
+  `.waven_reference.json` pointer in the conventional location. The source data
+  are not copied merely by choosing the external folder.
+- Do not manually move or rename cache products while a task is running.
+  Cache provenance uses the movie, coverage, grid, Gabor settings, and product
+  purpose to determine safe reuse.
 
-## Cache folders
+## Portable configurations
 
-| Folder | Produced artifacts | Notes |
-| --- | --- | --- |
-| `cache/gabor/coarse/` | Coarse RF Gabor library. | Generated names are deterministic, but loading accepts a single `.npy` or `.zarr` in the folder. |
-| `cache/gabor/full/` | Full-model/fine Gabor library. | Kept separate from coarse so arbitrary file names remain unambiguous. |
-| `cache/gabor/kernels/` | Compact convolution kernels. | Used by the convolution backend instead of giant flattened libraries. |
-| `cache/wavelets/coarse/` | Stimulus cache, `coarse_rf_power.zarr`, and named coarse-model real/imaginary Zarr phases. | RF and Run Model each read only their own product. |
-| `cache/wavelets/full/` | `dwt_videodata2_r.zarr` and `dwt_videodata2_i.zarr`. | Run Full Model reads this folder. |
+Use forward slashes and `{PROJECT_ROOT}` in `pipeline_config.json`:
 
-Generated caches carry `.waven.json` sidecars where practical. These sidecars
-store shape and parameter fingerprints so reruns can decide whether a cache is
-still compatible with the GUI inputs.
+```json
+{
+  "common": {
+    "Project Root": "{PROJECT_ROOT}/your_experiment",
+    "Movie Path": "{PROJECT_ROOT}/your_experiment/input/stimulus_movie",
+    "Spks Path": "{PROJECT_ROOT}/your_experiment/input/neural_cache"
+  }
+}
+```
 
-## Output folders
-
-| Folder | Produced artifacts |
-| --- | --- |
-| `output/plots/` | GUI plot cache and exported plot bundles. |
-| `output/recovery_cache/` | Durable task checkpoints for resumable buttons. |
-| `output/models/` | Full-model outputs and model-side result files. |
-
-## Metadata sanity checks
-
-When the GUI resolves the stimulus movie, it reads lightweight metadata: frame
-count, frame rate, width, height, and duration. These are authoritative. The
-user supplies only the downsampling percentage, from which the shared analysis
-grid is derived; there are no competing `NX`, `NY`, FPS, frame-count, or
-duration inputs to reconcile.
+At launch, Waven replaces `{PROJECT_ROOT}` with the repository directory that
+contains `ui.py`. See [Configuration and Scientific Settings](../how-to/prepare-configuration.md)
+for the full configuration schema.
