@@ -1618,7 +1618,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         defaults = {
             "png": True,
             "svg": True,
-            "data_pickle": True,
+            # PKL can contain the full plotted numerical payload.  Keep it
+            # opt-in so a normal visual export does not duplicate large arrays
+            # in memory and on disk.
+            "data_pickle": False,
             # Internal support remains explicitly off so old configuration files
             # cannot quietly re-enable a sprawling export layout.
             "figure_pickle": False,
@@ -1786,8 +1789,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "tab": tab_name,
             "title": title,
             "figure_data": figure_data,
-            "current_figure_data": current_figure_data,
-            "source_artist_data": cached_artist_data,
             "payload": payload,
         }
 
@@ -1844,8 +1845,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "tab": tab_name,
                     "title": title,
                     "figure_data": _json_safe(figure_data),
-                    "current_figure_data": _json_safe(current_figure_data),
-                    "source_artist_data": _json_safe(cached_artist_data),
                     "payload": _json_safe(payload),
                     "pickle_note": f"Original payload was not pickleable: {exc}",
                 }
@@ -1897,7 +1896,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         timing["graphs"] += 1
         if owns_timing:
             _log_export_timing(f"graph '{title}'", timing)
+        _release_export_figure(record, fig)
         return base_dir
+
+    def _release_export_figure(record, figure):
+        """Release a worker-owned restored figure as soon as its files are written."""
+        if record.get("figure_pickle_bytes") is None:
+            return
+        try:
+            figure.clear()
+            if plt is not None:
+                plt.close(figure)
+        except Exception:
+            # Disposal must never turn a completed export into a failure.
+            pass
 
     def _snapshot_export_record(record, array_format=None, file_options=None):
         """Freeze a GUI-owned figure for safe background export.
@@ -1910,6 +1922,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         fig = record["figure"]
         if array_format is None:
             array_format = "npy"
+        selected_files = dict(file_options or _selected_export_files())
+        needs_graph_data = bool(
+            selected_files.get("arrays")
+            or selected_files.get("data_pickle")
+            or selected_files.get("manifest")
+        )
         # Payloads are exported separately below and can be very large (or
         # intentionally non-pickleable).  Keeping them off the temporary
         # Figure pickle reduces UI-thread copy time and preserves the previous
@@ -1935,10 +1953,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # Artist extraction can traverse large image arrays; defer it to
             # the writer together with raster/vector rendering.
             "current_figure_data": None,
-            "cached_artist_data": None if cached_artist_data is absent else cached_artist_data,
-            "export_payload": None if export_payload is absent else export_payload,
+            "cached_artist_data": (
+                None if cached_artist_data is absent or not needs_graph_data else cached_artist_data
+            ),
+            "export_payload": (
+                None if export_payload is absent or not needs_graph_data else export_payload
+            ),
             "array_format": array_format,
-            "file_options": dict(file_options or _selected_export_files()),
+            "file_options": selected_files,
         }
 
     def _figure_from_export_snapshot(record):
@@ -2220,13 +2242,19 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 try:
                     figure_width, figure_height = fig.get_size_inches()
                     estimated_bytes = int(figure_width * png_dpi * figure_height * png_dpi * 4)
-                    if estimated_bytes <= 96 * 1024 * 1024:
+                    # A shared render avoids repeated full-dashboard draws, but
+                    # its decoded pixels are the largest transient allocation
+                    # in the exporter.  Keep that allocation bounded; users
+                    # processing unusually large figures can raise the cap.
+                    shared_png_limit_mb = float(os.environ.get("WAVEN_EXPORT_SHARED_PNG_MB", "64"))
+                    if estimated_bytes <= max(1, shared_png_limit_mb) * 1024 * 1024:
                         png_buffer = io.BytesIO()
                         _time_export_stage(timing, "png", lambda: fig.savefig(png_buffer, format="png", dpi=png_dpi))
                         png_buffer.seek(0)
                         def load_shared_png():
-                            image = Image.open(png_buffer).convert("RGBA")
+                            image = Image.open(png_buffer)
                             image.load()
+                            png_buffer.close()
                             return image
                         full_png = _time_export_stage(timing, "png", load_shared_png)
                 except Exception as exc:
@@ -2247,7 +2275,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
                     fig.savefig(path, dpi=png_dpi, bbox_inches=bbox_inches)
                     return
-                full_png.crop(crop_box).save(path, format="PNG")
+                cropped = full_png.crop(crop_box)
+                try:
+                    cropped.save(path, format="PNG")
+                finally:
+                    cropped.close()
 
             for axis_index, axis in enumerate(fig.axes):
                 if not axis.get_visible():
@@ -2416,6 +2448,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         _record_export_file(timing, manifest_path)
                 exported.append(graph_dir)
                 timing["graphs"] += 1
+            if full_png is not None:
+                full_png.close()
+            _release_export_figure(record, fig)
         if consolidated is not None:
             _write_consolidated_numeric_bundle(base_dir, consolidated, file_options, timing)
         _log_export_timing(
@@ -2481,7 +2516,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except ValueError:
             batch_workers = 2
         batch_workers = max(1, min(batch_workers, 4))
-        batch_queue_limit = max(2, 2 * batch_workers)
+        # A queued job already contains a serialized Matplotlib figure.  More
+        # queued snapshots do not increase writer throughput, but can double
+        # peak RAM, so keep at most one job per active writer.
+        batch_queue_limit = batch_workers
         total_neurons = sum(job[1] for job in jobs)
         export_started = time.perf_counter()
         print(
@@ -8934,7 +8972,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     export_file_specs = (
         ("png", "PNG — presentation-ready raster image", True),
         ("svg", "SVG — editable vector image for publications", True),
-        ("data_pickle", "PKL — graph data and analysis values for Python", True),
+        ("data_pickle", "PKL — graph data and analysis values for Python (larger/slower)", False),
     )
     for index, (key, label, default) in enumerate(export_file_specs):
         variable = tk.BooleanVar(value=_coerce_runtime_bool(configured_export_files.get(key), default))
@@ -8946,7 +8984,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     export_files_wrap.columnconfigure(0, weight=1)
     ctk.CTkLabel(
         frame_export,
-        text="Files are written directly into the folder you choose as shankX_unitX_graph-name.ext. NPY and Zarr are cache formats, not export formats, so they are no longer shown here.",
+        text=(
+            "Files are written directly into the folder you choose as shankX_unitX_graph-name.ext. "
+            "PNG/SVG-only is the fastest, lowest-memory export; enable PKL only when you need the underlying plotted data. "
+            "NPY and Zarr are cache formats, not export formats, so they are no longer shown here."
+        ),
         text_color=muted_text,
         wraplength=650,
         justify="left",
