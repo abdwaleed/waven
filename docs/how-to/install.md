@@ -11,15 +11,14 @@ computer; scientific configuration begins in
 | Conda or Miniconda | Recommended installation | The checked-in environment targets Python 3.10. |
 | 32 GB RAM recommended | Experiment-sized sessions | Smaller sessions can run with less; cache products stay disk-backed. |
 | Local SSD/NVMe storage | Durable caches | Strongly recommended for stimulus and wavelet cache throughput. |
-| NVIDIA CUDA GPU | Optional acceleration | CPU fallback is supported. CUDA is not required to launch the GUI. |
+| NVIDIA CUDA GPU | **STRONGLY RECOMMENDED** acceleration | CPU fallback is supported. CUDA is not required to launch the GUI. |
 
-## CUDA-enabled installation
+## CUDA-enabled installation (recommended default installation)
 
 `environment.yml` includes PyTorch CUDA 12.1 packages. Use it on a machine
-with a compatible NVIDIA driver:
+with a compatible NVIDIA driver. Run the following in the **root directory** of this project:
 
 ```bash
-cd C:/path/to/waven_jul1
 conda env create --solver libmamba -f environment.yml
 conda activate waven
 python -m pip install -e .
@@ -27,15 +26,15 @@ python ui.py
 ```
 
 If `libmamba` is unavailable, omit `--solver libmamba`. `python ui.py` should
-be run from the repository root; it adds the local `src` directory and reads
-the optional root-level `pipeline_config.json`.
+be run from the repository root; Don't worry about configuring `pipeline_config.json`
+before launch; GUI inputs are accepted.
 
 ## CPU-only installation
 
-Create a Python 3.10 environment and install the CPU requirements:
+Create a Python 3.10 environment and install the CPU requirements. Run the following in
+the **root directory** of this project:
 
 ```bash
-cd C:/path/to/waven_jul1
 conda create -n waven-cpu python=3.10 pip
 conda activate waven-cpu
 python -m pip install -r requirements-cpu.txt
@@ -43,8 +42,8 @@ python ui.py
 ```
 
 CPU-only runs are valid but convolution and large model preparations can take
-substantially longer. Keep the initial Gabor lists and movie sampling modest to
-verify the workflow before an experiment-sized run.
+substantially longer (**NOT** recommended). Keep the initial Gabor lists and 
+movie sampling modest to verify the workflow before an experiment-sized run.
 
 ## Verify the interpreter and launch
 
@@ -61,6 +60,8 @@ interpreter it used and writes unexpected startup tracebacks to
 same interpreter rather than a different system Python.
 
 ## Build the documentation locally
+
+Run the following in the **root directory** of this project:
 
 ```bash
 python -m pip install -e ".[docs]"

@@ -1,22 +1,16 @@
-# waven documentation
+# WavEn documentation
 
-Welcome to the current, convolution-only Waven GUI workflow. This site is
-organized by the order in which a new user makes decisions:
+Welcome to the current kernel-driven version of WavEn! These docs serve important information related to setup and requirements. Please read the following sections in order:
 
-1. [First GUI Analysis](tutorials/first-gui-analysis.md) — the single ordered
-   onboarding path, from hardware and inputs through Coarse RF and inspection.
-2. [Install and Launch](how-to/install.md) — create the conda environment and
-   start `ui.py`.
-3. [Experiment Folder](reference/project-layout.md) — place raw inputs, caches,
-   and results predictably.
-4. [pipeline_config.json and Scientific Settings](how-to/prepare-configuration.md)
-   — choose sampling, Gabor axes, and saved GUI settings.
-5. [Cache Storage and Disk Planning](reference/storage.md) — choose NPY or
-   Zarr and estimate resources before a long run.
-6. [GUI Workflow and System Configuration](reference/gui.md) — optional speed
+1. [First GUI Analysis](tutorials/first-gui-analysis.md): onboarding from A to Z.
+2. [Install and Launch](how-to/install.md): creating our conda environment and running `ui.py`.
+3. [Experiment Folder](reference/project-layout.md): the "standard" folder layout in which to find inputs and outputs or "reference" them from external folder(s).
+4. [pipeline_config.json and Scientific Settings](how-to/prepare-configuration.md): inputting our raw data paths, modifying Gabor and other params, and handling future caches and results paths.
+5. [GUI Workflow and Session Configuration](reference/gui.md): speed
    controls, notifications, cancellation, and exports.
+6. [Cache Storage and Disk Planning](reference/storage.md): choosing between NPY and Zarr and how Zarr promises better disk utilization.
 
-The primary scientific principle is simple: a stimulus movie and its visual
+The science is simple: a stimulus movie and its visual
 coverage define a spatial sampling grid; convolutional Gabor filters describe
 localized orientation, size, frequency, and phase features on that grid; and
 time-aligned neural activity is correlated or modelled against those features.

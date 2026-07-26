@@ -1,56 +1,47 @@
 # First GUI analysis
 
-This is the recommended first-run path. Complete the stages in order once;
-afterward Waven reuses matching caches rather than recalculating them. The GUI
-uses one convolutional wavelet implementation—there is no backend choice.
+This is the flowchart of the steps in chronological order. Note that steps
+that are completed store cache so that their product can be reused.
 
-```mermaid
-flowchart LR
-    A["Configure experiment"] --> B["Prepare stimulus cache"]
-    A --> C["Create or validate neural cache"]
-    B --> D["Prepare convolution kernels"]
-    B --> E["Prepare Coarse RF power cache"]
-    C --> F["Run Coarse RF analysis"]
-    D --> E --> F
-    F --> G["Inspect single neuron"]
-    G --> H["Optional Run Model or Run Full Model"]
-    F --> I["Export selected results"]
-    H --> I
-```
+![Flowchart of Our Pipeline](pipeline-map.svg)
 
 ## 1. Before starting: computer and storage
 
-Use **32 GB RAM or more** for experiment-sized work. Waven writes stimulus,
+Use **32 GB RAM or more** for best performance. Waven writes stimulus,
 neural, and wavelet products to disk in chunks; it does not require every
-product to fit in RAM. More RAM still helps operating-system caching and the
+product to fit in RAM. However, more RAM still helps operating-system caching and the
 optional **RAM acceleration cache**, but it is not a substitute for free disk.
 
-Use a local SSD or NVMe drive for `your_experiment`. Keep at least **twice the
-GUI estimate of the largest cache product free**, in addition to the raw movie,
-neural cache, and any cache products you want to retain. The Run Full Model
-real/imaginary phase pair is normally the largest product. The GUI reports
-product-specific estimates before cache preparation; use those estimates rather
-than a fixed number of gigabytes.
+Use a local SSD or NVMe drive for `your_experiment`. A majority of this program relies on disk I/O.
+Most of the space used comes from the prepared caches. The GUI reports product-specific 
+estimates before cache preparation.
+Keep at least **twice the GUI estimate of the largest cache product free**, in addition
+to the raw movie, neural cache, and any cache products you want to retain. The Run Full 
+Model real/imaginary phase pair is normally the largest product. In general, expect to use
+< 100 GB if not preparing Run Model or Run Full Model caches. However, expect 500 GB usage
+if you are.
 
-An NVIDIA CUDA GPU is optional. Waven falls back to CPU when CUDA is absent.
-When two or more GPUs have **comparable performance and available memory**,
-enable **Use compatible GPUs** in System Configuration to batch convolution
-work across them. A markedly slower or smaller GPU can make synchronous work
-slower; Waven deliberately excludes unsuitable mixed sets. See
-[System Configuration](../reference/gui.md#system-configuration) for the other
+An NVIDIA CUDA GPU is **strongly recommended**. Waven falls back to CPU when CUDA is absent.
+However, CPU fallback is.... extremely slow (*bye bye parallelism*). When two or more GPUs have
+**comparable performance and available memory** (e.g., 2 RTX 3080s), enable **Use compatible GPUs**
+in Session Configuration to batch convolution work across them. A markedly slower or smaller GPU 
+is **NOT** utilized since it can counterintuitively slow things. See
+[Session Configuration](../reference/gui.md#session-configuration) for the other
 optional speed settings.
 
 ## 2. Install and launch
 
-Follow [Install and Launch](../how-to/install.md). In short, activate the
+Follow [Install and Launch](../how-to/install.md) to setup your
 `waven` conda environment and run `python ui.py` from the repository root.
-The application opens with `pipeline_config.json` as optional defaults; a
-missing or partially filled file does not prevent the GUI from opening.
+The application opens with `pipeline_config.json` as optional defaults; however, a
+missing or partially filled JSON does not prevent the GUI from opening. Feel
+free to input from the GUI directly and then save your config using
+`Save pipeline_config.json` in the `Session Configuration` section.
 
 ## 3. Make the experiment folder
 
-Create or choose one writable `your_experiment` directory. The conventional
-layout is:
+Ensure you setup a `root directory` on an NVME SSD for the experiment with the following
+folder naming and layout:
 
 ```text
 your_experiment/
@@ -67,24 +58,26 @@ your_experiment/
     └── recovery_cache/       resumable task checkpoints
 ```
 
-The folders that hold **inputs** should already contain the relevant data.
-Waven creates cache and output folders when it writes to them. Folder fields in
-the GUI point to directories, not individual files. If raw data live elsewhere,
-the GUI can retain a reference inside the conventional project tree. See the
-[Experiment Folder reference](../reference/project-layout.md) for ownership and
-file names.
+For background, each folder in `input` either holds the actual data itself
+(if you choose to place it there) or, if data is elsewhere, a reference
+.json to the file path you specify. See the
+[Experiment Folder reference](../reference/project-layout.md) for more details.
+
+***
+Once you are ready to start the experiment, read the following sections:
 
 ## 4. Provide inputs
 
-Enter these fields in **System Configuration** before starting the pipeline.
+Enter the session fields in **Session Setup** and the stimulus fields in
+**Prepare Coarse RF / Stimulus Video** before starting the pipeline.
 
 | Input | Type | Required? | Description | Output / use |
 | --- | --- | --- | --- | --- |
-| Project Root | writable directory | Yes | The `your_experiment` directory. | Owns the conventional input/cache/output tree. |
+| Project Root | writable directory | Yes | The `your_experiment` directory of your choice. | Owns the conventional input/cache/output tree. |
 | Movie Path | directory containing one movie | Yes | Visual stimulus source. Waven reads frame count, dimensions, and FPS from it. | Metadata and the binary stimulus cache. |
 | Visual Coverage | four-number list in degrees | Yes | Full movie field: `[left, right, top, bottom]`. | Maps source pixels to visual angle. |
 | Analysis Coverage | four-number list in degrees | Yes | Crop to analyze, in the same order and inside Visual Coverage. | Defines the analysed visual field and grid. |
-| Fresh/raw data or existing cache | radio choice | Yes | Choose raw alignment or a previously aligned cache. | Determines how `spikes`/`pos` are obtained. |
+| Fresh/raw data or existing cache | radio choice | Yes | Choose raw alignment or a previously aligned cache. | Determines whether to render `spikes`/`pos` or load them from a cache. |
 | Dir | directory | Fresh/raw only | Raw acquisition root. | Input to alignment. |
 | Spks Path | directory | Existing-cache only; output location for fresh data | Folder containing or receiving the neural cache pair. | `spikes` and `pos` cache. |
 | 2-photon: Resolution, Number of Planes | positive number, integer | Fresh 2-photon only | Imaging spatial scale and plane count. | Aligned neural positions/activity. |
@@ -96,8 +89,8 @@ wire was the photodiode.
 
 ## 5. Choose scientifically meaningful sampling and Gabor axes
 
-Use the physical sampling controls in **Stimulus & Metadata**, not a guessed
-percentage whenever possible:
+Use the physical sampling controls in **Prepare Coarse RF / Stimulus Video**, not the percentage slider
+whenever possible:
 
 - **Target degrees/pixel** chooses the desired visual-angle size of one
   analysis pixel. Smaller values retain more spatial detail and create larger,
@@ -114,15 +107,16 @@ derived grid, degrees per pixel, and Nyquist limit. Choose a grid whose Nyquist
 limit is comfortably above the largest frequency you intend to analyse. Larger
 grids increase space and convolution roughly with the number of pixels.
 
-Enter Gabor values in **Gabor**:
+Enter Gabor values in **Gabor**. Please note that the **Sigmas** and **Frequencies**
+have an *apply recommended* option in the GUI:
 
 | Input | Type / units | Required? | Scientific reasoning |
 | --- | --- | --- | --- |
 | N_thetas | positive integer | Yes | Number of orientation bins from 0° inclusive to 180° exclusive. `12` means 15° spacing; increase it only when the expected tuning needs finer angular resolution. |
 | Sigmas | list of analysis pixels | Yes | Gaussian envelope sizes for Coarse RF. Use a short, increasing set that spans plausible receptive-field scales; more values multiply cache size and search time. |
-| Frequencies | list of cycles per analysis pixel | Required for Full Model; otherwise available for its preparation | Spatial-frequency axis for full-resolution model work. Keep values below the displayed Nyquist limit and use a sparse, approximately logarithmic progression when the plausible range is broad. |
+| Frequencies | list of cycles per analysis pixel | Required for **Run Full Model** only; otherwise available for its preparation | Spatial-frequency axis for full-resolution model work. Keep values below the displayed Nyquist limit and use a sparse, approximately logarithmic progression when the plausible range is broad. |
 | Phases | list of degrees | Yes | Gabor phase offsets. `[0, 90]` supplies quadrature-style real/imaginary phase information for the phase-aware model caches. |
-| Sigmas Full Model | list of analysis pixels | Required for Full Model | Optional finer size grid for local full-model refinement. It is merged with the coarse sizes for the full phase bank. |
+| Sigmas Full Model | list of analysis pixels | Required for **Run Full Model** | Optional finer size grid for local full-model refinement. It is merged with the coarse sizes for the full phase bank. |
 
 The choices describe the hypotheses Waven tests: *where* in visual space,
 *which orientation*, *which spatial scale*, *which spatial frequency*, and
@@ -133,18 +127,25 @@ The detailed field and `pipeline_config.json` reference is in
 
 ## 6. Build the durable inputs
 
+The preparation group keeps the stimulus video, Gabor filters, and Coarse RF
+cache work together. The **Coarse RF Cache** view is first because its outputs
+are the direct prerequisite for analysis. Use the individual actions only when
+you need to prepare or refresh one product.
+
 | GUI action | Required input | Output type | Output and purpose |
 | --- | --- | --- | --- |
-| Prepare Stimulus Cache | movie + coverage + sampling | NPY or Zarr `(frames, y, x)` binary array | Common cropped/downsampled movie used by later cache products. |
-| Create pos/spikes Cache | raw workflow inputs | NPY or Zarr arrays | Aligned `spikes` `(trials, frames, neurons)` plus `pos`; ephys values are frame-bin firing rates in Hz. |
+| Prepare Stimulus Cache | movie + coverage + sampling | NPY or Zarr `(frames, y, x)` binary array | Cropped and/or downsampled movie used by later cache products. |
+| Create pos/spikes Cache | raw ephys/2-photon inputs | NPY or Zarr arrays | Aligned `spikes` `(trials, frames, neurons)` plus `pos`; ephys values are frame-bin firing rates in Hz. |
 | Validate Existing Neural Cache | `spikes`/`pos` folder | validated disk-backed arrays | Reuses an already aligned matching pair without raw-data alignment. |
 | Prepare Convolution Kernels | movie-derived grid + Gabor axes | kernel-cache files | Compact reusable filters for Coarse RF and Full Model work. |
 | Prepare Coarse RF Cache | stimulus cache + kernels | Zarr power array | Power features required by Coarse RF correlation. |
 
 The **Run Guided Coarse RF Pipeline** button runs stimulus preparation, neural
 cache preparation, Coarse RF cache preparation, and Coarse RF analysis in that
-order. It obeys the currently visible settings. Use individual buttons if you
-already have a valid upstream cache or want to stop after a specific stage.
+order. Its two checkboxes can also export the selected all-neuron and/or
+individual-neuron graphs afterwards. It obeys the current settings, including
+the Export-tab graph selections and the option to repeat individual exports for
+every analyzed neuron.
 
 ## 7. Analyse and inspect
 
@@ -169,9 +170,10 @@ replacement for Coarse RF analysis.
 
 ## 8. Export and recover
 
-The Export tab has two scopes: **All Neurons** and **Individual Neurons**.
-Choose graph types, then export to one parent folder. Files are flat and named
-with a unit prefix such as `shank1_unit7_orientation_tuning.svg`.
+The Export tab starts with **Export folder**, followed by the **All Neurons**
+and **Individual Neurons** scopes. Set the folder once, choose graph types, and
+export directly to it without another save-location prompt. Files are flat and
+named with a unit prefix such as `shank1_unit7_orientation_tuning.svg`.
 
 - **PNG** is a presentation-ready raster image.
 - **SVG** is an editable publication-quality vector image.

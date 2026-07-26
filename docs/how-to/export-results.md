@@ -1,6 +1,9 @@
 # Export results
 
-Exports write selected results directly into one folder; they do not create nested package directories. Choose the graph scope, select file types, then click the matching **Export** button.
+Set **Export folder** at the top of the Export tab, then choose graph scopes and
+file types. Every export writes directly to that folder; it does not create
+nested package directories or ask for a destination again. The export folder
+and all selections are saved in `pipeline_config.json`.
 
 ## Scopes
 
@@ -11,6 +14,11 @@ Exports write selected results directly into one folder; they do not create nest
 | Individual Neurons + Repeat selections for every analyzed neuron | Same graph types | Recreates and writes those selected panels for each analysed neuron. |
 
 The individual-neuron choices for Run Model and Run Full Model are disabled until their phase caches exist. Selecting them for every neuron can require a model fit per neuron, so it is intentionally explicit.
+
+The Guided Pipeline can also export the selected all-neuron and/or
+individual-neuron graphs after analysis. Its two checkboxes use these same
+Export-tab selections, including **Repeat selections for every analyzed
+neuron**.
 
 ## File formats
 

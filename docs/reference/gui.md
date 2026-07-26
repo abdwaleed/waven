@@ -1,20 +1,22 @@
-# GUI workflow and System Configuration
+# GUI workflow and Session Configuration
 
 The GUI is designed as a staged, cache-aware workflow. It is convolution-only:
 the Gabor action prepares compact convolution kernels, and later actions create
 the product required by their consumer.
 
-## System Configuration
+## Session Configuration
 
-System Configuration contains the current experiment inputs, save/load actions,
-the guided workflow, and advanced performance settings.
+Session Configuration contains recovery settings, the project root, save/load
+actions, performance controls, and the guided workflow. The project root is
+next to the recovery location because both establish where WavEn keeps its
+session state.
 
 | Control | Input | Result |
 | --- | --- | --- |
-| **Load pipeline_config.json** | a JSON configuration file | Restores workflow, paths, sampling, Gabor values, cache formats, optional model choices, speed controls, and export format selections. |
+| **Load pipeline_config.json** | a JSON configuration file | Restores every saved GUI choice: workflow, paths, sampling, Gabor values, cache formats, model choices, performance controls, and export settings. |
 | **Save pipeline_config.json** | destination JSON path | Writes the current GUI inputs in the current schema. |
-| **Run Guided Coarse RF Pipeline** | current valid inputs | Runs Prepare Stimulus Cache → Create/Validate Neural Cache → Prepare Coarse RF Cache → Run Coarse RF Analysis. |
-| **Performance & Hardware (advanced)** | optional switches | Applies process-local speed/memory choices before the next action. |
+| **Run Guided Coarse RF Pipeline** | current valid inputs and its export checkboxes | Runs Prepare Stimulus Cache -> Create/Validate Neural Cache -> Prepare Coarse RF Cache -> Run Coarse RF Analysis, then optionally exports the selected graphs. |
+| **Performance & Hardware** | optional switches | Applies process-local speed/memory choices before the next action. |
 
 Save and load are intentionally available while a background task runs. They do
 not change the immutable settings snapshot already captured by that task; they
@@ -37,13 +39,13 @@ unsuitable device.
 
 | Stage | Action | Required input | Durable output | Enables |
 | --- | --- | --- | --- | --- |
-| Stimulus & Metadata | Prepare Stimulus Cache | movie, coverage, sampling, NPY/Zarr selection | binary movie cache | Neural alignment validation, wavelets, STA. |
+| Prepare Coarse RF / Stimulus Video | Prepare Stimulus Cache | movie, coverage, sampling, NPY/Zarr selection | binary movie cache | Neural alignment validation, wavelets, STA. |
 | Session Setup | Create pos/spikes Cache | raw 2-photon/ephys inputs | aligned neural pair | Coarse RF. |
 | Session Setup | Validate Existing Neural Cache | existing matching `spikes`/`pos` folder | validated disk-backed pair | Coarse RF without raw alignment. |
-| Gabor | Prepare Convolution Kernels | sampling grid and Gabor axes | compact kernel cache | Wavelet-product preparation. |
-| Stimulus Wavelet Pipeline | Prepare Coarse RF Cache | stimulus cache + kernels | `coarse_rf_power.zarr` | Coarse RF analysis. |
-| Stimulus Wavelet Pipeline | Prepare Run Model Phase Caches | stimulus cache + kernels | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | Optional Run Model tuning graphs. |
-| Stimulus Wavelet Pipeline | Prepare Run Full Model Phase Caches | stimulus cache + full settings | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | Optional Full Model tuning graphs. |
+| Prepare Coarse RF / Gabor Filters | Prepare Convolution Kernels | sampling grid and Gabor axes | compact kernel cache | Wavelet-product preparation. |
+| Prepare Coarse RF / Coarse RF Cache | Prepare Coarse RF Cache | stimulus cache + kernels | `coarse_rf_power.zarr` | Coarse RF analysis. |
+| Prepare Coarse RF / Coarse RF Cache | Prepare Run Model Phase Caches | stimulus cache + kernels | `coarse_model_real.zarr`, `coarse_model_imag.zarr` | Optional Run Model tuning graphs. |
+| Prepare Coarse RF / Coarse RF Cache | Prepare Run Full Model Phase Caches | stimulus cache + full settings | `dwt_videodata2_r.zarr`, `dwt_videodata2_i.zarr` | Optional Full Model tuning graphs. |
 | Analysis | Run Coarse RF Analysis | neural pair + Coarse RF power | RF correlation result and plot state | Population plots and individual-neuron inspection. |
 
 The NPY/Zarr selectors describe **cache storage**, not graph export. See
@@ -65,7 +67,8 @@ the Coarse RF result as their starting point; they are optional refinements.
 
 ## Export
 
-The streamlined Export tab separates two scopes:
+The Export tab starts with a persistent **Export folder**. It then separates two
+scopes:
 
 | Scope | Select | Result |
 | --- | --- | --- |
@@ -73,8 +76,9 @@ The streamlined Export tab separates two scopes:
 | Individual Neurons | available individual graph types; optional repeat for every analysed neuron | Export the current neuron or the selected graphs for every analysed neuron. |
 
 Run Model/Full Model graph choices appear only when their corresponding phase
-caches are available. Exports are written directly into the selected parent
-folder with names such as `shank1_unit7_orientation_tuning.png`.
+caches are available. Exports are written directly into the configured folder
+with names such as `shank1_unit7_orientation_tuning.png`; no folder picker
+appears when exporting.
 
 | Format | Purpose | Cost |
 | --- | --- | --- |

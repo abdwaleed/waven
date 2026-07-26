@@ -2,53 +2,99 @@
   "workflow": "ephys",
   "gui": {
     "coarse_rf_frequency_mode": "coupled",
-    "neural_source": "data_dir",
+    "sampling_mode": "Target degrees/pixel",
+    "target_degrees_per_pixel": "0.75",
+    "maximum_spatial_frequency_cpd": "0.4",
     "downsample_percent": 11,
     "downsample_format": "zarr",
+    "filter_bank_minimum_cpd": "0.025",
+    "filter_bank_maximum_cpd": "0.4",
+    "filter_bank_density": "Standard",
+    "filter_bank_cycles_per_sigma": "1.0",
+    "neural_source": "data_dir",
     "neural_cache_format": "zarr",
     "wavelet_format": "zarr",
+    "prepare_run_model_cache": false,
+    "prepare_full_model_cache": false,
+    "force_2d_graphs": false,
     "run_model_on_inspect": false,
     "run_full_model_on_inspect": false,
     "suite2p_subject_dirs": "",
+    "suite2p_output_dir": "",
     "performance": {
       "ram_acceleration_cache": false,
       "multi_gpu": false,
       "torch_compile": false,
       "amp": false
+    },
+    "export_path": "{PROJECT_ROOT}/your_experiment/output/exports",
+    "export_files": {
+      "png": true,
+      "svg": true,
+      "data_pickle": false
+    },
+    "export_selections": {
+      "current_all": {
+        "layout": true,
+        "retinotopy": true,
+        "selectivity": true,
+        "other": true
+      },
+      "all_individual": {
+        "spike_train": true,
+        "receptive_field": true,
+        "elevation": true,
+        "azimuth": true,
+        "orientation_correlation": true,
+        "orientation_firing_rate": true,
+        "size_tuning": true,
+        "spatial_frequency": true,
+        "sta": true,
+        "run_model_amplitude": false,
+        "run_model_phase": false,
+        "run_model_drift": false,
+        "run_full_model_amplitude": false,
+        "run_full_model_phase": false,
+        "run_full_model_drift": false,
+        "other": true
+      }
+    },
+    "repeat_individual_export": false,
+    "guided_export": {
+      "all_neurons": false,
+      "individual_neurons": false
     }
   },
   "gabor_param": {
     "N_thetas": "12",
     "Sigmas": "[2, 4, 6, 8, 12, 16]",
     "Frequencies": "[0.0024, 0.0049, 0.0098, 0.0196, 0.0391, 0.0783, 0.1223, 0.1957]",
-    "Phases": "[0, 90]",
-    "Coarse Library Path": "{PROJECT_ROOT}/your_experiment/cache/gabor/coarse",
-    "Fine Library Path": "{PROJECT_ROOT}/your_experiment/cache/gabor/full"
+    "Phases": "[0, 90]"
   },
   "common": {
     "Project Root": "{PROJECT_ROOT}/your_experiment",
     "Experiment Info": "('CnL43', '2026-05-23', 3)",
     "Block End": "0",
-    "Train Trial Indices": "[0, 2]",
-    "Test Trial Indices": "auto",
-    "Use Last Minute Holdout": "False",
     "Visual Coverage": "[-69, 69, 56, -56]",
     "Analysis Coverage": "[-69, 69, 56, -56]",
-    "Sigmas Full Model": "[2, 3, 4, 6, 8, 12, 16]",
     "Dir": "{PROJECT_ROOT}/your_experiment/input/raw_data",
     "Movie Path": "{PROJECT_ROOT}/your_experiment/input/stimulus_movie",
     "Spks Path": "{PROJECT_ROOT}/your_experiment/input/neural_cache",
+    "Excluded Trial Numbers": "[]",
     "Path Directory": "{PROJECT_ROOT}/your_experiment/cache/wavelets/coarse",
     "Full Model Wavelet Path": "{PROJECT_ROOT}/your_experiment/cache/wavelets/full",
-    "Full Model Save Path": "{PROJECT_ROOT}/your_experiment/output/models",
     "Plot Cache Path": "{PROJECT_ROOT}/your_experiment/output/plots",
-    "Recovery Cache Directory": "{PROJECT_ROOT}/your_experiment/output/recovery_cache"
+    "Recovery Cache Directory": "{PROJECT_ROOT}/your_experiment/output/recovery_cache",
+    "Full Model Save Path": "{PROJECT_ROOT}/your_experiment/output/models",
+    "Sigmas Full Model": "[2, 3, 4, 6, 8, 12, 16]",
+    "Model Fit Minutes": "5",
+    "Train Trial Indices": "[0, 2]",
+    "Test Trial Indices": "auto",
+    "Use Last Minute Holdout": "False"
   },
-  "two_photon": {
-    "Resolution": "1.3671",
-    "Number of Planes": "1"
-  },
+  "two_photon": {},
   "ephys": {
-    "Sampling Rate (samples / sec)": "30000"
+    "Sampling Rate (samples / sec)": "30000",
+    "Photodiode Port": "3"
   }
 }

@@ -1,11 +1,16 @@
 # Cache storage and disk planning
 
-Waven treats durable arrays as caches with provenance. A cache is reused only
-when the movie, visual coverage, sampling grid, Gabor axes, and requested
-product agree with the current action. This prevents quietly mixing results
+WavEn caches reusable intermediate products. Stimulus-derived caches (the
+prepared movie, Gabor kernels, and wavelet products) can be reused when the
+raw neural data changes, provided the stimulus movie, coverage, sampling grid,
+Gabor settings, and requested product are unchanged. They cannot be reused
+with a different stimulus movie. Neural caches and completed analysis results
+belong to their raw neural data. These checks prevent quietly mixing results
 from different experiments or resolution settings.
 
-## Choose NPY or Zarr for user-selectable caches
+## Choosing NPY or Zarr for caches
+
+The GUI offers a zarr or npy option for some caches. Zarr is essentially superior for processing and disk compression, but npy could be better inspectable. Here is a complete breakdown:
 
 | Format | Best use | Benefits | Trade-off |
 | --- | --- | --- | --- |
@@ -16,14 +21,18 @@ The GUI offers this choice for the prepared stimulus cache and a freshly
 created neural cache. Its **Wavelet storage format** controls the durable Coarse
 RF correlation result when that result is written to disk. Convolutional power
 and real/imaginary phase products remain Zarr because their chunked layout is
-required for their workload. NPY and Zarr do **not** describe graph exports;
+required for their workload. 
+
+**NOTE:** NPY and Zarr do **not** describe graph exports;
 the Export tab writes PNG, SVG, and optional PKL only.
 
 For a large experiment, prefer Zarr. For a small, self-contained cache you want
 to open directly with NumPy, NPY is often simpler. Changing cache format does
-not change the scientific result.
+not change the scientific result, though the file size is **drastically** different.
 
 ## Cache products and consumers
+
+Here is an exhaustive list of all the caches to expect the program to create and use:
 
 | Product | Typical path | Type / shape | Created by | Consumed by |
 | --- | --- | --- | --- | --- |
@@ -37,15 +46,19 @@ not change the scientific result.
 | Plot cache | `output/plots/plot_cache.pkl.gz` | compressed plot state | Plot/cache actions | Faster restoration of compatible plots. |
 | Recovery cache | `output/recovery_cache/` | task checkpoints and completed tiles | Long task runner | Safe cancellation/restart. |
 
-Image arrays use `(y, x)` order; feature/RF arrays use `(x, y)` after the time
+**NOTE:** Image arrays use `(y, x)` order; feature/RF arrays use `(x, y)` after the time
 axis. This distinction is intentional: image rendering follows row/column
 order while the feature grid follows azimuth/elevation indexing.
 
-## Estimate disk before starting
+## GUI Estimations of Cache Size
 
-The GUI shows estimates for the selected product. The following uncompressed
-upper bounds explain why full-model products grow quickly. All feature products
-are float32, so multiply elements by **4 bytes**.
+The GUI shows **uncompressed** estimates for the selected product based on the params you specify. 
+The following uncompressed upper bounds explain why full-model products grow quickly. Additionally, these estimates better reflect the size of the npy file than zarr, since zarr is compressed. The actual Zarr footprint can
+be smaller because of compression, but it can also require temporary chunks and
+metadata. **Treat the GUI estimate as the planning baseline, not a guaranteed
+compressed size.**
+
+All feature products are float32, so multiply elements by **4 bytes** as shown below.
 
 ```text
 stimulus_bytes = frames × grid_y × grid_x × 1
@@ -61,12 +74,6 @@ full_model_phase_pair_bytes =
 rf_correlation_bytes =
     neurons × grid_x × grid_y × orientations × sigmas × frequencies × 4
 ```
-
-Here `orientations` is `N_thetas`, `sigmas` is the length of `Sigmas`, and
-`full_sigmas` is the merged full-model size list. The actual Zarr footprint can
-be smaller because of compression, but it can also require temporary chunks and
-metadata. Treat the GUI estimate as the planning baseline, not a guaranteed
-compressed size.
 
 ### Free-space recommendation
 
@@ -88,12 +95,15 @@ predictable chunk throughput.
 ## RAM and safe reuse
 
 The cache system limits peak RAM by reading arrays in chunks or through memory
-maps. It is normal for RAM to rise during a tile calculation, image render, or
-BLAS operation, but the complete wavelet tensor is not intentionally loaded as
-one RAM array. **32 GB RAM or more** is recommended for large sessions.
+maps, keeping total RAM usage under 16 GB most of the time, with occasional 32 GB
+spikes when exporting neuronal plots. It is normal for RAM to rise during a
+tile calculation, image render, or BLAS operation, but the complete wavelet tensor
+is not intentionally loaded as one RAM array.
 
-The optional **RAM acceleration cache** retains only safely sized, reused
+To reiterate, **32 GB RAM or more** is recommended for large sessions.
+
+Finally, the optional **RAM acceleration cache** speedup option retains only safely sized, reused
 model-phase and PSTH/STA inputs for later actions; preparation itself stays
 disk-backed and oversized arrays stay on disk. Disable it if another program
-needs memory. See [System Configuration](gui.md#system-configuration) for the
+needs memory. See [Session Configuration](gui.md#session-configuration) for the
 other optional speed controls.

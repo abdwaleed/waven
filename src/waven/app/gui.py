@@ -25,6 +25,8 @@ import gc
 import traceback
 import customtkinter as ctk
 
+from .components import apply_window_icon, create_stage_views, create_text_entry_row
+
 # --- DPI Awareness ---
 try:
     import ctypes
@@ -294,17 +296,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ("coarse_rf_frequency_mode", coarse_rf_frequency_mode_var),
             ("downsample_format", downsample_format_var),
             ("downsample_percent", downsample_percent_var),
+            ("export_path", export_path_var),
             ("filter_bank_cycles_per_sigma", filter_bank_cycles_per_sigma_var),
             ("filter_bank_density", filter_bank_density_var),
             ("filter_bank_maximum_cpd", filter_bank_maximum_cpd_var),
             ("filter_bank_minimum_cpd", filter_bank_minimum_cpd_var),
             ("force_2d_graphs", force_2d_graphs_var),
+            ("guided_export_all_neurons", guided_export_all_neurons_var),
+            ("guided_export_individual_neurons", guided_export_individual_neurons_var),
             ("maximum_spatial_frequency_cpd", maximum_spatial_frequency_cpd_var),
             ("neural_cache_format", neural_cache_format_var),
             ("neural_source", neural_source_var),
             ("neural_source_display", neural_source_display_var),
             ("prepare_full_model_cache", prepare_full_model_cache_var),
             ("prepare_run_model_cache", prepare_run_model_cache_var),
+            ("repeat_individual_export", repeat_individual_export_var),
             ("run_model_on_inspect", run_model_on_inspect_var),
             ("run_full_model_on_inspect", run_full_model_on_inspect_var),
             ("sampling_mode", sampling_mode_var),
@@ -1644,6 +1650,22 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Retain one independent PKL bundle per exported graph."""
         return "per_graph"
 
+    def _configured_export_root():
+        """Return the configured graph-export folder without opening a dialog."""
+        try:
+            value = _worker_var_value("export_path", export_path_var, "").strip()
+        except NameError:
+            value = ""
+        if value.lower() in {"", "none", "null"}:
+            value = str(_project_layout().output_dir / "exports")
+        return value
+
+    def _prepare_export_root():
+        """Create and return the configured graph-export folder when an export starts."""
+        export_root = _configured_export_root()
+        os.makedirs(export_root, exist_ok=True)
+        return export_root
+
     def _validate_export_file_selection():
         """Reject an export with no selected output products."""
         if any(_selected_export_files().values()):
@@ -1990,9 +2012,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             record: Input value for this operation.
         """
         title = record.get("title") or "plot"
-        export_dir = filedialog.askdirectory(title=f"Select Folder for Export {title}")
-        if not export_dir:
-            return
         if not _validate_export_file_selection():
             return
         try:
@@ -2006,8 +2025,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         def write_export():
             try:
-                export_root = export_dir
-                os.makedirs(export_root, exist_ok=True)
+                export_root = _prepare_export_root()
                 print(f"[EXPORT] Writing graph 1/1: '{title}'")
                 graph_dir = _export_figure_record(snapshot, export_root, index=1)
                 print(f"[EXPORT] Wrote graph 1/1: {graph_dir}")
@@ -2028,16 +2046,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         run_in_thread(write_export, f"Export {title}")()
 
-    def _export_records(records, export_label, dialog_title):
+    def _export_records(records, export_label, on_complete=None):
         """Export a prepared collection of complete current-display figures."""
         if not records:
             messagebox.showinfo("No Selected Graphs", "No displayed graphs match the selected export checkboxes.")
             print("No displayed graphs match the selected export checkboxes.")
             return
         if not _validate_export_file_selection():
-            return
-        selected_dir = filedialog.askdirectory(title=dialog_title)
-        if not selected_dir:
             return
         try:
             snapshots = _snapshot_export_records(records)
@@ -2051,7 +2066,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             f"[EXPORT] Queued {export_label} | graphs={len(snapshots)} | "
             + _describe_export_options(file_options, packaging)
         )
-        export_root = selected_dir
+        export_root = _configured_export_root()
         def write_export():
             exported = []
             failures = []
@@ -2088,6 +2103,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         )
                     else:
                         messagebox.showinfo("Export Complete", f"Exported {len(exported)} graph(s).\n\n{destination}")
+                    if on_complete is not None:
+                        on_complete()
                 schedule_on_ui(show_result)
                 return True
             except Exception as exc:
@@ -2101,7 +2118,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         run_in_thread(write_export, f"Export {export_label}")()
 
-    def _export_displayed_results(tab_name=None, selection_name=None):
+    def _export_displayed_results(tab_name=None, selection_name=None, on_complete=None):
         """Function for export displayed results.
 
         Args:
@@ -2115,12 +2132,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showinfo("No Results", f"No {label} results are available to export.")
             print(f"No {label} figures are available to export.")
             return
-        title = f"Select Folder for {tab_name} Export" if tab_name else "Select Folder for Displayed Result Export"
-        _export_records(records, tab_name or "displayed_results", title)
+        _export_records(records, tab_name or "displayed_results", on_complete=on_complete)
 
-    def export_all_neurons_results():
+    def export_all_neurons_results(on_complete=None):
         """Function for export all neurons results."""
-        _export_displayed_results("All neurons", "current_all")
+        _export_displayed_results("All neurons", "current_all", on_complete=on_complete)
 
     def _new_consolidated_numeric_bundle():
         """Create one fast numeric archive for an individual-neuron export."""
@@ -2459,7 +2475,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         )
         return exported
 
-    def export_all_individual_graph_types_results():
+    def export_all_individual_graph_types_results(on_complete=None):
         """Export selected one-graph files for every coarse-RF neuron."""
         rf_draw = individual_neuron_renderer.get("draw")
         rf_count = np.asarray(analysis_state.get("spks", np.empty((0, 0, 0)))).shape[-1] if rf_draw else 0
@@ -2488,10 +2504,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "Select 'Prepare Run Full Model Phase Caches' in Prepare Analysis Caches and create them first.",
             )
             return
-        selected_dir = filedialog.askdirectory(title="Select Folder for Single-Graph Export for Every Analyzed Neuron")
-        if not selected_dir:
-            return
-        export_root = selected_dir
+        export_root = _configured_export_root()
         os.makedirs(export_root, exist_ok=True)
         jobs = [("coarse_rf", rf_count, rf_draw, "Individual neuron")]
         sta_batch = individual_neuron_renderer.get("sta_batch") if "sta" in selected_kinds else None
@@ -2635,6 +2648,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         )
                     else:
                         messagebox.showinfo("Export Complete", f"Exported selected single-graph files.\n\n{destination}")
+                    if on_complete is not None:
+                        on_complete()
                 schedule_on_ui(show_delivery)
 
             threading.Thread(target=finish_delivery, daemon=True).start()
@@ -4240,7 +4255,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def embed_interactive_figure(fig, parent_container, title=None, tab_name=None):
         """Embed a matplotlib figure with navigation toolbar in ``parent_container``."""
         _ensure_plot_imports()
-        section = ctk.CTkFrame(parent_container, corner_radius=8, fg_color="#FFFFFF")
+        section = ctk.CTkFrame(parent_container, corner_radius=8, fg_color=frame_color)
         section.pack(side=tk.TOP, fill=tk.BOTH, expand=False, pady=8, padx=8)
         graph_title = title or _figure_title(fig)
         header = ctk.CTkFrame(section, fg_color="transparent")
@@ -4249,7 +4264,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ctk.CTkLabel(
                 header,
                 text=graph_title,
-                text_color="#1F2937",
+                text_color=text_color,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
             ).pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -4271,7 +4286,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         caption_label = ctk.CTkLabel(
             section,
             text=caption,
-            text_color="#6B7280",
+            text_color=muted_text,
             font=ctk.CTkFont(size=11),
             anchor="w",
         )
@@ -4293,8 +4308,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             width=150,
             height=28,
             corner_radius=6,
-            fg_color="#4B5563",
-            hover_color="#374151",
+            fg_color=secondary_btn,
+            hover_color=secondary_hover,
             command=lambda r=record: export_single_graph(r),
         ).pack(side=tk.RIGHT, padx=(10, 0))
         return canvas
@@ -4365,7 +4380,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ctk.CTkLabel(
                 parent,
                 text="No matplotlib figures were produced for this run.",
-                text_color="#6B7280",
+                text_color=muted_text,
             ).pack(anchor="w", padx=12, pady=12)
             return
         for index, fig in enumerate(figures, start=1):
@@ -6676,14 +6691,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showinfo("No Retinotopy Data", str(exc))
             print(f"Retinotopy export skipped: {exc}")
             return
-        path = filedialog.asksaveasfilename(
-            title="Export Retinotopy Matrix",
-            defaultextension=".npy",
-            filetypes=[("NumPy array", "*.npy"), ("Compressed NumPy archive", "*.npz")],
-            initialfile="retinotopy_matrix.npy",
-        )
-        if not path:
-            return
+        path = os.path.join(_prepare_export_root(), "retinotopy_matrix.npy")
         try:
             retinotopy = np.asarray(
                 state.get("rf_retinotopy", state.get("rfs_gabor", [None, None, None])[2])
@@ -6709,9 +6717,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showinfo("No Plots", "Run an analysis before exporting plots.")
             print("No embedded plots are available to export.")
             return
-        export_dir = filedialog.askdirectory(title="Select Folder for SVG Export")
-        if not export_dir:
-            return
+        export_dir = _prepare_export_root()
         exported = 0
         failures = []
         try:
@@ -6773,12 +6779,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "downsample_format": _selected_downsample_format(),
                 "neural_source": _selected_neural_source(),
                 "neural_cache_format": _selected_neural_cache_format(),
+                "prepare_run_model_cache": bool(prepare_run_model_cache_var.get()),
+                "prepare_full_model_cache": bool(prepare_full_model_cache_var.get()),
+                "force_2d_graphs": bool(force_2d_graphs_var.get()),
                 "run_model_on_inspect": bool(run_model_on_inspect_var.get()),
                 "run_full_model_on_inspect": bool(run_full_model_on_inspect_var.get()),
                 "performance": _runtime_control_values(),
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
                 "suite2p_output_dir": suite2p_output_dir_var.get().strip(),
+                "export_path": export_path_var.get().strip(),
                 "export_files": _selected_export_files(),
+                "export_selections": {
+                    selection: {
+                        kind: bool(variable.get())
+                        for kind, variable in variables.items()
+                    }
+                    for selection, variables in export_selection_vars.items()
+                },
+                "repeat_individual_export": bool(repeat_individual_export_var.get()),
+                "guided_export": {
+                    "all_neurons": bool(guided_export_all_neurons_var.get()),
+                    "individual_neurons": bool(guided_export_individual_neurons_var.get()),
+                },
             },
             "gabor_param": {key: entry.get() for key, entry in gabor_entries.items()},
             "common": common_values,
@@ -6882,6 +6904,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if neural_cache_format in {"npy", "zarr"}:
                 neural_cache_format_var.set(neural_cache_format)
             for state_key, variable in (
+                ("prepare_run_model_cache", prepare_run_model_cache_var),
+                ("prepare_full_model_cache", prepare_full_model_cache_var),
+                ("force_2d_graphs", force_2d_graphs_var),
                 ("run_model_on_inspect", run_model_on_inspect_var),
                 ("run_full_model_on_inspect", run_full_model_on_inspect_var),
             ):
@@ -6891,6 +6916,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             for key, variable in export_file_vars.items():
                 if key in export_file_options:
                     variable.set(_coerce_runtime_bool(export_file_options[key], bool(variable.get())))
+            export_selections = save_options.get("export_selections") or {}
+            for selection, values in export_selections.items():
+                for kind, value in dict(values or {}).items():
+                    variable = export_selection_vars.get(selection, {}).get(kind)
+                    if variable is not None:
+                        variable.set(_coerce_runtime_bool(value, bool(variable.get())))
+            if "repeat_individual_export" in save_options:
+                repeat_individual_export_var.set(
+                    _coerce_runtime_bool(
+                        save_options["repeat_individual_export"], bool(repeat_individual_export_var.get())
+                    )
+                )
+            if "export_path" in save_options:
+                export_path_var.set(str(save_options["export_path"]).strip())
+            guided_export = save_options.get("guided_export") or {}
+            for key, variable in (
+                ("all_neurons", guided_export_all_neurons_var),
+                ("individual_neurons", guided_export_individual_neurons_var),
+            ):
+                if key in guided_export:
+                    variable.set(_coerce_runtime_bool(guided_export[key], bool(variable.get())))
             _set_runtime_controls(save_options.get("performance") or {})
             suite2p_subject_dirs_var.set(
                 str(save_options.get("suite2p_subject_dirs", "")).strip()
@@ -7093,10 +7139,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 values=port_values,
                 height=30,
                 corner_radius=6,
-                fg_color="#E5E7EB",
-                button_color="#64748B",
-                button_hover_color="#475569",
+                fg_color=choice_bg,
+                button_color=secondary_btn,
+                button_hover_color=secondary_hover,
                 text_color=text_color,
+                dropdown_fg_color=frame_color,
+                dropdown_text_color=text_color,
+                dropdown_hover_color=choice_bg,
                 command=lambda _value, name=key: _on_config_entry_changed(name),
             )
             entry.set(default_port)
@@ -7142,8 +7191,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 width=82,
                 height=30,
                 corner_radius=6,
-                fg_color="#64748B",
-                hover_color="#475569",
+                fg_color=secondary_btn,
+                hover_color=secondary_hover,
                 command=refresh_photodiode_ports,
             ).grid(row=0, column=1, padx=(5, 0))
             ctk.CTkLabel(
@@ -7160,6 +7209,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             height=30,
             corner_radius=6,
             border_width=1,
+            fg_color=frame_color,
+            text_color=text_color,
+            placeholder_text_color=muted_text,
+            border_color="#CBD5E1",
             placeholder_text=hint,
         )
         entry.insert(0, default)
@@ -7179,8 +7232,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 width=34,
                 height=30,
                 corner_radius=6,
-                fg_color="#E5E7EB",
-                hover_color="#D1D5DB",
+                fg_color=choice_bg,
+                hover_color="#CBD5E1",
                 text_color=text_color,
                 command=lambda e=entry, k=browse_kind, name=key: browse_path(e, k, name),
             ).grid(row=0, column=1, padx=(5, 0))
@@ -7195,9 +7248,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return label_widget, entry_wrap
 
     # --- Root Window Setup & Theming ---
+    # The application is deliberately light-only. Several controls use a
+    # single text color, so following the operating-system appearance mode can
+    # otherwise produce unreadable light-on-light or dark-on-dark labels.
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
+    app_icon_path = None
     terminal_redirect = None
     root.after(25, _drain_ui_callbacks)
     keep_awake = KeepAwake("waven analysis GUI is open")
@@ -7239,16 +7296,51 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if icon_base64:
             app_icon = tk.PhotoImage(data=icon_base64)
             root.iconphoto(True, app_icon)
+            # Keep the PhotoImage alive for the complete window lifetime.
+            root._waven_app_icon = app_icon
+            # On Windows, iconphoto updates the title bar but is not reliably
+            # used by the taskbar. Build an ICO from the same hardcoded PNG and
+            # set iconbitmap too, so the launched app uses one icon everywhere.
+            if sys.platform.startswith("win"):
+                with tempfile.NamedTemporaryFile(prefix="waven-icon-", suffix=".ico", delete=False) as handle:
+                    app_icon_path = Path(handle.name)
+                with Image.open(io.BytesIO(base64.b64decode(icon_base64))) as icon_source:
+                    icon_image = icon_source.convert("RGBA")
+                try:
+                    icon_image.save(
+                        app_icon_path,
+                        format="ICO",
+                        sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+                    )
+                finally:
+                    icon_image.close()
+                root.iconbitmap(default=str(app_icon_path))
     except Exception as e:
         print(f"Failed to load custom icon: {e}")
     
-    bg_color = "#F3F6F8"
+    # A small semantic palette keeps actions legible: blue advances the normal
+    # workflow, slate is a secondary/action-neutral control, green starts a
+    # full run, and red is reserved for cancellation or destructive actions.
+    bg_color = "#F1F5F9"
     frame_color = "#FFFFFF"
-    text_color = "#1F2937"
+    text_color = "#172033"
+    muted_text = "#64748B"
+    inverse_text = "#FFFFFF"
     primary_btn = "#2563EB"
+    primary_hover = "#1D4ED8"
+    secondary_btn = "#475569"
+    secondary_hover = "#334155"
     success_btn = "#047857"
+    success_hover = "#065F46"
     danger_btn = "#DC2626"
-    muted_text = "#6B7280"
+    danger_hover = "#B91C1C"
+    # Choice controls retain dark text for both states.  A dark selected segment
+    # with one shared text color was the source of black-on-black labels.
+    choice_bg = "#DBEAFE"
+    choice_btn = "#BFDBFE"
+    choice_hover = "#93C5FD"
+    status_bg = "#EFF6FF"
+    status_text = "#1E3A8A"
     
     style = ttk.Style()
     style.theme_use("clam")
@@ -7258,15 +7350,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     
     style.configure(".", font=main_font, background=bg_color, foreground=text_color)
     style.configure("TFrame", background=frame_color)
-    style.configure("TLabelframe", background=frame_color, bordercolor="#E1DFDD", lightcolor="#FFFFFF", darkcolor="#E1DFDD")
-    style.configure("TLabelframe.Label", background=frame_color, font=bold_font, foreground="#0078D4")
+    style.configure("TLabel", background=frame_color, foreground=text_color)
+    style.configure("TEntry", fieldbackground=frame_color, foreground=text_color, insertcolor=text_color)
+    style.configure("TCombobox", fieldbackground=frame_color, background=choice_bg, foreground=text_color)
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", frame_color)],
+        foreground=[("readonly", text_color)],
+        selectbackground=[("readonly", choice_btn)],
+        selectforeground=[("readonly", text_color)],
+    )
+    style.configure("TCheckbutton", background=frame_color, foreground=text_color)
+    style.configure("TRadiobutton", background=frame_color, foreground=text_color)
+    style.configure("TLabelframe", background=frame_color, bordercolor="#CBD5E1", lightcolor="#FFFFFF", darkcolor="#CBD5E1")
+    style.configure("TLabelframe.Label", background=frame_color, font=bold_font, foreground="#1E3A8A")
     
-    style.configure("Primary.TButton", background=primary_btn, foreground="white", font=main_font, padding=(10, 6), borderwidth=0)
-    style.map("Primary.TButton", background=[("active", "#005A9E")])
-    style.configure("Success.TButton", background=success_btn, foreground="white", font=main_font, padding=(10, 6), borderwidth=0)
-    style.map("Success.TButton", background=[("active", "#0B5B2E")])
-    style.configure("Danger.TButton", background=danger_btn, foreground="white", font=main_font, padding=(10, 6), borderwidth=0)
-    style.map("Danger.TButton", background=[("active", "#A4262C")])
+    style.configure("Primary.TButton", background=primary_btn, foreground=inverse_text, font=main_font, padding=(10, 6), borderwidth=0)
+    style.map("Primary.TButton", background=[("active", primary_hover)], foreground=[("active", inverse_text)])
+    style.configure("Success.TButton", background=success_btn, foreground=inverse_text, font=main_font, padding=(10, 6), borderwidth=0)
+    style.map("Success.TButton", background=[("active", success_hover)], foreground=[("active", inverse_text)])
+    style.configure("Danger.TButton", background=danger_btn, foreground=inverse_text, font=main_font, padding=(10, 6), borderwidth=0)
+    style.map("Danger.TButton", background=[("active", danger_hover)], foreground=[("active", inverse_text)])
     style.configure("Browse.TButton", font=("Segoe UI Emoji", 10), padding=2)
 
     root.configure(fg_color=bg_color)
@@ -7303,8 +7407,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             pass
 
     # --- View Menu ---
-    menubar = tk.Menu(root)
-    view_menu = tk.Menu(menubar, tearoff=0)
+    menu_colors = {
+        "background": frame_color,
+        "foreground": text_color,
+        "activebackground": choice_btn,
+        "activeforeground": text_color,
+        "selectcolor": frame_color,
+    }
+    menubar = tk.Menu(root, **menu_colors)
+    view_menu = tk.Menu(menubar, tearoff=0, **menu_colors)
 
     terminal_visible = [True]
 
@@ -7431,7 +7542,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=26,
         corner_radius=6,
         fg_color=danger_btn,
-        hover_color="#A4262C",
+        hover_color=danger_hover,
         state=tk.DISABLED,
         command=request_cancel_current_task,
     )
@@ -7442,8 +7553,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         width=64,
         height=26,
         corner_radius=6,
-        fg_color="#374151",
-        hover_color="#111827",
+        fg_color=secondary_btn,
+        hover_color=secondary_hover,
         command=lambda: text_log.delete("1.0", tk.END),
     )
     btn_clear_terminal.pack(side=tk.RIGHT)
@@ -7453,6 +7564,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         frame_log, height=10, bg="#1E1E1E", fg="#CCCCCC",
         font=("Consolas", 10), yscrollcommand=log_scroll.set, relief="flat",
         wrap="word", borderwidth=0, highlightthickness=0,
+        insertbackground=inverse_text, selectbackground="#2563EB", selectforeground=inverse_text,
     )
     text_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=(0, 10))
     log_scroll.config(command=text_log.yview)
@@ -7507,11 +7619,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         container_right_top,
         corner_radius=8,
         fg_color=frame_color,
-        segmented_button_fg_color="#E5E7EB",
-        segmented_button_selected_color=primary_btn,
-        segmented_button_selected_hover_color="#1D4ED8",
-        segmented_button_unselected_color="#E5E7EB",
-        segmented_button_unselected_hover_color="#D1D5DB",
+        segmented_button_fg_color=choice_bg,
+        segmented_button_selected_color=choice_btn,
+        segmented_button_selected_hover_color=choice_hover,
+        segmented_button_unselected_color="#E2E8F0",
+        segmented_button_unselected_hover_color="#CBD5E1",
         text_color=text_color,
     )
     plot_tabs.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
@@ -7538,6 +7650,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_session.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10), padx=10)
 
     workflow_var = tk.StringVar(value=workflow)
+    configured_guided_export = dict(gui_options.get("guided_export") or {})
+    guided_export_all_neurons_var = tk.BooleanVar(
+        value=str(configured_guided_export.get("all_neurons", "")).strip().lower() in {"1", "true", "yes", "on"}
+    )
+    guided_export_individual_neurons_var = tk.BooleanVar(
+        value=str(configured_guided_export.get("individual_neurons", "")).strip().lower() in {"1", "true", "yes", "on"}
+    )
+    export_path_var = tk.StringVar(value=str(gui_options.get("export_path", "")).strip())
 
     def set_workflow_from_panel(value):
         """Function for set workflow from panel.
@@ -7568,7 +7688,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     workflow_frame.pack(fill=tk.X, pady=(0, 8))
     ctk.CTkLabel(
         workflow_frame,
-        text="Neural data type",
+        text="Neural data type — choose one",
         text_color=text_color,
         font=ctk.CTkFont(size=12, weight="bold"),
     ).pack(anchor="w", pady=(0, 4))
@@ -7580,12 +7700,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=28,
         corner_radius=6,
         border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
+        fg_color=choice_bg,
+        selected_color=choice_btn,
+        selected_hover_color=choice_hover,
+        unselected_color="#F8FAFC",
+        unselected_hover_color="#E2E8F0",
+        text_color=text_color,
         text_color_disabled="#9CA3AF",
     )
     workflow_segment.pack(fill=tk.X)
@@ -7601,12 +7721,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     action_buttons.pack(fill=tk.X, padx=10, pady=(0, 8))
     btn_load_state = ctk.CTkButton(
         action_buttons, text="Load pipeline_config.json", height=28,
-        fg_color=primary_btn, hover_color="#1D4ED8", command=load_app_state,
+        fg_color=primary_btn, hover_color=primary_hover, command=load_app_state,
     )
     btn_load_state.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
     btn_save_state = ctk.CTkButton(
         action_buttons, text="Save pipeline_config.json", height=28,
-        fg_color="#4B5563", hover_color="#374151", command=save_app_state,
+        fg_color=secondary_btn, hover_color=secondary_hover, command=save_app_state,
     )
     btn_save_state.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
@@ -7621,8 +7741,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.CTkLabel(
         automation_frame,
         text=(
-            "Runs stimulus downsampling, neural-cache preparation, Coarse RF cache preparation, "
-            "and Coarse RF analysis using the current configuration."
+            "Prepares the stimulus and neural caches, builds the Coarse RF cache, and runs Coarse RF analysis."
         ),
         text_color=muted_text,
         justify="left",
@@ -7633,10 +7752,32 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         text="Run Guided Coarse RF Pipeline",
         height=30,
         fg_color=success_btn,
-        hover_color="#065F46",
+        hover_color=success_hover,
         command=lambda: start_guided_pipeline(),
     )
     btn_run_guided_pipeline.pack(fill=tk.X, padx=10, pady=(0, 10))
+    ctk.CTkLabel(
+        automation_frame,
+        text="After analysis, also export:",
+        text_color=muted_text,
+        font=ctk.CTkFont(size=11, weight="bold"),
+    ).pack(anchor="w", padx=10, pady=(0, 2))
+    ctk.CTkCheckBox(
+        automation_frame,
+        text="All-neuron graphs selected in Export",
+        variable=guided_export_all_neurons_var,
+        onvalue=True,
+        offvalue=False,
+        text_color=text_color,
+    ).pack(anchor="w", padx=10, pady=2)
+    ctk.CTkCheckBox(
+        automation_frame,
+        text="Individual-neuron graphs selected in Export",
+        variable=guided_export_individual_neurons_var,
+        onvalue=True,
+        offvalue=False,
+        text_color=text_color,
+    ).pack(anchor="w", padx=10, pady=(2, 10))
 
     initial_neural_source = gui_options.get("neural_source", "data_dir")
     initial_coarse_frequency_mode = gui_options.get("coarse_rf_frequency_mode", "coupled")
@@ -7850,27 +7991,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         text_color=muted_text,
         wraplength=330,
         justify="left",
-    ).pack(fill=tk.X, pady=(8, 2))
+    ).pack(fill=tk.X, pady=(8, 2), after=automation_frame)
 
     runtime_toggle = ctk.CTkButton(
         frame_session,
-        text="Performance & Hardware (advanced)  Show",
+        text="Performance & Hardware  Show",
         height=28,
-        fg_color="#E2E8F0",
-        hover_color="#CBD5E1",
-        text_color="#334155",
+        fg_color=secondary_btn,
+        hover_color=secondary_hover,
+        text_color="#FFFFFF",
     )
-    runtime_toggle.pack(fill=tk.X, pady=(4, 4))
+    runtime_toggle.pack(fill=tk.X, pady=(0, 4), before=automation_frame)
     runtime_frame = ctk.CTkFrame(frame_session, fg_color="#F8FAFC", corner_radius=8)
 
     def toggle_runtime_controls():
         """Show detailed hardware settings only when the user needs them."""
         if runtime_frame.winfo_manager():
             runtime_frame.pack_forget()
-            runtime_toggle.configure(text="Performance & Hardware (advanced)  Show")
+            runtime_toggle.configure(text="Performance & Hardware  Show")
         else:
             runtime_frame.pack(fill=tk.X, pady=(0, 8), after=runtime_toggle)
-            runtime_toggle.configure(text="Performance & Hardware (advanced)  Hide")
+            runtime_toggle.configure(text="Performance & Hardware  Hide")
 
     runtime_toggle.configure(command=toggle_runtime_controls)
     ctk.CTkLabel(
@@ -7882,10 +8023,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.CTkLabel(
         runtime_frame,
         text=(
-            "Adaptive batch tuning, bounded input prefetch, asynchronous cache writes, "
-            "time-major coarse convolution, parallel Suite2p plane loading, and GPU Coarse RF "
-            "statistics are automatic. These remaining controls affect scheduling and resource "
-            "use only; they do not change analysis parameters or cache shapes."
+            "These optional controls affect speed and resource use only. They do not change the "
+            "stimulus, Gabor settings, or scientific results."
         ),
         text_color=muted_text,
         wraplength=310,
@@ -7934,9 +8073,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         text="Release RAM acceleration cache",
         command=_release_ram_cache_from_panel,
         height=26,
-        fg_color="#E2E8F0",
-        hover_color="#CBD5E1",
-        text_color="#334155",
+        fg_color=secondary_btn,
+        hover_color=secondary_hover,
+        text_color="#FFFFFF",
     ).pack(fill=tk.X, padx=10, pady=(4, 2))
     runtime_hardware_label = ctk.CTkLabel(
         runtime_frame,
@@ -7993,8 +8132,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         suite2p_dirs_frame,
         text="Apply Suite2p Folders",
         command=_apply_suite2p_subject_dirs,
-        fg_color="#64748B",
-        hover_color="#475569",
+        fg_color=secondary_btn,
+        hover_color=secondary_hover,
         height=26,
     ).pack(anchor="e", padx=10, pady=(0, 8))
     _apply_suite2p_subject_dirs()
@@ -8004,16 +8143,37 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=740,
         corner_radius=8,
         fg_color=frame_color,
-        segmented_button_selected_color=primary_btn,
-        segmented_button_selected_hover_color="#1D4ED8",
+        segmented_button_fg_color=choice_bg,
+        segmented_button_selected_color=choice_btn,
+        segmented_button_selected_hover_color=choice_hover,
+        segmented_button_unselected_color="#E2E8F0",
+        segmented_button_unselected_hover_color="#CBD5E1",
+        text_color=text_color,
     )
     stage_tabs.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-    stage_downsample = stage_tabs.add("1 Stimulus & Metadata")
+    stage_preparation = stage_tabs.add("1 Prepare Reusable Cache")
     stage_setup = stage_tabs.add("2 Session Setup")
-    stage_gabor = stage_tabs.add("3 Gabor")
-    stage_wavelet = stage_tabs.add("4 Wavelet Products")
-    stage_analysis = stage_tabs.add("5 Analysis")
-    stage_export = stage_tabs.add("6 Export")
+    stage_analysis = stage_tabs.add("3 Analysis")
+    stage_export = stage_tabs.add("4 Export")
+
+    # Preparation is deliberately its own compact group.  The required cache
+    # action is first, while the video and Gabor prerequisites remain a click
+    # away instead of appearing as one long undifferentiated form.
+    preparation_tabs = ctk.CTkTabview(
+        stage_preparation,
+        corner_radius=8,
+        fg_color="#F8FAFC",
+        segmented_button_fg_color=choice_bg,
+        segmented_button_selected_color=choice_btn,
+        segmented_button_selected_hover_color=choice_hover,
+        segmented_button_unselected_color="#E2E8F0",
+        segmented_button_unselected_hover_color="#CBD5E1",
+        text_color=text_color,
+    )
+    preparation_tabs.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+    stage_downsample = preparation_tabs.add("1 Downsample")
+    stage_gabor = preparation_tabs.add("2 Gabor Parameters")
+    stage_wavelet = preparation_tabs.add("3 Coarse RF Cache")
 
     # --- Gabor filter bank ---
     frame_gabor = ttk.LabelFrame(stage_gabor, text="Gabor Filter Bank", padding=15)
@@ -8028,15 +8188,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     filter_recommender.columnconfigure(0, weight=1)
     ctk.CTkLabel(
         filter_recommender,
-        text="Scientifically Calibrated Filter Bank",
+        text="Filter-bank relationship - choose one",
         text_color=text_color,
         font=ctk.CTkFont(size=13, weight="bold"),
     ).grid(row=0, column=0, sticky="w", padx=10, pady=(9, 2))
     ctk.CTkLabel(
         filter_recommender,
         text=(
-            "Choose physical frequencies first. WAVEN converts the generated cpd and degree values "
-            "to the calibrated analysis-pixel fields below."
+            "Set the frequency range in cycles per degree, then apply a recommendation to the editable filter fields below."
         ),
         text_color=muted_text,
         wraplength=420,
@@ -8048,10 +8207,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         variable=coarse_rf_frequency_mode_var,
         command=_on_coarse_rf_frequency_mode_changed,
         height=28,
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#E5E7EB",
-        unselected_hover_color="#D1D5DB",
+        fg_color=choice_bg,
+        selected_color=choice_btn,
+        selected_hover_color=choice_hover,
+        unselected_color="#F8FAFC",
+        unselected_hover_color="#E2E8F0",
         text_color=text_color,
     )
     filter_bank_mode_control.grid(row=2, column=0, sticky="ew", padx=10, pady=(8, 2))
@@ -8091,19 +8251,26 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         values=["Fast", "Standard", "Dense"],
         variable=filter_bank_density_var,
         height=28,
-        fg_color="#64748B",
-        button_color="#475569",
-        button_hover_color="#334155",
+        fg_color=secondary_btn,
+        button_color=secondary_hover,
+        button_hover_color=choice_hover,
+        text_color=inverse_text,
+        dropdown_fg_color=frame_color,
+        dropdown_text_color=text_color,
+        dropdown_hover_color=choice_bg,
     ).grid(row=1, column=3, sticky="ew")
 
     filter_bank_summary_label = ctk.CTkLabel(
         filter_recommender,
         text="Select a stimulus in Step 1, then recommend a physical filter bank.",
-        text_color=muted_text,
+        text_color=status_text,
+        fg_color=status_bg,
+        corner_radius=6,
         wraplength=420,
         justify="left",
+        anchor="w",
     )
-    filter_bank_summary_label.grid(row=5, column=0, sticky="w", padx=10, pady=(4, 2))
+    filter_bank_summary_label.grid(row=5, column=0, sticky="ew", padx=10, pady=(4, 2), ipadx=8, ipady=6)
 
     def _format_filter_bank_values(values):
         """Format a compact human-readable numeric list for the recommender."""
@@ -8171,7 +8338,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         command=_recommend_filter_bank,
         height=30,
         fg_color=primary_btn,
-        hover_color="#1D4ED8",
+        hover_color=primary_hover,
     ).grid(row=6, column=0, sticky="ew", padx=10, pady=(8, 10))
 
     gabor_input_start_row = 4
@@ -8188,14 +8355,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     gabor_dimensions_label = ctk.CTkLabel(
         frame_gabor,
         text="Stimulus grid: select a movie in Step 1",
-        text_color=muted_text,
+        text_color=status_text,
+        fg_color=status_bg,
+        corner_radius=6,
+        anchor="w",
+        justify="left",
+        wraplength=420,
     )
     gabor_dimensions_label.grid(
         row=gabor_input_start_row + len(editable_gabor_params),
         column=0,
         columnspan=2,
-        sticky="w",
+        sticky="ew",
         pady=(6, 0),
+        ipadx=8,
+        ipady=6,
     )
 
     btn_submit_gabor = ctk.CTkButton(
@@ -8204,7 +8378,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
-        hover_color="#1D4ED8",
+        hover_color=primary_hover,
         command=run_in_thread(create_both_gabor_libraries, "Gabor asset preparation"),
     )
     btn_submit_gabor.grid(
@@ -8216,7 +8390,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
 
     # --- Stimulus wavelet pipeline ---
-    frame_processing = ttk.LabelFrame(stage_wavelet, text="Stimulus Wavelet Pipeline", padding=15)
+    frame_processing = ttk.LabelFrame(stage_wavelet, text="Coarse RF Cache", padding=15)
     frame_processing.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
     initial_wavelet_format = gui_options.get("wavelet_format", "zarr")
@@ -8252,7 +8426,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
-        hover_color="#1D4ED8",
+        hover_color=primary_hover,
         command=_start_prepare_analysis_caches,
     )
     btn_submit_wavelet.pack(fill=tk.X, pady=3)
@@ -8284,7 +8458,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     format_frame_wavelet = ctk.CTkFrame(frame_processing, fg_color="transparent")
     format_frame_wavelet.pack(anchor="w", pady=(10, 0))
-    ctk.CTkLabel(format_frame_wavelet, text="Wavelet storage format:", text_color=muted_text).pack(side=tk.LEFT)
+    ctk.CTkLabel(format_frame_wavelet, text="RF result storage — choose one:", text_color=muted_text).pack(side=tk.LEFT)
 
     def _set_wavelet_format(val):
         """Function for set wavelet format.
@@ -8308,12 +8482,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=26,
         corner_radius=6,
         border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
+        fg_color=choice_bg,
+        selected_color=choice_btn,
+        selected_hover_color=choice_hover,
+        unselected_color="#F8FAFC",
+        unselected_hover_color="#E2E8F0",
+        text_color=text_color,
         text_color_disabled="#9CA3AF",
     )
     wavelet_format_segment.pack(side=tk.LEFT, padx=(10, 0))
@@ -8333,14 +8507,17 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     except Exception:
         pass
 
-    wavelet_size_label = ttk.Label(
+    wavelet_size_label = ctk.CTkLabel(
         frame_processing,
-        text="Wavelet disk size: enter valid dimensions to calculate",
-        font=main_font,
-        background=frame_color,
-        foreground=text_color,
+        text="Estimate: enter a valid movie and filter bank to calculate cache size.",
+        text_color=status_text,
+        fg_color=status_bg,
+        corner_radius=6,
+        justify="left",
+        wraplength=420,
+        anchor="w",
     )
-    wavelet_size_label.pack(anchor="w", pady=(6, 0))
+    wavelet_size_label.pack(fill=tk.X, pady=(6, 0), ipadx=8, ipady=6)
 
     ttk.Separator(frame_processing, orient="horizontal").pack(fill=tk.X, pady=8)
 
@@ -8359,7 +8536,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     model_settings_hint = None
     PARAMETER_GROUPS = {
         "Data Input": [
-            "Project Root",
             "Experiment Info",
         ],
         "Acquisition & Timing": [
@@ -8368,10 +8544,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "Photodiode Port",
             "Block End",
         ],
-        "Spatial & Wavelet": [
+        "Imaging": [
             "Resolution",
-            "Visual Coverage",
-            "Analysis Coverage",
         ],
     }
 
@@ -8383,10 +8557,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             loaded_values: Input value for this operation.
         """
         external_param_keys = {
-            "Neuron ID", "Dir", "Spks Path", "Movie Path", "Path Directory",
+            "Neuron ID", "Project Root", "Dir", "Spks Path", "Movie Path", "Path Directory",
             "Full Model Wavelet Path", "Full Model Save Path", "Plot Cache Path",
             "Recovery Cache Directory", "Sigmas Full Model", "Excluded Trial Numbers", "Train Trial Indices",
-            "Test Trial Indices", "Use Last Minute Holdout", "Model Fit Minutes",
+            "Test Trial Indices", "Use Last Minute Holdout", "Model Fit Minutes", "Visual Coverage",
+            "Analysis Coverage",
         }
         existing_values = {}
         if preserve_values:
@@ -8426,8 +8601,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         param_defaults.get("Recovery Cache Directory", ""),
         param_entries, 0, frame_color, ANALYSIS_LABELS,
     )
-    wavelet_paths_frame = ttk.LabelFrame(frame_processing, text="Wavelet Cache Folders", padding=(10, 8))
-    wavelet_paths_frame.pack(fill=tk.X, pady=(8, 0))
+    add_config_row(
+        recovery_frame, "Project Root",
+        param_defaults.get("Project Root", DEFAULT_COMMON_PARAMS.get("Project Root", "")),
+        param_entries, 1, frame_color, ANALYSIS_LABELS,
+    )
+    wavelet_paths_frame = ttk.LabelFrame(frame_processing, text="Cache folders", padding=(10, 8))
+    wavelet_paths_frame.pack(fill=tk.X, pady=(0, 8), before=btn_submit_wavelet)
     wavelet_paths_frame.columnconfigure(1, weight=1)
     coarse_wavelet_path_row = add_config_row(
         wavelet_paths_frame, "Path Directory", param_defaults.get("Path Directory", ""),
@@ -8449,7 +8629,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     neural_source_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
     ctk.CTkLabel(
         neural_source_frame,
-        text="Neural cache source",
+        text="Neural cache source — choose one",
         text_color=muted_text,
     ).pack(side=tk.LEFT)
 
@@ -8493,12 +8673,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=26,
         corner_radius=6,
         border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
+        fg_color=choice_bg,
+        selected_color=choice_btn,
+        selected_hover_color=choice_hover,
+        unselected_color="#F8FAFC",
+        unselected_hover_color="#E2E8F0",
+        text_color=text_color,
         text_color_disabled="#9CA3AF",
     )
     neural_source_segment.pack(side=tk.LEFT, padx=(10, 0))
@@ -8538,7 +8718,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     neural_cache_format_frame.grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
     ctk.CTkLabel(
         neural_cache_format_frame,
-        text="Create as:",
+        text="Cache format — choose one:",
         text_color=muted_text,
     ).pack(side=tk.LEFT)
 
@@ -8549,12 +8729,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=26,
         corner_radius=6,
         border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
+        fg_color=choice_bg,
+        selected_color=choice_btn,
+        selected_hover_color=choice_hover,
+        unselected_color="#F8FAFC",
+        unselected_hover_color="#E2E8F0",
+        text_color=text_color,
         text_color_disabled="#9CA3AF",
     )
     neural_cache_format_segment.pack(side=tk.LEFT, padx=(10, 0))
@@ -8573,7 +8753,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
-        hover_color="#1D4ED8",
+        hover_color=primary_hover,
         command=run_in_thread(create_neural_cache, "Neural cache creation"),
     )
     btn_create_neural_cache.grid(row=6, column=0, columnspan=2, pady=(12, 0), sticky="ew")
@@ -8589,38 +8769,51 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         param_entries, 0, frame_color, ANALYSIS_LABELS,
     )
 
+    coverage_frame = ttk.LabelFrame(frame_downsample, text="Visual field and analysis field", padding=(10, 8))
+    coverage_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    coverage_frame.columnconfigure(1, weight=1)
+    add_config_row(
+        coverage_frame, "Visual Coverage", param_defaults.get("Visual Coverage", ""),
+        param_entries, 0, frame_color, ANALYSIS_LABELS,
+    )
+    add_config_row(
+        coverage_frame, "Analysis Coverage", param_defaults.get("Analysis Coverage", ""),
+        param_entries, 1, frame_color, ANALYSIS_LABELS,
+    )
+
     ctk.CTkLabel(
         frame_downsample,
-        text="1. Choose scientifically meaningful analysis sampling",
+        text="Analysis sampling - choose one",
         text_color=text_color,
         font=ctk.CTkFont(size=13, weight="bold"),
-    ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 2))
+    ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 2))
     ctk.CTkLabel(
         frame_downsample,
         text=(
-            "Target degrees/pixel and retained cpd use the current Analysis Coverage to make "
-            "analysis pixels square in visual angle. Percentage is retained for compatibility."
+            "Choose the analysis resolution. The coverage above defines the visual crop; analysis "
+            "pixels remain square in visual angle."
         ),
         text_color=muted_text,
         wraplength=420,
         justify="left",
-    ).grid(row=2, column=0, columnspan=2, sticky="w")
+    ).grid(row=3, column=0, columnspan=2, sticky="w")
 
     sampling_mode_control = ctk.CTkSegmentedButton(
         frame_downsample,
         values=["Target degrees/pixel", "Retain up to cpd", "Compatibility percent"],
         variable=sampling_mode_var,
         height=28,
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#E5E7EB",
-        unselected_hover_color="#D1D5DB",
+        fg_color=choice_bg,
+        selected_color=choice_btn,
+        selected_hover_color=choice_hover,
+        unselected_color="#F8FAFC",
+        unselected_hover_color="#E2E8F0",
         text_color=text_color,
     )
-    sampling_mode_control.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 2))
+    sampling_mode_control.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 2))
 
     sampling_target_frame = ctk.CTkFrame(frame_downsample, fg_color="transparent")
-    sampling_target_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+    sampling_target_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
     sampling_target_frame.columnconfigure(1, weight=1)
     sampling_target_label = ctk.CTkLabel(
         sampling_target_frame, text="Target analysis sampling (deg/pixel):", text_color=text_color
@@ -8631,7 +8824,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     sampling_target_entry.grid(row=0, column=1, sticky="ew", padx=(8, 8))
     sampling_apply_button = ctk.CTkButton(
-        sampling_target_frame, text="Apply sampling", height=28, fg_color="#64748B", hover_color="#475569"
+        sampling_target_frame, text="Apply sampling", height=28, fg_color=secondary_btn, hover_color=secondary_hover
     )
     sampling_apply_button.grid(row=0, column=2, sticky="e")
 
@@ -8652,11 +8845,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     sampling_status_label = ctk.CTkLabel(
         frame_downsample,
         text="Select a valid movie and Analysis Coverage to calculate the calibrated grid.",
-        text_color=muted_text,
+        text_color=status_text,
+        fg_color=status_bg,
+        corner_radius=6,
         wraplength=420,
         justify="left",
+        anchor="w",
     )
-    sampling_status_label.grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 2))
+    sampling_status_label.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(6, 2), ipadx=8, ipady=6)
 
     def _sampling_coverage():
         """Return the currently configured analysis coverage for sampling planning."""
@@ -8683,7 +8879,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     f"Nyquist: {plan.nyquist_cpd:.3g} cpd | "
                     f"compatibility sampling: {plan.horizontal_percent:.1f}% horizontally"
                 ),
-                text_color=muted_text,
+                text_color=status_text,
             )
         except Exception as exc:
             sampling_status_label.configure(
@@ -8691,7 +8887,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     "Select a valid movie and Analysis Coverage to calculate the calibrated grid. "
                     f"({exc})"
                 ),
-                text_color=muted_text,
+                text_color="#B45309",
             )
 
     def _apply_sampling_choice():
@@ -8730,14 +8926,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             downsample_percent_frame.grid_remove()
         elif mode == "Compatibility percent":
             sampling_target_frame.grid_remove()
-            downsample_percent_frame.grid(row=5, column=0, columnspan=2, sticky="ew")
+            downsample_percent_frame.grid(row=6, column=0, columnspan=2, sticky="ew")
             _refresh_sampling_status()
             return
         else:
             sampling_target_label.configure(text="Target analysis sampling (deg/pixel):")
             sampling_target_entry.configure(textvariable=target_degrees_per_pixel_var)
             downsample_percent_frame.grid_remove()
-        sampling_target_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        sampling_target_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         _refresh_sampling_status()
 
     def _refresh_downsample_controls(_value=None):
@@ -8758,10 +8954,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     downsample_slider.configure(command=_refresh_downsample_controls)
 
     downsample_format_frame = ctk.CTkFrame(frame_downsample, fg_color="transparent")
-    downsample_format_frame.grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    downsample_format_frame.grid(row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
     ctk.CTkLabel(
         downsample_format_frame,
-        text="Cache array format:",
+        text="Stimulus-cache format — choose one:",
         text_color=text_color,
         font=ctk.CTkFont(size=12, weight="bold"),
     ).pack(side=tk.LEFT)
@@ -8773,12 +8969,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=26,
         corner_radius=6,
         border_width=1,
-        fg_color="#E5E7EB",
-        selected_color=primary_btn,
-        selected_hover_color="#1D4ED8",
-        unselected_color="#F3F4F6",
-        unselected_hover_color="#E5E7EB",
-        text_color="#FFFFFF",
+        fg_color=choice_bg,
+        selected_color=choice_btn,
+        selected_hover_color=choice_hover,
+        unselected_color="#F8FAFC",
+        unselected_hover_color="#E2E8F0",
+        text_color=text_color,
         text_color_disabled="#9CA3AF",
     )
     downsample_format_segment.pack(side=tk.LEFT, padx=(10, 0))
@@ -8792,7 +8988,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         text_color=muted_text,
         wraplength=430,
         justify="left",
-    ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(3, 0))
+    ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(3, 0))
 
     btn_downsample_video = ctk.CTkButton(
         frame_downsample,
@@ -8800,10 +8996,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
-        hover_color="#1D4ED8",
+        hover_color=primary_hover,
         command=run_in_thread(create_downsampled_video_cache, "Stimulus video downsampling"),
     )
-    btn_downsample_video.grid(row=9, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    btn_downsample_video.grid(row=10, column=0, columnspan=2, pady=(12, 0), sticky="ew")
     _refresh_sampling_mode()
     _refresh_downsample_controls()
 
@@ -8811,7 +9007,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_analysis = ttk.LabelFrame(stage_analysis, text="Neural & RF Analysis", padding=15)
     frame_analysis.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-    force_2d_graphs_var = tk.BooleanVar(value=False)
+    force_2d_graphs_var = tk.BooleanVar(
+        value=_coerce_runtime_bool(gui_options.get("force_2d_graphs"), False)
+    )
 
     coarse_rf_controls = ctk.CTkFrame(frame_analysis, fg_color="transparent")
     coarse_rf_controls.pack(fill=tk.X, pady=(0, 10))
@@ -8821,7 +9019,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=34,
         corner_radius=6,
         fg_color=success_btn,
-        hover_color="#065F46",
+        hover_color=success_hover,
         command=run_in_thread(plot_data, "Coarse receptive-field analysis"),
     )
     btn_submit_plot.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -8834,7 +9032,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         checkbox_height=18,
     ).pack(side=tk.RIGHT, padx=(12, 0))
 
-    def _run_guided_pipeline():
+    def _run_guided_pipeline(export_all_neurons=False, export_individual_neurons=False):
         """Run the required Coarse RF stages in dependency order."""
         steps = (
             ("Stimulus cache", create_downsampled_video_cache),
@@ -8853,16 +9051,49 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if result is False:
                 raise RuntimeError(f"Guided pipeline stopped during {label}.")
         update_progress(100, "Guided Coarse RF pipeline", "Coarse RF results are ready")
+        if export_all_neurons or export_individual_neurons:
+            schedule_on_ui(
+                lambda: _queue_guided_exports(
+                    export_all_neurons=export_all_neurons,
+                    export_individual_neurons=export_individual_neurons,
+                )
+            )
         return True
+
+    def _queue_guided_exports(export_all_neurons=False, export_individual_neurons=False):
+        """Start the chosen exports after the guided analysis has returned control to Tk."""
+        def export_individual():
+            if not export_individual_neurons:
+                return
+            if repeat_individual_export_var.get():
+                export_all_individual_graph_types_results()
+            else:
+                export_individual_neuron_section()
+
+        def start_exports():
+            if export_all_neurons:
+                export_all_neurons_results(on_complete=export_individual)
+            else:
+                export_individual()
+
+        # ``plot_data`` queues figure embedding on the Tk loop.  Deferring one
+        # turn guarantees that export snapshots see those newly-rendered figures
+        # and that the preceding guided task has released its busy state.
+        root.after(100, start_exports)
 
     def start_guided_pipeline():
         """Capture current settings and start the guided pipeline in one worker."""
-        run_in_thread(_run_guided_pipeline, "Guided Coarse RF pipeline")()
+        export_all_neurons = bool(guided_export_all_neurons_var.get())
+        export_individual_neurons = bool(guided_export_individual_neurons_var.get())
+        run_in_thread(
+            lambda: _run_guided_pipeline(export_all_neurons, export_individual_neurons),
+            "Guided Coarse RF pipeline",
+        )()
 
     ttk.Separator(frame_analysis, orient="horizontal").pack(fill=tk.X, pady=8)
 
-    plot_cache_frame = ttk.LabelFrame(frame_analysis, text="Analysis Plot Cache", padding=(10, 8))
-    plot_cache_frame.pack(fill=tk.X, pady=(0, 10))
+    plot_cache_frame = ttk.LabelFrame(frame_analysis, text="Analysis results folder", padding=(10, 8))
+    plot_cache_frame.pack(fill=tk.X, pady=(0, 10), before=coarse_rf_controls)
     plot_cache_frame.columnconfigure(1, weight=1)
     add_config_row(
         plot_cache_frame,
@@ -8880,17 +9111,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ctk.CTkLabel(
         model_settings_frame,
         text=(
-            "These settings control the selected neuron's automatic Run Model fit and optional Run Full Model fit. "
-            "Full-model filter sizes change the Full Model cache; trial settings only change fitting/evaluation."
+            "Optional settings for model tuning after Coarse RF. Each field is explained below; leave the "
+            "trial lists as 'auto' unless you need a specific split."
         ),
         text_color=muted_text,
         justify="left",
         wraplength=680,
     ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+    model_setting_notes = {
+        "Full Model Save Path": "Folder for full-model fit files. It does not change the cache.",
+        "Sigmas Full Model": "Filter sizes tested by Run Full Model. Changing this requires rebuilding its phase cache.",
+        "Model Fit Minutes": "How many stimulus minutes each model uses for fitting.",
+        "Train Trial Indices": "Trials used to fit the model. Use 'auto' to choose alternating trials.",
+        "Test Trial Indices": "Held-out trials used to evaluate the fit. Use 'auto' for the remaining trials.",
+        "Use Last Minute Holdout": "When True, reserve the last stimulus minute for evaluation instead of fitting.",
+    }
     for row, key in enumerate(
         (
-            "Sigmas Full Model",
             "Full Model Save Path",
+            "Sigmas Full Model",
             "Model Fit Minutes",
             "Train Trial Indices",
             "Test Trial Indices",
@@ -8902,17 +9141,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             model_settings_frame, key, param_defaults.get(key, ""), param_entries,
             row, frame_color, ANALYSIS_LABELS,
         )
+        ctk.CTkLabel(
+            model_settings_frame,
+            text=model_setting_notes[key],
+            text_color=muted_text,
+            font=ctk.CTkFont(size=10),
+            justify="left",
+            wraplength=300,
+        ).grid(row=row, column=2, sticky="w", padx=(10, 0))
     model_settings_hint = ctk.CTkLabel(
         model_settings_frame,
         text=(
             "Trial count will be checked after Coarse RF loads the neural cache. "
             "Use zero-based trial indices; 'auto' alternates train trials and holds out the rest."
         ),
-        text_color=muted_text,
+        text_color=status_text,
+        fg_color=status_bg,
+        corner_radius=6,
         justify="left",
         wraplength=680,
+        anchor="w",
     )
-    model_settings_hint.grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
+    model_settings_hint.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(6, 0), ipadx=8, ipady=6)
     for key in ("Model Fit Minutes", "Train Trial Indices", "Test Trial Indices", "Use Last Minute Holdout"):
         param_entries[key].bind("<KeyRelease>", _refresh_model_settings_hint)
         param_entries[key].bind("<FocusOut>", _refresh_model_settings_hint)
@@ -8940,12 +9190,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         height=34,
         corner_radius=6,
         fg_color=primary_btn,
-        hover_color="#1D4ED8",
+        hover_color=primary_hover,
     )
     btn_runRF.pack(fill=tk.X)
 
-    run_model_on_inspect_var = tk.BooleanVar(value=False)
-    run_full_model_on_inspect_var = tk.BooleanVar(value=False)
+    run_model_on_inspect_var = tk.BooleanVar(
+        value=_coerce_runtime_bool(gui_options.get("run_model_on_inspect"), False)
+    )
+    run_full_model_on_inspect_var = tk.BooleanVar(
+        value=_coerce_runtime_bool(gui_options.get("run_full_model_on_inspect"), False)
+    )
     inspect_model_options = ctk.CTkFrame(frame_analysis, fg_color="transparent")
     inspect_model_options.pack(fill=tk.X, pady=(6, 0))
     ctk.CTkCheckBox(
@@ -8985,7 +9239,44 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     frame_export = ttk.LabelFrame(stage_export, text="Export", padding=15)
     frame_export.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
+    if not export_path_var.get().strip():
+        export_path_var.set(str(_project_layout().output_dir / "exports"))
+    export_path_frame = ttk.LabelFrame(frame_export, text="Export folder", padding=(10, 8))
+    export_path_frame.pack(fill=tk.X, pady=(0, 10))
+    export_path_frame.columnconfigure(0, weight=1)
+    ctk.CTkLabel(
+        export_path_frame,
+        text="All graph exports use this folder. Change it here instead of choosing a location for each export.",
+        text_color=muted_text,
+        wraplength=650,
+        justify="left",
+    ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 5))
+    export_path_entry = ctk.CTkEntry(
+        export_path_frame,
+        textvariable=export_path_var,
+        height=30,
+        placeholder_text="Folder for exported graphs",
+    )
+    export_path_entry.grid(row=1, column=0, sticky="ew")
+
+    def choose_export_path():
+        """Let the user set the persistent export folder outside an export action."""
+        selected = filedialog.askdirectory(title="Choose Export Folder")
+        if selected:
+            export_path_var.set(selected)
+
+    ctk.CTkButton(
+        export_path_frame,
+        text="Browse",
+        width=78,
+        height=30,
+        fg_color=secondary_btn,
+        hover_color=secondary_hover,
+        command=choose_export_path,
+    ).grid(row=1, column=1, padx=(6, 0))
+
     configured_export_files = dict(gui_options.get("export_files") or {})
+    configured_export_selections = dict(gui_options.get("export_selections") or {})
     ctk.CTkLabel(
         frame_export, text="File formats", text_color=text_color,
         font=ctk.CTkFont(size=13, weight="bold"),
@@ -9026,7 +9317,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         variables = export_selection_vars[selection_name]
         for index, (kind, label) in enumerate(options):
             is_model_tuning = kind in model_tuning_export_kinds
-            variable = tk.BooleanVar(value=not is_model_tuning)
+            saved_value = configured_export_selections.get(selection_name, {}).get(kind)
+            variable = tk.BooleanVar(
+                value=(
+                    _coerce_runtime_bool(saved_value, not is_model_tuning)
+                    if saved_value is not None
+                    else not is_model_tuning
+                )
+            )
             variables[kind] = variable
             checkbox = ctk.CTkCheckBox(
                 options_frame,
@@ -9057,11 +9355,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         ctk.CTkButton(
             actions, text="Select all", width=86, height=24, corner_radius=5,
+            fg_color=secondary_btn, hover_color=secondary_hover,
             command=select_available,
         ).pack(side=tk.LEFT)
         ctk.CTkButton(
             actions, text="Clear all", width=86, height=24, corner_radius=5,
-            fg_color="#6B7280", hover_color="#4B5563",
+            fg_color=secondary_btn, hover_color=secondary_hover,
             command=lambda: [variable.set(False) for variable in variables.values()],
         ).pack(side=tk.LEFT, padx=(6, 0))
 
@@ -9078,8 +9377,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     btn_export_all_neurons = ctk.CTkButton(
         frame_export,
         text="Export All-Neuron Graphs",
-        fg_color="#0891B2",
-        hover_color="#0E7490",
+        fg_color=primary_btn,
+        hover_color=primary_hover,
         command=export_all_neurons_results,
     )
     btn_export_all_neurons.pack(fill=tk.X, pady=3)
@@ -9099,7 +9398,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         frame_export, "Individual graph types", "all_individual",
         SINGLE_NEURON_GRAPH_OPTIONS,
     )
-    repeat_individual_export_var = tk.BooleanVar(value=False)
+    repeat_individual_export_var = tk.BooleanVar(
+        value=_coerce_runtime_bool(gui_options.get("repeat_individual_export"), False)
+    )
     ctk.CTkCheckBox(
         frame_export,
         text="Repeat these selections for every analyzed neuron",
@@ -9121,9 +9422,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return
         if not _validate_export_file_selection():
             return
-        selected_dir = filedialog.askdirectory(title="Select Folder for Individual-Neuron Export")
-        if not selected_dir:
-            return
         try:
             snapshots = _snapshot_export_records(records)
         except Exception as exc:
@@ -9131,6 +9429,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return
 
         def write_export():
+            selected_dir = _prepare_export_root()
             exported = _export_individual_axes(
                 snapshots, selected_dir, selected_kinds, file_options=_selected_export_files(),
             )
@@ -9145,8 +9444,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     btn_export_all_individual_graph_types = ctk.CTkButton(
         frame_export,
         text="Export Individual-Neuron Graphs",
-        fg_color="#0F766E",
-        hover_color="#115E59",
+        fg_color=primary_btn,
+        hover_color=primary_hover,
         command=export_individual_neuron_section,
     )
     btn_export_all_individual_graph_types.pack(fill=tk.X, pady=3)
@@ -9204,3 +9503,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if sys.stderr is terminal_redirect:
             sys.stderr = original_stderr
         keep_awake.stop()
+        if app_icon_path is not None:
+            try:
+                app_icon_path.unlink(missing_ok=True)
+            except OSError:
+                pass
