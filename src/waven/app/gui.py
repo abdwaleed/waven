@@ -2078,7 +2078,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         run_in_thread(write_export, f"Export {title}")()
 
-    def _export_records(records, export_label, on_complete=None):
+    def _export_records(records, export_label, on_complete=None, show_completion=True):
         """Export a prepared collection of complete current-display figures."""
         if not records:
             messagebox.showinfo("No Selected Graphs", "No displayed graphs match the selected export checkboxes.")
@@ -2127,6 +2127,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 destination = _package_export_root(export_root, packaging)
                 print(f"[DONE] Exported {len(exported)} displayed graph(s) with reusable data to: {destination}")
                 def show_result():
+                    if on_complete is not None:
+                        on_complete()
+                    if not show_completion:
+                        return
                     if failures:
                         messagebox.showwarning(
                             "Export Completed with Skips",
@@ -2135,8 +2139,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         )
                     else:
                         messagebox.showinfo("Export Complete", f"Exported {len(exported)} graph(s).\n\n{destination}")
-                    if on_complete is not None:
-                        on_complete()
                 schedule_on_ui(show_result)
                 return True
             except Exception as exc:
@@ -2150,7 +2152,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         run_in_thread(write_export, f"Export {export_label}")()
 
-    def _export_displayed_results(tab_name=None, selection_name=None, on_complete=None):
+    def _export_displayed_results(
+        tab_name=None, selection_name=None, on_complete=None, show_completion=True,
+    ):
         """Function for export displayed results.
 
         Args:
@@ -2164,11 +2168,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showinfo("No Results", f"No {label} results are available to export.")
             print(f"No {label} figures are available to export.")
             return
-        _export_records(records, tab_name or "displayed_results", on_complete=on_complete)
+        _export_records(
+            records,
+            tab_name or "displayed_results",
+            on_complete=on_complete,
+            show_completion=show_completion,
+        )
 
-    def export_all_neurons_results(on_complete=None):
+    def export_all_neurons_results(on_complete=None, show_completion=True):
         """Function for export all neurons results."""
-        _export_displayed_results("All neurons", "current_all", on_complete=on_complete)
+        _export_displayed_results(
+            "All neurons",
+            "current_all",
+            on_complete=on_complete,
+            show_completion=show_completion,
+        )
 
     def _new_consolidated_numeric_bundle():
         """Create one fast numeric archive for an individual-neuron export."""
@@ -2507,7 +2521,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         )
         return exported
 
-    def export_all_individual_graph_types_results(on_complete=None):
+    def export_all_individual_graph_types_results(on_complete=None, show_completion=True):
         """Export selected one-graph files for every coarse-RF neuron."""
         rf_draw = individual_neuron_renderer.get("draw")
         rf_count = np.asarray(analysis_state.get("spks", np.empty((0, 0, 0)))).shape[-1] if rf_draw else 0
@@ -2672,6 +2686,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         f"[DONE] Exported selected single-graph files | "
                         f"neuron bundles={completed}/{total_neurons} | elapsed={elapsed:.1f}s\n       {destination}"
                     )
+                    if on_complete is not None:
+                        on_complete()
+                    if not show_completion:
+                        return
                     if state["failures"]:
                         messagebox.showwarning(
                             "Export Completed with Skips",
@@ -2680,8 +2698,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         )
                     else:
                         messagebox.showinfo("Export Complete", f"Exported selected single-graph files.\n\n{destination}")
-                    if on_complete is not None:
-                        on_complete()
                 schedule_on_ui(show_delivery)
 
             threading.Thread(target=finish_delivery, daemon=True).start()
@@ -9536,18 +9552,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return True
 
     def _queue_guided_exports(export_all_neurons=False, export_individual_neurons=False):
-        """Start the chosen exports after the guided analysis has returned control to Tk."""
+        """Start guided exports without modal dialogs blocking the export queue."""
         def export_individual():
             if not export_individual_neurons:
                 return
             if repeat_individual_export_var.get():
-                export_all_individual_graph_types_results()
+                export_all_individual_graph_types_results(show_completion=False)
             else:
-                export_individual_neuron_section()
+                export_individual_neuron_section(show_completion=False)
 
         def start_exports():
             if export_all_neurons:
-                export_all_neurons_results(on_complete=export_individual)
+                export_all_neurons_results(
+                    on_complete=export_individual,
+                    show_completion=False,
+                )
             else:
                 export_individual()
 
@@ -9894,10 +9913,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         text_color=text_color,
     ).pack(anchor="w", pady=(3, 2))
 
-    def export_individual_neuron_section():
+    def export_individual_neuron_section(show_completion=True):
         """Export selected axes for one displayed neuron or for every analyzed neuron."""
         if repeat_individual_export_var.get():
-            export_all_individual_graph_types_results()
+            export_all_individual_graph_types_results(show_completion=show_completion)
             return
         selected_kinds = _selected_export_kinds("all_individual")
         records = _active_export_records("Individual neuron")
@@ -9918,9 +9937,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 snapshots, selected_dir, selected_kinds, file_options=_selected_export_files(),
             )
             print(f"[DONE] Exported {len(exported)} individual graph(s) to: {selected_dir}")
-            schedule_on_ui(
-                lambda: messagebox.showinfo("Export Complete", f"Exported {len(exported)} graph(s).\n\n{selected_dir}")
-            )
+            if show_completion:
+                schedule_on_ui(
+                    lambda: messagebox.showinfo(
+                        "Export Complete", f"Exported {len(exported)} graph(s).\n\n{selected_dir}"
+                    )
+                )
             return True
 
         run_in_thread(write_export, "Export individual-neuron graphs")()
