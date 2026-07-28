@@ -15,6 +15,8 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .stimulus.metadata import validate_coverage_pair
+
 
 DEFAULT_GABOR_PARAMS: Dict[str, str] = {
     "N_thetas": "8",
@@ -556,6 +558,7 @@ class AnalysisConfig:
         )
         if len(visual_coverage) != 4 or len(analysis_coverage) != 4:
             raise ValueError("Coverage values must contain four numbers")
+        validate_coverage_pair(visual_coverage, analysis_coverage)
 
         model_fit_minutes = _as_int(
             _get(mapping, "Model Fit Minutes", DEFAULT_COMMON_PARAMS["Model Fit Minutes"]),

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="280" viewBox="0 0 1120 280" role="img" aria-labelledby="title description">
+  <title id="title">WavEn GUI onboarding path</title>
+  <desc id="description">A seven-step sequence from system configuration through export.</desc>
+  <style>
+    .title { font: 700 22px Arial, sans-serif; fill: #0f172a; }
+    .step { font: 700 14px Arial, sans-serif; fill: #0f172a; }
+    .detail { font: 12px Arial, sans-serif; fill: #334155; }
+  </style>
+  <rect width="1120" height="280" fill="#f8fafc"/>
+  <text x="36" y="40" class="title">GUI-first onboarding path</text>
+  <g stroke="#94a3b8" stroke-width="3" fill="none" marker-end="url(#arrow)">
+    <path d="M166 143 H194"/><path d="M326 143 H354"/><path d="M486 143 H514"/><path d="M646 143 H674"/><path d="M806 143 H834"/><path d="M966 143 H994"/>
+  </g>
+  <g>
+    <rect x="26" y="90" width="140" height="106" rx="12" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+    <text x="46" y="122" class="step">1. System setup</text><text x="46" y="148" class="detail">Project root, recovery,</text><text x="46" y="166" class="detail">optional guided run.</text>
+    <rect x="186" y="90" width="140" height="106" rx="12" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+    <text x="206" y="122" class="step">2. Stimulus video</text><text x="206" y="148" class="detail">Movie metadata, coverage,</text><text x="206" y="166" class="detail">recommended sampling.</text>
+    <rect x="346" y="90" width="140" height="106" rx="12" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+    <text x="366" y="122" class="step">3. Gabor filters</text><text x="366" y="148" class="detail">Recommended or scientific</text><text x="366" y="166" class="detail">filter-bank selection.</text>
+    <rect x="506" y="90" width="140" height="106" rx="12" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+    <text x="526" y="122" class="step">4. Cache version</text><text x="526" y="148" class="detail">Prepare/reuse/select the</text><text x="526" y="166" class="detail">matching RF cache.</text>
+    <rect x="666" y="90" width="140" height="106" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+    <text x="686" y="122" class="step">5. Neural setup</text><text x="686" y="148" class="detail">Create or validate aligned</text><text x="686" y="166" class="detail">spikes and positions.</text>
+    <rect x="826" y="90" width="140" height="106" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+    <text x="846" y="122" class="step">6. Analysis</text><text x="846" y="148" class="detail">Run Coarse RF; inspect</text><text x="846" y="166" class="detail">neurons and optional models.</text>
+    <rect x="986" y="90" width="108" height="106" rx="12" fill="#fae8ff" stroke="#a21caf" stroke-width="2"/>
+    <text x="1005" y="122" class="step">7. Export</text><text x="1005" y="148" class="detail">Choose graphs</text><text x="1005" y="166" class="detail">and formats.</text>
+  </g>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/></marker></defs>
+</svg>

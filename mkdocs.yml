@@ -59,18 +59,15 @@ markdown_extensions:
 nav:
   - Start Here: index.md
   - Onboarding:
-      - First GUI Analysis: tutorials/first-gui-analysis.md
       - Install and Launch: how-to/install.md
-      - Experiment Folder: reference/project-layout.md
-  - Configure:
-      - pipeline_config.json and Scientific Settings: how-to/prepare-configuration.md
-      - Cache Storage and Disk Planning: reference/storage.md
-  - Run and Export:
-      - GUI Workflow and System Configuration: reference/gui.md
-      - Inputs, Outputs, and Cache Contracts: reference/data-contracts.md
+      - First GUI Analysis: tutorials/first-gui-analysis.md
+      - GUI Onboarding: tutorials/gui-onboarding.md
+      - Reusable Caches: reference/storage.md
+      - Restore GUI Settings (pipeline_config.json): how-to/prepare-configuration.md
       - Export Results: how-to/export-results.md
   - Understand and Maintain:
       - Scientific Intuition: explanation/pipeline-intuition.md
+      - Inputs, Outputs, and Cache Contracts: reference/data-contracts.md
       - Source Architecture and Ownership: reference/source-architecture.md
       - Maintainability Guide: explanation/maintainability.md
   - FAQ: faq.md

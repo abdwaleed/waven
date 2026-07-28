@@ -1,109 +1,116 @@
-# Cache storage and disk planning
+# Reusable Caches
 
-WavEn caches reusable intermediate products. Stimulus-derived caches (the
-prepared movie, Gabor kernels, and wavelet products) can be reused when the
-raw neural data changes, provided the stimulus movie, coverage, sampling grid,
-Gabor settings, and requested product are unchanged. They cannot be reused
-with a different stimulus movie. Neural caches and completed analysis results
-belong to their raw neural data. These checks prevent quietly mixing results
-from different experiments or resolution settings.
+Use this page when you want to avoid repeating expensive stimulus preparation.
+The GUI is responsible for creating, selecting, validating, and versioning
+caches; you normally do not need to move cache files by hand.
 
-## Choosing NPY or Zarr for caches
+## The useful rule
 
-The GUI offers a zarr or npy option for some caches. Zarr is essentially superior for processing and disk compression, but npy could be better inspectable. Here is a complete breakdown:
+It is advisable to reuse a stimulus-derived cache for a new neural recording
+when the **stimulus-side experiment is unchanged**. You can create a new neural
+cache from new raw data, then analyse it against an existing Coarse RF cache.
 
-| Format | Best use | Benefits | Trade-off |
-| --- | --- | --- | --- |
-| **NPY** | Simple local arrays and fast sequential scans | One file, easy NumPy interchange, memory-mappable without loading all data. | No chunk-level compression or recovery; partial writes are less convenient. |
-| **Zarr** | Large, chunked, compressed, or resumable caches | Reads/writes only needed chunks, supports compression and safer chunk-level continuation. | Many files/metadata entries; small arrays can have more overhead. |
+A prepared stimulus, Gabor kernel cache, or Coarse RF cache is reusable only
+when these inputs match:
 
-The GUI offers this choice for the prepared stimulus cache and a freshly
-created neural cache. Its **Wavelet storage format** controls the durable Coarse
-RF correlation result when that result is written to disk. Convolutional power
-and real/imaginary phase products remain Zarr because their chunked layout is
-required for their workload. 
+1. The underlying stimulus video.
+2. Visual Field Coverage and Analysis Field Coverage.
+3. The derived sampling grid.
+4. Gabor orientations, sigmas, frequencies, phases, and Coarse RF frequency
+   mode.
 
-**NOTE:** NPY and Zarr do **not** describe graph exports;
-the Export tab writes PNG, SVG, and optional PKL only.
+Changing raw neural data alone does not invalidate the stimulus-side cache.
+Changing any item above does. WavEn records provenance and validates a selected
+cache before analysis, so it will refuse a cache built for a different movie,
+crop, grid, or filter bank.
 
-For a large experiment, prefer Zarr. For a small, self-contained cache you want
-to open directly with NumPy, NPY is often simpler. Changing cache format does
-not change the scientific result, though the file size is **drastically** different.
+## What is reusable and what is not
+
+| Product | Reuse with new raw neural data? | Reason |
+| --- | --- | --- |
+| Downsampled stimulus movie | Yes, when the movie, coverage, and grid match. | It is derived only from the visual stimulus. |
+| Gabor convolution kernels | Yes, when the grid and Gabor parameters match. | They are independent of neural activity. |
+| Coarse RF power cache | Yes, when all stimulus-side compatibility inputs match. | It contains visual features, not neural responses. |
+| Run Model / Full Model phase caches | Yes, when their stimulus-side settings match. | They contain phase-aware visual features, not neural responses. |
+| Aligned neural `spikes` / `pos` cache | No. Create or validate a cache for the new recording. | It represents the specific neural data and frame alignment. |
+| Coarse RF results, plots, and fitted models | Usually no. Re-run for the new neural recording. | They combine the selected visual cache with neural responses. |
+
+## Cache libraries and versions
+
+The **Coarse RF Cache Library Folder** and **Full-Model Cache Library Folder**
+are libraries, not single-use folders.
+
+```text
+cache/wavelets/coarse/
+├── stimulus_coarse_downsampled_p20.zarr     # shared prepared stimulus
+├── coarse_rf_power.zarr                     # legacy/top-level cache version
+└── cache-20260726-153012/                   # preserved alternative version
+    ├── coarse_rf_power.zarr
+    ├── coarse_model_real.zarr               # if requested
+    └── coarse_model_imag.zarr               # if requested
+```
+
+When **Prepare Analysis Caches** finds existing products, the replacement dialog
+has three outcomes:
+
+| Choice | What happens |
+| --- | --- |
+| **Yes** | Allows replacement inside the currently selected cache version. Use only when you intend to update that version. |
+| **No** | Creates a new timestamped subfolder, selects it as active, and writes the new cache there. Existing versions stay untouched. |
+| **Cancel** | Does not start cache preparation. |
+
+Use **Active Coarse RF Cache** to choose the version that **Run Coarse RF
+Analysis** should use. The dropdown lists completed versions in the selected
+library. Analysis then validates the selected cache against the current movie,
+coverage, grid, and Gabor settings; it never guesses which version you meant or
+silently switches to another one.
+
+The shared downsampled movie remains at the library level, so choosing **No**
+typically creates only a new wavelet-cache version rather than a duplicate
+video cache.
 
 ## Cache products and consumers
 
-Here is an exhaustive list of all the caches to expect the program to create and use:
-
-| Product | Typical path | Type / shape | Created by | Consumed by |
+| Product | Typical location | Type / shape | Created by | Used by |
 | --- | --- | --- | --- | --- |
-| Downsampled stimulus | `cache/wavelets/coarse/` | binary NPY/Zarr `(frames, y, x)` | Prepare Stimulus Cache | All wavelet products; PSTH/STA. |
-| Aligned neural cache | `input/neural_cache/` | matching `spikes` `(trials, frames, neurons)` and `pos` | Create pos/spikes Cache or user input | Coarse RF, inspection, models. |
-| Convolution kernels | `cache/gabor/` | compact kernel-cache files | Prepare Convolution Kernels | Wavelet cache preparation. |
-| Coarse RF power | `cache/wavelets/coarse/coarse_rf_power.zarr` | float32 `(frames, x, y, orientations, sigmas)` | Prepare Coarse RF Cache | Run Coarse RF Analysis. |
-| Run Model phase pair | `cache/wavelets/coarse/coarse_model_{real,imag}.zarr` | two float32 arrays `(frames, x, y, orientations, sigmas)` | Prepare Run Model Phase Caches | Optional Run Model inspection graphs. |
-| Full Model phase pair | `cache/wavelets/full/dwt_videodata2_{r,i}.zarr` | two float32 arrays `(frames, x, y, orientations, sigmas, frequencies)` | Prepare Run Full Model Phase Caches | Optional Full Model inspection graphs. |
-| RF correlation result | Coarse wavelet folder | in-memory or NPY/Zarr when large | Run Coarse RF Analysis | Population and individual-neuron plots. |
-| Plot cache | `output/plots/plot_cache.pkl.gz` | compressed plot state | Plot/cache actions | Faster restoration of compatible plots. |
-| Recovery cache | `output/recovery_cache/` | task checkpoints and completed tiles | Long task runner | Safe cancellation/restart. |
+| Downsampled stimulus | `cache/wavelets/coarse/` | Binary NPY/Zarr `(frames, y, x)` | Prepare Stimulus Cache | Wavelets, neural validation, PSTH/STA. |
+| Aligned neural cache | `input/neural_cache/` | Matching `spikes` `(trials, frames, neurons)` and `pos` arrays | Create or Validate Neural Cache | Coarse RF and inspection. |
+| Convolution kernels | `cache/gabor/` | Compact kernel-cache files | Prepare Gabor Assets | Wavelet-cache preparation. |
+| Coarse RF power | `cache/wavelets/coarse[/cache-timestamp]/coarse_rf_power.zarr` | Float32 `(frames, x, y, orientations, sigmas[, frequencies])` | Prepare Analysis Caches | Run Coarse RF Analysis. |
+| Run Model phase pair | `cache/wavelets/coarse[/cache-timestamp]/coarse_model_{real,imag}.zarr` | Two float32 phase arrays | Optional preparation checkbox | Run Model inspection. |
+| Full Model phase pair | `cache/wavelets/full[/cache-timestamp]/dwt_videodata2_{r,i}.zarr` | Two float32 phase arrays with frequency axis | Optional preparation checkbox | Full Model inspection. |
+| Plot cache | `output/plots/plot_cache.pkl.gz` | Compressed GUI result state | Analysis/plot actions | Faster compatible plot restoration. |
+| Recovery cache | `output/recovery_cache/` | Task checkpoints and completed tiles | Long task runner | Safe cancellation/restart. |
 
-**NOTE:** Image arrays use `(y, x)` order; feature/RF arrays use `(x, y)` after the time
-axis. This distinction is intentional: image rendering follows row/column
-order while the feature grid follows azimuth/elevation indexing.
+Image arrays use `(y, x)` order; feature and RF arrays use `(x, y)` after the
+time axis. This is intentional: image rendering follows row/column order while
+feature arrays follow azimuth/elevation indexing.
 
-## GUI Estimations of Cache Size
+## NPY and Zarr
 
-The GUI shows **uncompressed** estimates for the selected product based on the params you specify. 
-The following uncompressed upper bounds explain why full-model products grow quickly. Additionally, these estimates better reflect the size of the npy file than zarr, since zarr is compressed. The actual Zarr footprint can
-be smaller because of compression, but it can also require temporary chunks and
-metadata. **Treat the GUI estimate as the planning baseline, not a guaranteed
-compressed size.**
+The GUI lets you choose NPY or Zarr for selected durable products. These are
+cache-storage formats, not graph-export formats.
 
-All feature products are float32, so multiply elements by **4 bytes** as shown below.
+| Format | Best use | Benefits | Trade-off |
+| --- | --- | --- | --- |
+| **NPY** | Simple local arrays and fast sequential scans | One file, easy NumPy interchange, memory-mappable. | No chunk-level compression or resumable tiles. |
+| **Zarr** | Large, compressed, or resumable arrays | Chunked I/O, compression, and safer continuation for large tasks. | Many metadata/chunk files; small arrays can have more overhead. |
 
-```text
-stimulus_bytes = frames × grid_y × grid_x × 1
+Convolutional Coarse RF power and phase products remain Zarr because their
+chunked layout is required for preparation and bounded analysis reads. PNG,
+SVG, and optional PKL are **export** formats; see
+[Export Results](../how-to/export-results.md).
 
-coarse_power_bytes = frames × grid_x × grid_y × orientations × sigmas × 4
+## Plan disk space
 
-run_model_phase_pair_bytes =
-    2 × frames × grid_x × grid_y × orientations × sigmas × 4
+The GUI shows uncompressed estimates based on the movie metadata, grid, and
+filter bank. Treat the estimate as a planning baseline, not a guarantee: Zarr
+compression depends on the data, and preparation may need temporary chunks.
 
-full_model_phase_pair_bytes =
-    2 × frames × grid_x × grid_y × orientations × full_sigmas × frequencies × 4
+For large work, reserve enough space for the raw movie, neural cache, the final
+cache version, and working headroom. If you want to keep several scientific
+configurations, keep each version rather than overwriting it, and name or record
+the corresponding experiment purpose outside the timestamped folder.
 
-rf_correlation_bytes =
-    neurons × grid_x × grid_y × orientations × sigmas × frequencies × 4
-```
-
-### Free-space recommendation
-
-Reserve at least:
-
-```text
-2 × estimated largest product
-+ raw movie size
-+ aligned neural cache size
-+ every already-completed cache product you intend to keep
-```
-
-The `2 ×` headroom covers partial chunks, retries, recovery information, and
-normal filesystem overhead. If you plan to retain both Run Model and Full Model
-phase pairs, count both; they are separate products. Avoid network shares for
-active cache creation when possible—local SSD/NVMe storage gives much more
-predictable chunk throughput.
-
-## RAM and safe reuse
-
-The cache system limits peak RAM by reading arrays in chunks or through memory
-maps, keeping total RAM usage under 16 GB most of the time, with occasional 32 GB
-spikes when exporting neuronal plots. It is normal for RAM to rise during a
-tile calculation, image render, or BLAS operation, but the complete wavelet tensor
-is not intentionally loaded as one RAM array.
-
-To reiterate, **32 GB RAM or more** is recommended for large sessions.
-
-Finally, the optional **RAM acceleration cache** speedup option retains only safely sized, reused
-model-phase and PSTH/STA inputs for later actions; preparation itself stays
-disk-backed and oversized arrays stay on disk. Disable it if another program
-needs memory. See [Session Configuration](gui.md#session-configuration) for the
-other optional speed controls.
+Return to [GUI Onboarding](../tutorials/gui-onboarding.md) for the controls that
+create and select these caches.

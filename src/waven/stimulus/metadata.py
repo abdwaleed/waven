@@ -5,6 +5,7 @@ alignment code can all derive dimensions and duration from the same source.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Dict, Sequence, Tuple, Union
 
@@ -12,6 +13,68 @@ import numpy as np
 
 
 MoviePath = Union[str, Path]
+
+
+def centered_screen_visual_coverage(
+    screen_width_cm: float,
+    screen_height_cm: float,
+    viewing_distance_cm: float,
+) -> Tuple[float, float, float, float]:
+    """Return visual coverage for a screen centred on a single eye.
+
+    The returned order matches the GUI coverage fields: ``(left, right, top,
+    bottom)`` in degrees.  It assumes the eye is level with, and centred on,
+    the active display area.
+    """
+    try:
+        width, height, distance = (
+            float(screen_width_cm),
+            float(screen_height_cm),
+            float(viewing_distance_cm),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Screen width, screen height, and viewing distance must each be a positive finite value in cm."
+        ) from exc
+    if not all(math.isfinite(value) and value > 0 for value in (width, height, distance)):
+        raise ValueError(
+            "Screen width, screen height, and viewing distance must each be a positive finite value in cm."
+        )
+    horizontal_angle = math.degrees(math.atan((width / 2.0) / distance))
+    vertical_angle = math.degrees(math.atan((height / 2.0) / distance))
+    return -horizontal_angle, horizontal_angle, vertical_angle, -vertical_angle
+
+
+def validate_coverage_pair(
+    visual_coverage: Sequence[float], analysis_coverage: Sequence[float]
+) -> Tuple[Tuple[float, float, float, float], Tuple[float, float, float, float]]:
+    """Validate that a non-empty analysis field is entirely within the visual field."""
+    if len(visual_coverage) != 4 or len(analysis_coverage) != 4:
+        raise ValueError("Coverage values must each contain left, right, top, and bottom values.")
+
+    visual = tuple(float(value) for value in visual_coverage)
+    analysis = tuple(float(value) for value in analysis_coverage)
+    if not all(math.isfinite(value) for value in (*visual, *analysis)):
+        raise ValueError("Coverage values must be finite numbers.")
+
+    visual_x_min, visual_x_max = sorted(visual[:2])
+    visual_y_min, visual_y_max = sorted(visual[2:])
+    analysis_x_min, analysis_x_max = sorted(analysis[:2])
+    analysis_y_min, analysis_y_max = sorted(analysis[2:])
+    if visual_x_max <= visual_x_min or visual_y_max <= visual_y_min:
+        raise ValueError("Visual Coverage must span a non-zero horizontal and vertical field.")
+    if analysis_x_max <= analysis_x_min or analysis_y_max <= analysis_y_min:
+        raise ValueError("Analysis Coverage must span a non-zero horizontal and vertical field.")
+
+    tolerance = 1e-9
+    if (
+        analysis_x_min < visual_x_min - tolerance
+        or analysis_x_max > visual_x_max + tolerance
+        or analysis_y_min < visual_y_min - tolerance
+        or analysis_y_max > visual_y_max + tolerance
+    ):
+        raise ValueError("Analysis Coverage must lie within Visual Coverage.")
+    return visual, analysis
 
 
 def read_movie_metadata(path: MoviePath) -> Dict[str, float]:
@@ -78,6 +141,9 @@ def coverage_ratios(
     visual_coverage: Sequence[float], analysis_coverage: Sequence[float]
 ) -> Tuple[float, float]:
     """Return spatial crop ratios used during stimulus downsampling."""
+    visual_coverage, analysis_coverage = validate_coverage_pair(
+        visual_coverage, analysis_coverage
+    )
     if tuple(visual_coverage) == tuple(analysis_coverage):
         return 1.0, 1.0
     visual = np.asarray(visual_coverage, dtype=float)
@@ -105,27 +171,13 @@ def coverage_crop_bounds(
     height, width = (int(frame_shape[0]), int(frame_shape[1]))
     if height <= 0 or width <= 0:
         raise ValueError("frame_shape dimensions must be positive.")
-    if len(visual_coverage) != 4 or len(analysis_coverage) != 4:
-        raise ValueError("Coverage values must each contain x_max, x_min, y_max, y_min.")
-
-    vx_max, vx_min, vy_max, vy_min = (float(value) for value in visual_coverage)
-    ax_max, ax_min, ay_max, ay_min = (float(value) for value in analysis_coverage)
-    visual_x_min, visual_x_max = sorted((vx_min, vx_max))
-    visual_y_min, visual_y_max = sorted((vy_min, vy_max))
-    analysis_x_min, analysis_x_max = sorted((ax_min, ax_max))
-    analysis_y_min, analysis_y_max = sorted((ay_min, ay_max))
+    visual, analysis = validate_coverage_pair(visual_coverage, analysis_coverage)
+    visual_x_min, visual_x_max = sorted(visual[:2])
+    visual_y_min, visual_y_max = sorted(visual[2:])
+    analysis_x_min, analysis_x_max = sorted(analysis[:2])
+    analysis_y_min, analysis_y_max = sorted(analysis[2:])
     x_span = visual_x_max - visual_x_min
     y_span = visual_y_max - visual_y_min
-    if x_span <= 0 or y_span <= 0:
-        raise ValueError("Visual Coverage must span a non-zero horizontal and vertical field.")
-    tolerance = 1e-9
-    if (
-        analysis_x_min < visual_x_min - tolerance
-        or analysis_x_max > visual_x_max + tolerance
-        or analysis_y_min < visual_y_min - tolerance
-        or analysis_y_max > visual_y_max + tolerance
-    ):
-        raise ValueError("Analysis Coverage must lie within Visual Coverage.")
 
     col_start = int(np.floor((analysis_x_min - visual_x_min) * width / x_span))
     col_end = int(np.ceil((analysis_x_max - visual_x_min) * width / x_span))
@@ -138,4 +190,11 @@ def coverage_crop_bounds(
     return row_start, row_end, col_start, col_end
 
 
-__all__ = ["coverage_crop_bounds", "coverage_ratios", "downsampled_grid_dimensions", "read_movie_metadata"]
+__all__ = [
+    "centered_screen_visual_coverage",
+    "coverage_crop_bounds",
+    "coverage_ratios",
+    "downsampled_grid_dimensions",
+    "read_movie_metadata",
+    "validate_coverage_pair",
+]

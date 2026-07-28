@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="650" viewBox="0 0 1120 650" role="img" aria-labelledby="title description">
+  <title id="title">WavEn experiment folder inputs, reusable caches, and outputs</title>
+  <desc id="description">A diagram separating user-provided raw data and stimulus input from reusable stimulus caches and neural-data-specific outputs.</desc>
+  <style>
+    .title { font: 700 24px Arial, sans-serif; fill: #0f172a; }
+    .head { font: 700 16px Arial, sans-serif; fill: #0f172a; }
+    .body { font: 14px Arial, sans-serif; fill: #1e293b; }
+    .small { font: 12px Arial, sans-serif; fill: #475569; }
+    .box { stroke-width: 2; rx: 12; }
+  </style>
+  <rect width="1120" height="650" fill="#f8fafc"/>
+  <text x="40" y="45" class="title">One experiment folder: inputs on the left, reusable stimulus caches in the middle, outputs on the right</text>
+
+  <rect x="40" y="86" width="300" height="450" class="box" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="65" y="120" class="head">You provide these inputs</text>
+  <rect x="64" y="146" width="252" height="112" class="box" fill="#ffffff" stroke="#93c5fd"/>
+  <text x="82" y="174" class="head">input/raw_data/</text>
+  <text x="82" y="201" class="body">Ephys: one session .pkl at this root</text>
+  <text x="82" y="223" class="body">and Din&lt;port&gt;.dat below it.</text>
+  <text x="82" y="245" class="body">2-photon: Timeline.mat + Suite2p output.</text>
+  <rect x="64" y="285" width="252" height="94" class="box" fill="#ffffff" stroke="#93c5fd"/>
+  <text x="82" y="313" class="head">input/stimulus_movie/</text>
+  <text x="82" y="340" class="body">One intended stimulus video.</text>
+  <text x="82" y="362" class="body">WavEn reads its metadata.</text>
+  <rect x="64" y="406" width="252" height="92" class="box" fill="#ffffff" stroke="#93c5fd"/>
+  <text x="82" y="434" class="head">GUI settings</text>
+  <text x="82" y="461" class="body">Visual coverage, sampling,</text>
+  <text x="82" y="483" class="body">and Gabor parameters.</text>
+
+  <rect x="410" y="86" width="300" height="450" class="box" fill="#ecfdf5" stroke="#059669"/>
+  <text x="435" y="120" class="head">Reusable stimulus-derived caches</text>
+  <rect x="434" y="146" width="252" height="112" class="box" fill="#ffffff" stroke="#6ee7b7"/>
+  <text x="452" y="174" class="head">cache/wavelets/coarse/</text>
+  <text x="452" y="201" class="body">Shared downsampled stimulus.</text>
+  <text x="452" y="223" class="body">Top-level or versioned RF caches.</text>
+  <text x="452" y="245" class="body">Select the active version in the GUI.</text>
+  <rect x="434" y="285" width="252" height="94" class="box" fill="#ffffff" stroke="#6ee7b7"/>
+  <text x="452" y="313" class="head">cache/gabor/</text>
+  <text x="452" y="340" class="body">Compact convolution kernels.</text>
+  <text x="452" y="362" class="body">Reused with the same Gabor settings.</text>
+  <rect x="434" y="406" width="252" height="92" class="box" fill="#ffffff" stroke="#6ee7b7"/>
+  <text x="452" y="434" class="head">Reuse rule</text>
+  <text x="452" y="461" class="body">Same stimulus + coverage + grid</text>
+  <text x="452" y="483" class="body">+ Gabor parameters = reusable.</text>
+
+  <rect x="780" y="86" width="300" height="450" class="box" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="805" y="120" class="head">Created for this neural recording</text>
+  <rect x="804" y="146" width="252" height="112" class="box" fill="#ffffff" stroke="#fdba74"/>
+  <text x="822" y="174" class="head">input/neural_cache/</text>
+  <text x="822" y="201" class="body">Aligned spikes + positions.</text>
+  <text x="822" y="223" class="body">Create again when raw neural data changes.</text>
+  <rect x="804" y="285" width="252" height="94" class="box" fill="#ffffff" stroke="#fdba74"/>
+  <text x="822" y="313" class="head">output/plots/ and output/models/</text>
+  <text x="822" y="340" class="body">Analysis views, exports, and fits.</text>
+  <text x="822" y="362" class="body">These belong to this neural dataset.</text>
+  <rect x="804" y="406" width="252" height="92" class="box" fill="#ffffff" stroke="#fdba74"/>
+  <text x="822" y="434" class="head">New raw data?</text>
+  <text x="822" y="461" class="body">Create a new neural cache, then</text>
+  <text x="822" y="483" class="body">reuse matching stimulus caches.</text>
+
+  <path d="M340 310 H395" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M710 310 H765" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="347" y="290" class="small">prepare once</text>
+  <text x="717" y="290" class="small">combine for analysis</text>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker></defs>
+  <text x="40" y="588" class="small">Important: the GUI validates cache provenance before analysis. A compatible cache is reused; a changed stimulus, coverage, sampling grid, or Gabor filter bank requires a different cache version.</text>
+</svg>

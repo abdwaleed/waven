@@ -90,7 +90,13 @@ from ..storage.neural_cache import (
     load_unit_ids,
 )
 from ..storage.array_store import read_first_axis_indices
-from ..stimulus.metadata import coverage_ratios, downsampled_grid_dimensions, read_movie_metadata
+from ..stimulus.metadata import (
+    centered_screen_visual_coverage,
+    coverage_ratios,
+    downsampled_grid_dimensions,
+    read_movie_metadata,
+    validate_coverage_pair,
+)
 from ..stimulus.sampling import (
     sampling_plan_from_degrees_per_pixel,
     sampling_plan_from_max_cpd,
@@ -293,6 +299,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         variables = {}
         for name, variable in (
+            ("active_coarse_cache_path", active_coarse_cache_path_var),
+            ("active_full_model_cache_path", active_full_model_cache_path_var),
             ("coarse_rf_frequency_mode", coarse_rf_frequency_mode_var),
             ("downsample_format", downsample_format_var),
             ("downsample_percent", downsample_percent_var),
@@ -794,8 +802,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     def _set_entry_value(entry, value):
         """Replace one editable field or selection-control value."""
         if isinstance(entry, ctk.CTkEntry):
-            entry.delete(0, tk.END)
-            entry.insert(0, str(value))
+            previous_state = entry.cget("state")
+            if previous_state == "disabled":
+                entry.configure(state="normal")
+            try:
+                entry.delete(0, tk.END)
+                entry.insert(0, str(value))
+            finally:
+                if previous_state == "disabled":
+                    entry.configure(state="disabled")
         else:
             entry.set(str(value))
 
@@ -847,11 +862,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         movie = find_stimulus_movie(folder)
         return str(movie)
 
-    def _wavelet_folder(scale="coarse"):
-        """Return the conventional wavelet cache folder for ``scale``."""
+    def _wavelet_cache_library_folder(scale="coarse"):
+        """Return the collection folder that holds versioned wavelet caches."""
         key = "Full Model Wavelet Path" if scale == "full" else "Path Directory"
         default = _project_layout().full_wavelet_dir if scale == "full" else _project_layout().coarse_wavelet_dir
         return _folder_from_entry(param_entries, key, default)
+
+    def _wavelet_folder(scale="coarse"):
+        """Return the selected cache version inside the corresponding cache library."""
+        library = Path(_wavelet_cache_library_folder(scale))
+        variable = active_full_model_cache_path_var if scale == "full" else active_coarse_cache_path_var
+        variable_name = "active_full_model_cache_path" if scale == "full" else "active_coarse_cache_path"
+        selected = str(_worker_var_value(variable_name, variable, "") or "").strip()
+        if not selected:
+            return str(library)
+        try:
+            selected_path = Path(selected).resolve()
+            selected_path.relative_to(library.resolve())
+        except (OSError, ValueError):
+            # A changed library path must not silently continue using a cache
+            # from a different project or experiment.
+            return str(library)
+        return str(selected_path)
 
     def _plot_cache_path():
         """Function for plot cache path.
@@ -3341,7 +3373,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         scale = scale or _selected_analysis_scale()
         output_format = output_format or _selected_downsample_format()
         percent = int(round(_selected_downsample_percent()))
-        return str(conventional_downsample_path(_wavelet_folder(scale), scale, output_format, percent))
+        # Stimulus video is shared by all versioned wavelet products for the
+        # same experiment.  Keeping it at the library level avoids duplicating
+        # a large movie whenever a new RF cache version is created.
+        return str(
+            conventional_downsample_path(
+                _wavelet_cache_library_folder(scale), scale, output_format, percent,
+            )
+        )
 
     def _downsample_cache_candidates(movie_path, scale, preferred_format=None):
         """Return current and legacy downsample-cache candidates in priority order."""
@@ -3349,17 +3388,23 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         alternate_format = "zarr" if preferred_format == "npy" else "npy"
         percent = int(round(_selected_downsample_percent()))
         wavelet_folder = Path(_wavelet_folder(scale))
+        library_folder = Path(_wavelet_cache_library_folder(scale))
         movie = Path(movie_path)
         legacy_input_folder = _project_layout().input_dir
         candidates = [
             conventional_downsample_path(wavelet_folder, scale, preferred_format, percent),
             conventional_downsample_path(wavelet_folder, scale, alternate_format, percent),
         ]
+        if library_folder != wavelet_folder:
+            candidates.extend((
+                conventional_downsample_path(library_folder, scale, preferred_format, percent),
+                conventional_downsample_path(library_folder, scale, alternate_format, percent),
+            ))
         # Coarse and full-model products intentionally share the one metadata-
         # derived stimulus grid.  A full-model run may therefore reuse the
         # single cache prepared in Step 2 instead of creating a duplicate.
         if scale == "full":
-            shared_folder = Path(_wavelet_folder("coarse"))
+            shared_folder = Path(_wavelet_cache_library_folder("coarse"))
             candidates.extend(
                 (
                     conventional_downsample_path(shared_folder, "coarse", preferred_format, percent),
@@ -3386,9 +3431,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         legacy_input_folder / f"{movie.stem}_full_downsampled{suffix}",
                     )
                 )
-        if wavelet_folder.exists():
-            candidates.extend(sorted(wavelet_folder.glob(f"stimulus_{scale}_downsampled_p*.npy")))
-            candidates.extend(sorted(wavelet_folder.glob(f"stimulus_{scale}_downsampled_p*.zarr")))
+        for folder in {wavelet_folder, library_folder}:
+            if folder.exists():
+                candidates.extend(sorted(folder.glob(f"stimulus_{scale}_downsampled_p*.npy")))
+                candidates.extend(sorted(folder.glob(f"stimulus_{scale}_downsampled_p*.zarr")))
         unique = []
         seen = set()
         for candidate in candidates:
@@ -3438,6 +3484,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _downsample_cache_crop_params(visual_coverage, analysis_coverage):
         """Return cache provenance for the pixel-accurate coverage crop."""
+        visual_coverage, analysis_coverage = validate_coverage_pair(
+            visual_coverage, analysis_coverage
+        )
         return {
             "crop_version": 3,
             "grid_geometry": "square_visual_degrees_v1",
@@ -3541,8 +3590,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         update_progress(100, "Stimulus downsample", "Downsampled movie ready")
         return True
 
-    def run_wavelet(product="coarse_rf"):
+    def run_wavelet(product="coarse_rf", allow_overwrite=False):
         """Function for run wavelet.
+
+        Args:
+            product: Cache product to prepare.
+            allow_overwrite: Whether an incompatible, existing named cache may
+                be replaced.  Completed compatible caches are always reused.
 
         Returns:
             Result produced by the operation.
@@ -3761,6 +3815,35 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             }
         )
 
+        def _protect_existing_cache_products(products):
+            """Refuse to replace an incompatible named cache without approval."""
+            conflicts = [
+                path
+                for path, shape, fingerprint, kind in products
+                if os.path.exists(path)
+                and not _artifact_ready(path, shape, fingerprint, kind=kind)
+            ]
+            if conflicts and not allow_overwrite:
+                paths = "\n".join(f"  - {path}" for path in conflicts)
+                raise FileExistsError(
+                    "Existing cache products were left unchanged because they do not match "
+                    "the current settings. Choose 'Yes, allow replacement' in the cache "
+                    "confirmation to rebuild them:\n"
+                    f"{paths}"
+                )
+
+        def _protect_existing_cache_set(products):
+            """Refuse a partial cache-set rebuild that would replace a valid member."""
+            existing = [path for path, _shape, _fingerprint, _kind in products if os.path.exists(path)]
+            if existing and not allow_overwrite:
+                paths = "\n".join(f"  - {path}" for path in existing)
+                raise FileExistsError(
+                    "The requested cache set is incomplete, and completing it would replace "
+                    "existing cache products. They were left unchanged. Choose 'Yes, allow "
+                    "replacement' in the cache confirmation to continue:\n"
+                    f"{paths}"
+                )
+
         def _build_coarse_power_zarr(real_path, imag_path, power_path):
             """Stream phase magnitudes into the RF-only Zarr product."""
             from ..storage.array_store import load_array
@@ -3874,11 +3957,24 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         if scale == "coarse":
             current_wavelet_dir[0] = wavelet_folder
+            real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
+            imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
+            protected_products = []
+            if product in {"coarse_rf", "coarse_bundle"}:
+                protected_products.append(
+                    (coarse_power_path, coarse_power_shape, coarse_power_fingerprint, "coarse_rf_power")
+                )
+            if include_model_phases:
+                protected_products.extend((
+                    (model_real_path, coarse_phase_shape, real_phase_fingerprint, "coarse_model_phase"),
+                    (model_imag_path, coarse_phase_shape, imag_phase_fingerprint, "coarse_model_phase"),
+                ))
+            _protect_existing_cache_products(protected_products)
             requested_path = coarse_power_path if product in {"coarse_rf", "coarse_bundle"} else model_real_path
             requested_shape = coarse_power_shape if product in {"coarse_rf", "coarse_bundle"} else coarse_phase_shape
             requested_fingerprint = (
                 coarse_power_fingerprint if product in {"coarse_rf", "coarse_bundle"}
-                else _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
+                else real_phase_fingerprint
             )
             requested_kind = "coarse_rf_power" if product in {"coarse_rf", "coarse_bundle"} else "coarse_model_phase"
             coarse_cache_ready = _artifact_ready(
@@ -3888,9 +3984,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 coarse_cache_ready = coarse_cache_ready and _artifact_ready(
                     model_imag_path,
                     coarse_phase_shape,
-                    _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint}),
+                    imag_phase_fingerprint,
                     kind="coarse_model_phase",
                 )
+
+            # Coarse bundle and Run Model writers produce phase pairs (and, for
+            # the bundle, power) together. If a selected set is only partly
+            # present, a writer would replace its completed member as well.
+            if not coarse_cache_ready:
+                _protect_existing_cache_set(protected_products)
 
             if coarse_cache_ready:
                 update_progress(80, "Coarse wavelet decomposition", f"Reusing {product.replace('_', ' ')} cache")
@@ -3971,8 +4073,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         coarse_power_fingerprint, params=cache_params,
                     )
                     if include_model_phases:
-                        real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
-                        imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
                         if model_phase_fused_into_power:
                             if not _artifact_matches(model_real_path, coarse_phase_shape) or not _artifact_matches(model_imag_path, coarse_phase_shape):
                                 raise ValueError("Direct coarse cache bundle did not create both Run Model phase caches.")
@@ -4008,8 +4108,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     # Preparing Run Model alone still uses the compact
                     # sigma-coupled phase bank, never an arbitrary slice of
                     # the independent Coarse RF sweep.
-                    real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
-                    imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
                     _prepare_model_phase_pair_cache(
                         real_phase_fingerprint, imag_phase_fingerprint, videodata,
                     )
@@ -4019,7 +4117,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
                 update_progress(25, "Coarse wavelet decomposition", "Preparing coarse real phase")
                 print("Step 2/4: Preparing coarse real phase wavelets...")
-                real_phase_fingerprint = _cache_fingerprint({"phase": 0, "base": coarse_phase_fingerprint})
                 if _artifact_ready(real_phase_path, coarse_phase_shape, real_phase_fingerprint, kind="coarse_model_phase" if include_model_phases else "coarse_rf_temporary_phase"):
                     print(f"Resume: found completed coarse real phase, reusing {real_phase_path}")
                     _write_recovery_step("coarse_phase_real_reused", path=real_phase_path)
@@ -4064,7 +4161,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
                 update_progress(45, "Coarse wavelet decomposition", "Preparing coarse imaginary phase")
                 print("Step 3/4: Preparing coarse imaginary phase wavelets...")
-                imag_phase_fingerprint = _cache_fingerprint({"phase": 1, "base": coarse_phase_fingerprint})
                 if _artifact_ready(imag_phase_path, coarse_phase_shape, imag_phase_fingerprint, kind="coarse_model_phase" if include_model_phases else "coarse_rf_temporary_phase"):
                     print(f"Resume: found completed coarse imaginary phase, reusing {imag_phase_path}")
                     _write_recovery_step("coarse_phase_imaginary_reused", path=imag_phase_path)
@@ -4197,11 +4293,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if full_storage_layout:
             full_phase_identity["storage_layout"] = full_storage_layout
         full_phase_fingerprint = _cache_fingerprint(full_phase_identity)
+        full_phase_targets = []
         for phase in (0, 1):
             suffix = "_r" if phase == 0 else "_i"
             target_ext = ".zarr" if is_zarr_wavelet else ".npy"
             target = os.path.join(full_output, f"dwt_videodata2{suffix}{target_ext}")
             phase_fingerprint = _cache_fingerprint({"phase": phase, "base": full_phase_fingerprint})
+            full_phase_targets.append((phase, target, phase_fingerprint))
+        _protect_existing_cache_products(
+            [
+                (target, full_model_shape, fingerprint, "full_wavelet_phase")
+                for _phase, target, fingerprint in full_phase_targets
+            ]
+        )
+        for phase, target, phase_fingerprint in full_phase_targets:
             if _artifact_ready(target, full_model_shape, phase_fingerprint, kind="full_wavelet_phase"):
                 print(f"Resume: found completed full-model wavelets, reusing {target}")
                 _write_recovery_step(f"full_model_phase_{phase}_reused", path=target, shape=full_model_shape)
@@ -4420,10 +4525,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Return parsed inputs needed to load or create aligned neural caches."""
         data_dirs = _parse_data_dir(_field_value(param_entries, "Dir"))
         data_dirs = (resolve_folder_reference(data_dirs[0], "raw_data"),) + tuple(data_dirs[1:])
-        exp_info = parse_literal(_field_value(param_entries, "Experiment Info"), "Experiment Info")
-        block_end = int(_field_value(param_entries, "Block End"))
+        if workflow == WORKFLOW_2P:
+            exp_info = parse_literal(_field_value(param_entries, "Experiment Info"), "Experiment Info")
+            block_end = int(_field_value(param_entries, "Block End", "0"))
+            pathdata = Path(data_dirs[0]) / exp_info[0] / exp_info[1] / str(exp_info[2])
+        else:
+            exp_info = ("", "", 0)
+            block_end = 0
+            pathdata = Path(data_dirs[0])
         nb_frames = _movie_metadata()["frames"]
-        pathdata = Path(data_dirs[0]) / exp_info[0] / exp_info[1] / str(exp_info[2])
         pathsuite2p = pathdata / "suite2p"
         neural_cache_dir = Path(_folder_from_entry(param_entries, "Spks Path", _project_layout().neural_cache_dir))
         if workflow == WORKFLOW_2P:
@@ -4453,12 +4563,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def create_neural_cache():
         """Create or validate the aligned neural firing-rate cache."""
-        context = _neural_alignment_context()
         from .. import time_alignment as ta
 
-        excluded_trial_numbers = ta.normalize_excluded_trial_numbers(
-            parse_literal(_field_value(param_entries, "Excluded Trial Numbers"), "Excluded Trial Numbers")
-        )
         spks_text = _field_value(param_entries, "Spks Path").strip()
         if _selected_neural_source() == "spks_path":
             if spks_text.lower() in ("", "none", "null"):
@@ -4477,6 +4583,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             update_progress(100, "Neural cache", "Existing cache ready")
             return True
 
+        context = _neural_alignment_context()
+        excluded_trial_numbers = ta.normalize_excluded_trial_numbers(
+            parse_literal(_field_value(param_entries, "Excluded Trial Numbers"), "Excluded Trial Numbers")
+        )
         if spks_text.lower() not in ("", "none", "null"):
             print("Neural source is Data Dir; Spks Path will be ignored unless you select Spks Path mode.")
 
@@ -4541,6 +4651,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         _ensure_rf_imports("coarse RF analysis")
         rf_extra = {
             "selected_neuron": _field_value(param_entries, "Neuron ID", ""),
+            "coarse_cache_path": _wavelet_folder("coarse"),
             "force_3d_graphs_to_2d": bool(_worker_var_value("force_2d_graphs", force_2d_graphs_var, False)),
             # Cached Coarse RF results before this schema lack the complete
             # precomputed orientation-export records.
@@ -4564,15 +4675,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             return
 
         try:
-            data_dirs = _parse_data_dir(_field_value(param_entries, "Dir"))
-            data_dirs = (resolve_folder_reference(data_dirs[0], "raw_data"),) + tuple(data_dirs[1:])
-            exp_info = parse_literal(_field_value(param_entries, "Experiment Info"), "Experiment Info")
+            neural_source = _selected_neural_source()
+            if neural_source == "data_dir":
+                data_dirs = _parse_data_dir(_field_value(param_entries, "Dir"))
+                data_dirs = (resolve_folder_reference(data_dirs[0], "raw_data"),) + tuple(data_dirs[1:])
+                if workflow == WORKFLOW_2P:
+                    exp_info = parse_literal(_field_value(param_entries, "Experiment Info"), "Experiment Info")
+                    block_end = int(_field_value(param_entries, "Block End", "0"))
+                else:
+                    exp_info = ("", "", 0)
+                    block_end = 0
+            else:
+                data_dirs = None
+                exp_info = None
+                block_end = 0
             sigmas = np.array(parse_literal(_field_value(gabor_entries, "Sigmas"), "Sigmas"))
             frequencies = np.array(parse_literal(_field_value(gabor_entries, "Frequencies"), "Frequencies"))
             nf = len(frequencies)
             visual_coverage = parse_literal(_field_value(param_entries, "Visual Coverage"), "Visual Coverage")
             analysis_coverage = parse_literal(_field_value(param_entries, "Analysis Coverage"), "Analysis Coverage")
-            block_end = int(_field_value(param_entries, "Block End"))
             movie_metadata = _movie_metadata()
             nx, ny = movie_metadata["width"], movie_metadata["height"]
             coarse_nx, coarse_ny = _stimulus_grid_dimensions("coarse")
@@ -4599,7 +4720,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             # calibrated analysis-pixel scale, not the original video-pixel scale.
             screen_ratio = degrees_per_pixel
             xM, xm, yM, ym = analysis_coverage
-            if workflow == WORKFLOW_2P:
+            if neural_source != "data_dir":
+                n_planes = None
+                resolution = None
+                sampling_rate = None
+                photodiode_port = None
+            elif workflow == WORKFLOW_2P:
                 n_planes = int(_field_value(param_entries, "Number of Planes"))
                 resolution = float(_field_value(param_entries, "Resolution"))
                 sampling_rate = None
@@ -4616,8 +4742,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             print(f"Invalid input: {e}")
             return False
 
-        pathdata = os.path.join(data_dirs[0], exp_info[0], exp_info[1], str(exp_info[2]))
-        pathsuite2p = os.path.join(pathdata, 'suite2p')
+        if neural_source == "data_dir":
+            pathdata = (
+                os.path.join(data_dirs[0], exp_info[0], exp_info[1], str(exp_info[2]))
+                if workflow == WORKFLOW_2P else data_dirs[0]
+            )
+            pathsuite2p = os.path.join(pathdata, 'suite2p')
         # The downsampled grid is square in visual degrees.  Sigma is therefore
         # a true Gabor Gaussian standard deviation in degrees, while the filter
         # bank itself remains compact and efficient in pixel coordinates.
@@ -4625,7 +4755,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         unit_ids = None
         unit_info = None
-        if _selected_neural_source() == "data_dir":
+        if neural_source == "data_dir":
             cache_pair = find_neural_cache_pair(neural_cache_dir)
             if cache_pair is not None:
                 update_progress(10, "Coarse receptive-field analysis", "Loading aligned neural cache")
@@ -4702,7 +4832,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         point_alphas = np.where(filter_mask, 1.0, 0.05)
 
-        parent_dir = current_wavelet_dir[0] or _wavelet_folder("coarse")
+        parent_dir = _wavelet_folder("coarse")
         try:
             # Coarse RF owns only its magnitude/power product.  It stays
             # disk-backed and correlation reads bounded feature blocks.
@@ -6766,6 +6896,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         state = {
             "workflow": workflow,
             "gui": {
+                "active_coarse_cache_path": active_coarse_cache_path_var.get().strip(),
+                "active_full_model_cache_path": active_full_model_cache_path_var.get().strip(),
                 "coarse_rf_frequency_mode": _selected_coarse_rf_frequency_mode(),
                 "downsample_percent": _selected_downsample_percent(),
                 "sampling_mode": sampling_mode_var.get(),
@@ -6930,6 +7062,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
             if "export_path" in save_options:
                 export_path_var.set(str(save_options["export_path"]).strip())
+            for state_key, variable in (
+                ("active_coarse_cache_path", active_coarse_cache_path_var),
+                ("active_full_model_cache_path", active_full_model_cache_path_var),
+            ):
+                if state_key in save_options:
+                    variable.set(str(save_options[state_key]).strip())
             guided_export = save_options.get("guided_export") or {}
             for key, variable in (
                 ("all_neurons", guided_export_all_neurons_var),
@@ -6947,6 +7085,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             _apply_suite2p_subject_dirs()
             _apply_project_layout_defaults(force=True)
             try:
+                _refresh_cache_selectors()
                 _refresh_neural_source_controls()
                 _refresh_sampling_mode()
                 _refresh_downsample_controls()
@@ -6992,6 +7131,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if field_name == "Project Root":
                 _set_entry_value(entry_widget, selected)
                 _apply_project_layout_defaults(force=True)
+                active_coarse_cache_path_var.set("")
+                active_full_model_cache_path_var.set("")
+                try:
+                    _refresh_cache_selectors()
+                except NameError:
+                    pass
             elif field_name in BROWSE_KIND and kind == "dir":
                 try:
                     conventional = _layout_field_folder(field_name)
@@ -7017,6 +7162,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     _set_entry_value(entry_widget, selected)
             else:
                 _set_entry_value(entry_widget, selected)
+            if field_name == "Path Directory":
+                active_coarse_cache_path_var.set("")
+                try:
+                    _refresh_cache_selector("coarse")
+                except NameError:
+                    pass
+            elif field_name == "Full Model Wavelet Path":
+                active_full_model_cache_path_var.set("")
+                try:
+                    _refresh_cache_selector("full")
+                except NameError:
+                    pass
             refresh_size_estimates()
 
     def _check_movie_metadata_against_gui(movie_path):
@@ -7658,6 +7815,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         value=str(configured_guided_export.get("individual_neurons", "")).strip().lower() in {"1", "true", "yes", "on"}
     )
     export_path_var = tk.StringVar(value=str(gui_options.get("export_path", "")).strip())
+    active_coarse_cache_path_var = tk.StringVar(
+        value=str(gui_options.get("active_coarse_cache_path", "")).strip()
+    )
+    active_full_model_cache_path_var = tk.StringVar(
+        value=str(gui_options.get("active_full_model_cache_path", "")).strip()
+    )
 
     def set_workflow_from_panel(value):
         """Function for set workflow from panel.
@@ -7670,8 +7833,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         workflow_label = workflow_display_name(workflow)
         root.title(f"Neuron Analysis Toolkit — {workflow_label}")
         try:
-            frame_params.configure(text=f"Experiment Configuration ({workflow_label})")
             render_parameter_fields(preserve_values=True)
+            _refresh_neural_source_controls()
             refresh_size_estimates()
         except NameError:
             pass
@@ -7800,6 +7963,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     target_degrees_per_pixel_var = tk.StringVar(
         value=str(gui_options.get("target_degrees_per_pixel", 0.75))
     )
+    screen_width_cm_var = tk.StringVar(value="")
+    screen_height_cm_var = tk.StringVar(value="")
+    viewing_distance_cm_var = tk.StringVar(value="")
     maximum_spatial_frequency_cpd_var = tk.StringVar(
         value=str(gui_options.get("maximum_spatial_frequency_cpd", 0.4))
     )
@@ -7817,7 +7983,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     )
     neural_source_var = tk.StringVar(value=initial_neural_source if initial_neural_source in {"data_dir", "spks_path"} else "data_dir")
     neural_source_display_var = tk.StringVar(
-        value="Continue / existing cache" if neural_source_var.get() == "spks_path" else "Fresh / raw data"
+        value="Existing / neural cache" if neural_source_var.get() == "spks_path" else "Fresh / raw data"
     )
     initial_neural_format = gui_options.get("neural_cache_format", "npy")
     neural_cache_format_var = tk.StringVar(value=initial_neural_format if initial_neural_format in {"npy", "zarr"} else "npy")
@@ -7961,9 +8127,26 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except NameError:
             pass
 
+    def _sync_coarse_rf_frequency_input(mode):
+        """Keep the frequency list editable and name it for the selected topology."""
+        try:
+            gabor_entries["Frequencies"].configure(state="normal")
+            frequency_label, _frequency_entry_wrap = gabor_row_widgets["Frequencies"]
+            frequency_label.configure(
+                text=(
+                    "Matched frequencies (cyc/analysis px; one per filter size)"
+                    if mode == "coupled"
+                    else GABOR_LABELS["Frequencies"]
+                )
+            )
+        except (KeyError, NameError):
+            # The mode control is created before the editable Gabor fields.
+            pass
+
     def _on_coarse_rf_frequency_mode_changed(value):
         """Invalidate artifacts after changing the coarse filter-bank topology."""
         mode = "frequency_list" if value in {"Use frequency list", "Use independent list"} else "coupled"
+        _sync_coarse_rf_frequency_input(mode)
         refresh_size_estimates()
         mode_description = (
             "the independent configured Frequencies list"
@@ -8262,7 +8445,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     filter_bank_summary_label = ctk.CTkLabel(
         filter_recommender,
-        text="Select a stimulus in Step 1, then recommend a physical filter bank.",
+        text="Select a stimulus, then apply a filter-bank recommendation.",
         text_color=status_text,
         fg_color=status_bg,
         corner_radius=6,
@@ -8351,6 +8534,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         gabor_row_widgets[label] = add_config_row(
             frame_gabor, label, default, gabor_entries, i + gabor_input_start_row, frame_color, GABOR_LABELS
         )
+    _sync_coarse_rf_frequency_input(_selected_coarse_rf_frequency_mode())
 
     gabor_dimensions_label = ctk.CTkLabel(
         frame_gabor,
@@ -8401,22 +8585,141 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     prepare_full_model_cache_var = tk.BooleanVar(
         value=bool(gui_options.get("prepare_full_model_cache", False))
     )
+    cache_selector_widgets = {}
 
-    def _prepare_analysis_caches(include_model=False, include_full=False):
+    def _cache_version_product_paths(scale, folder):
+        """Return the durable products that identify one complete cache version."""
+        folder = Path(folder)
+        if scale == "full":
+            return (
+                folder / "dwt_videodata2_r.zarr",
+                folder / "dwt_videodata2_i.zarr",
+            )
+        return (folder / "coarse_rf_power.zarr",)
+
+    def _cache_version_candidates(scale):
+        """Find complete cache versions in the selected library and its children."""
+        library = Path(_wavelet_cache_library_folder(scale))
+        candidates = []
+        candidate_paths = [library]
+        if library.is_dir():
+            candidate_paths.extend(sorted(path for path in library.iterdir() if path.is_dir()))
+        for candidate in candidate_paths:
+            if candidate.is_dir() and all(path.exists() for path in _cache_version_product_paths(scale, candidate)):
+                candidates.append(candidate.resolve())
+        return candidates
+
+    def _new_cache_version_folder(scale):
+        """Allocate an unused versioned cache path without creating or replacing it."""
+        library = Path(_wavelet_cache_library_folder(scale))
+        stamp = time.strftime("cache-%Y%m%d-%H%M%S")
+        candidate = library / stamp
+        suffix = 2
+        while candidate.exists():
+            candidate = library / f"{stamp}-{suffix}"
+            suffix += 1
+        return str(candidate)
+
+    def _activate_new_cache_versions(include_full=False):
+        """Select fresh cache-version paths while leaving every old version intact."""
+        coarse_path = _new_cache_version_folder("coarse")
+        active_coarse_cache_path_var.set(coarse_path)
+        current_wavelet_dir[0] = coarse_path
+        selected = [f"Coarse RF: {coarse_path}"]
+        if include_full:
+            full_path = _new_cache_version_folder("full")
+            active_full_model_cache_path_var.set(full_path)
+            selected.append(f"Full Model: {full_path}")
+        _refresh_cache_selectors()
+        print("Preparing new cache version(s) without replacing existing products:\n  " + "\n  ".join(selected))
+
+    def _set_active_cache_version(scale, value):
+        """Make the selected cache version the source for later analysis."""
+        variable = active_full_model_cache_path_var if scale == "full" else active_coarse_cache_path_var
+        variable.set(str(value))
+        if scale == "coarse":
+            current_wavelet_dir[0] = str(value)
+        print(f"Selected {scale} cache version: {value}")
+
+    def _refresh_cache_selector(scale):
+        """Refresh a cache-version selector after preparation or a folder change."""
+        selector = cache_selector_widgets.get(scale)
+        if selector is None:
+            return
+        candidates = [str(path) for path in _cache_version_candidates(scale)]
+        current = _wavelet_folder(scale)
+        if current not in candidates:
+            candidates.insert(0, current)
+        selector.configure(values=candidates)
+        _set_active_cache_version(scale, current)
+
+    def _refresh_cache_selectors():
+        """Refresh both cache-version controls."""
+        _refresh_cache_selector("coarse")
+        _refresh_cache_selector("full")
+
+    def _selected_analysis_cache_products(include_model=False, include_full=False):
+        """Return the named cache stores affected by the selected preparation."""
+        products = [
+            ("Coarse RF power cache", os.path.join(_wavelet_folder("coarse"), "coarse_rf_power.zarr")),
+        ]
+        if include_model:
+            products.extend((
+                ("Run Model real phase cache", os.path.join(_wavelet_folder("coarse"), "coarse_model_real.zarr")),
+                ("Run Model imaginary phase cache", os.path.join(_wavelet_folder("coarse"), "coarse_model_imag.zarr")),
+            ))
+        if include_full:
+            products.extend((
+                ("Full Model real phase cache", os.path.join(_wavelet_folder("full"), "dwt_videodata2_r.zarr")),
+                ("Full Model imaginary phase cache", os.path.join(_wavelet_folder("full"), "dwt_videodata2_i.zarr")),
+            ))
+        return products
+
+    def _confirm_cache_replacement(include_model=False, include_full=False):
+        """Ask before a cache preparation is allowed to replace a saved product."""
+        existing = [
+            (label, path)
+            for label, path in _selected_analysis_cache_products(include_model, include_full)
+            if os.path.exists(path)
+        ]
+        if not existing:
+            return "reuse"
+        product_list = "\n".join(f"• {label}\n  {path}" for label, path in existing)
+        return messagebox.askyesnocancel(
+            "Existing analysis caches",
+            "WAVEN found existing cache products:\n\n"
+            f"{product_list}\n\n"
+            "A complete matching cache set will be reused. If the requested set is "
+            "incomplete or does not match the current settings, existing products may "
+            "need to be replaced before preparation can continue.\n\n"
+            "Yes — allow replacement in the selected cache version.\n"
+            "No — prepare a new versioned cache folder and keep these caches unchanged.\n"
+            "Cancel — do not start cache preparation.",
+        )
+
+    def _prepare_analysis_caches(include_model=False, include_full=False, allow_overwrite=False):
         """Prepare exactly the cache products selected in the unified UI."""
         coarse_product = "coarse_bundle" if include_model else "coarse_rf"
-        if not run_wavelet(coarse_product):
+        if not run_wavelet(coarse_product, allow_overwrite=allow_overwrite):
             return False
         if include_full:
-            return run_wavelet("full_model")
+            if not run_wavelet("full_model", allow_overwrite=allow_overwrite):
+                return False
+        schedule_on_ui(_refresh_cache_selectors)
         return True
 
     def _start_prepare_analysis_caches():
         """Capture Tk checkbox state before dispatching the worker thread."""
         include_model = bool(prepare_run_model_cache_var.get())
         include_full = bool(prepare_full_model_cache_var.get())
+        cache_decision = _confirm_cache_replacement(include_model, include_full)
+        if cache_decision is None:
+            return
+        if cache_decision is False:
+            _activate_new_cache_versions(include_full)
+        allow_overwrite = cache_decision is True
         run_in_thread(
-            lambda: _prepare_analysis_caches(include_model, include_full),
+            lambda: _prepare_analysis_caches(include_model, include_full, allow_overwrite),
             "Prepare analysis caches",
         )()
 
@@ -8521,33 +8824,21 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     ttk.Separator(frame_processing, orient="horizontal").pack(fill=tk.X, pady=8)
 
-    # --- Experiment configuration ---
-    frame_params = ttk.LabelFrame(
-        stage_setup,
-        text=f"Experiment Configuration ({workflow_label})",
-        padding=15,
-    )
-    frame_params.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-    frame_params.columnconfigure(1, weight=1)
-
     param_entries = {}
     # These analysis-stage controls are created after the session form but must
     # survive a workflow switch/re-render of that form.
     model_settings_hint = None
-    PARAMETER_GROUPS = {
-        "Data Input": [
-            "Experiment Info",
-        ],
-        "Acquisition & Timing": [
-            "Number of Planes",
-            "Sampling Rate (samples / sec)",
-            "Photodiode Port",
-            "Block End",
-        ],
-        "Imaging": [
-            "Resolution",
-        ],
-    }
+    frame_params = None
+    RAW_NEURAL_FIELDS = (
+        "Dir",
+        "Photodiode Port",
+        "Sampling Rate (samples / sec)",
+        "Experiment Info",
+        "Number of Planes",
+        "Block End",
+        "Resolution",
+        "Excluded Trial Numbers",
+    )
 
     def render_parameter_fields(preserve_values=False, loaded_values=None):
         """Function for render parameter fields.
@@ -8568,11 +8859,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             existing_values = {
                 key: entry.get()
                 for key, entry in param_entries.items()
-                if key not in {"Neuron ID", "Dir", "Spks Path"}
+                if key not in {"Neuron ID", "Spks Path"}
             }
         if loaded_values:
             existing_values.update({str(key): str(value) for key, value in loaded_values.items()})
 
+        if frame_params is None:
+            return
         for widget in frame_params.winfo_children():
             widget.destroy()
         for key in list(param_entries):
@@ -8580,19 +8873,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 param_entries.pop(key, None)
 
         workflow_param_keys, filtered_param_defaults = workflow_defaults(workflow)
-        for section_title, section_keys in PARAMETER_GROUPS.items():
-            section_frame = ttk.LabelFrame(frame_params, text=section_title, padding=(10, 8))
-            section_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
-            section_frame.columnconfigure(1, weight=1)
-            section_row = 0
-            for key in section_keys:
-                if key not in workflow_param_keys:
-                    continue
-                default = existing_values.get(key, filtered_param_defaults.get(key, ""))
-                add_config_row(section_frame, key, default, param_entries, section_row, frame_color, ANALYSIS_LABELS)
+        section_row = 0
+        for key in RAW_NEURAL_FIELDS:
+            if key == "Experiment Info" and workflow == WORKFLOW_EPHYS:
+                continue
+            if key not in workflow_param_keys or (key == "Block End" and workflow != WORKFLOW_2P):
+                continue
+            if key == "Excluded Trial Numbers":
+                ctk.CTkLabel(frame_params, text="").grid(
+                    row=section_row, column=0, columnspan=2, pady=(6, 0)
+                )
                 section_row += 1
-
-    render_parameter_fields()
+            default = existing_values.get(key, filtered_param_defaults.get(key, ""))
+            add_config_row(frame_params, key, default, param_entries, section_row, frame_color, ANALYSIS_LABELS)
+            section_row += 1
     recovery_frame = ttk.LabelFrame(frame_session, text="Recovery & Resume", padding=(10, 8))
     recovery_frame.pack(fill=tk.X, pady=(8, 0))
     recovery_frame.columnconfigure(1, weight=1)
@@ -8617,10 +8911,75 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         wavelet_paths_frame, "Full Model Wavelet Path", param_defaults.get("Full Model Wavelet Path", ""),
         param_entries, 1, frame_color, ANALYSIS_LABELS,
     )
+
+    def _on_cache_library_focus_out(scale):
+        """Clear a stale cache-version selection after the library path changes."""
+        variable = active_full_model_cache_path_var if scale == "full" else active_coarse_cache_path_var
+        variable.set("")
+        _refresh_cache_selector(scale)
+
+    param_entries["Path Directory"].bind(
+        "<FocusOut>", lambda _event: _on_cache_library_focus_out("coarse"), add="+"
+    )
+    param_entries["Full Model Wavelet Path"].bind(
+        "<FocusOut>", lambda _event: _on_cache_library_focus_out("full"), add="+"
+    )
+    cache_versions_frame = ctk.CTkFrame(frame_processing, fg_color=status_bg, corner_radius=6)
+    cache_versions_frame.pack(fill=tk.X, pady=(0, 8), before=btn_submit_wavelet)
+    cache_versions_frame.columnconfigure(1, weight=1)
+    ctk.CTkLabel(
+        cache_versions_frame,
+        text="Active cache versions",
+        text_color=status_text,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(7, 2))
+    ctk.CTkLabel(
+        cache_versions_frame,
+        text=(
+            "Choose the cache version used for analysis. Preserving a cache creates a new version."
+        ),
+        text_color=muted_text,
+        justify="left",
+        wraplength=610,
+    ).grid(row=1, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 6))
+    for row, (scale, label, variable) in enumerate((
+        ("coarse", "Coarse RF cache", active_coarse_cache_path_var),
+        ("full", "Full Model cache", active_full_model_cache_path_var),
+    ), start=2):
+        ctk.CTkLabel(cache_versions_frame, text=label, text_color=text_color).grid(
+            row=row, column=0, sticky="w", padx=8, pady=3
+        )
+        selector = ctk.CTkOptionMenu(
+            cache_versions_frame,
+            values=[_wavelet_folder(scale)],
+            variable=variable,
+            command=lambda value, cache_scale=scale: _set_active_cache_version(cache_scale, value),
+            height=30,
+            fg_color=choice_bg,
+            button_color=secondary_btn,
+            button_hover_color=secondary_hover,
+            text_color=text_color,
+            dropdown_fg_color=frame_color,
+            dropdown_text_color=text_color,
+            dropdown_hover_color=choice_bg,
+        )
+        selector.grid(row=row, column=1, sticky="ew", padx=(8, 5), pady=3)
+        cache_selector_widgets[scale] = selector
+    ctk.CTkButton(
+        cache_versions_frame,
+        text="Refresh cache list",
+        width=122,
+        height=28,
+        corner_radius=6,
+        fg_color=secondary_btn,
+        hover_color=secondary_hover,
+        command=_refresh_cache_selectors,
+    ).grid(row=2, column=2, rowspan=2, sticky="ns", padx=(0, 8), pady=3)
+    _refresh_cache_selectors()
     refresh_size_estimates()
 
     # --- Neural spike/position cache ---
-    frame_neural_cache = ttk.LabelFrame(stage_setup, text="Neural Spike/Position Cache", padding=15)
+    frame_neural_cache = ttk.LabelFrame(stage_setup, text="Neural data source", padding=15)
     frame_neural_cache.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
     frame_neural_cache.columnconfigure(1, weight=1)
     _, neural_section_defaults = workflow_defaults(workflow)
@@ -8636,7 +8995,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     neural_row_widgets = {}
     neural_source_labels = {
         "Fresh / raw data": "data_dir",
-        "Continue / existing cache": "spks_path",
+        "Existing / neural cache": "spks_path",
     }
 
     def _refresh_neural_source_controls(value=None):
@@ -8646,19 +9005,20 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         source = _selected_neural_source()
         try:
             neural_source_display_var.set(
-                "Fresh / raw data" if source == "data_dir" else "Continue / existing cache"
+                "Fresh / raw data" if source == "data_dir" else "Existing / neural cache"
             )
             for key, row_widgets in neural_row_widgets.items():
-                visible = (key == "Dir" and source == "data_dir") or (
-                    key == "Spks Path" and source == "spks_path"
-                ) or (key == "Excluded Trial Numbers" and source == "data_dir")
+                visible = key == "Spks Path" and source == "spks_path"
                 for widget in row_widgets:
                     widget.grid() if visible else widget.grid_remove()
             if source == "data_dir":
+                if not frame_params.winfo_manager():
+                    frame_params.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
                 neural_cache_format_frame.grid()
                 neural_cache_format_note.grid()
                 btn_create_neural_cache.configure(text="Create pos/spikes Cache")
             else:
+                frame_params.grid_remove()
                 neural_cache_format_frame.grid_remove()
                 neural_cache_format_note.grid_remove()
                 btn_create_neural_cache.configure(text="Validate Existing Neural Cache")
@@ -8684,15 +9044,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     neural_source_segment.pack(side=tk.LEFT, padx=(10, 0))
     neural_source_segment.set(neural_source_display_var.get())
 
-    neural_row_widgets["Dir"] = add_config_row(
-        frame_neural_cache,
-        "Dir",
-        param_defaults.get("Dir", neural_section_defaults.get("Dir", "")),
-        param_entries,
-        1,
-        frame_color,
-        ANALYSIS_LABELS,
-    )
+    frame_params = ctk.CTkFrame(frame_neural_cache, fg_color="transparent")
+    frame_params.columnconfigure(1, weight=1)
+    render_parameter_fields()
 
     neural_row_widgets["Spks Path"] = add_config_row(
         frame_neural_cache,
@@ -8704,18 +9058,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         ANALYSIS_LABELS,
     )
 
-    neural_row_widgets["Excluded Trial Numbers"] = add_config_row(
-        frame_neural_cache,
-        "Excluded Trial Numbers",
-        param_defaults.get("Excluded Trial Numbers", neural_section_defaults.get("Excluded Trial Numbers", "[]")),
-        param_entries,
-        3,
-        frame_color,
-        ANALYSIS_LABELS,
-    )
-
     neural_cache_format_frame = ctk.CTkFrame(frame_neural_cache, fg_color="transparent")
-    neural_cache_format_frame.grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    neural_cache_format_frame.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
     ctk.CTkLabel(
         neural_cache_format_frame,
         text="Cache format — choose one:",
@@ -8745,7 +9089,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         text_color=muted_text,
         wraplength=420,
         justify="left",
-    ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(3, 0))
+    ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(3, 0))
 
     btn_create_neural_cache = ctk.CTkButton(
         frame_neural_cache,
@@ -8756,7 +9100,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color=primary_hover,
         command=run_in_thread(create_neural_cache, "Neural cache creation"),
     )
-    btn_create_neural_cache.grid(row=6, column=0, columnspan=2, pady=(12, 0), sticky="ew")
+    btn_create_neural_cache.grid(row=5, column=0, columnspan=2, pady=(12, 0), sticky="ew")
     _refresh_neural_source_controls()
 
     # --- Stimulus downsample cache ---
@@ -8772,14 +9116,140 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     coverage_frame = ttk.LabelFrame(frame_downsample, text="Visual field and analysis field", padding=(10, 8))
     coverage_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
     coverage_frame.columnconfigure(1, weight=1)
+
+    recommendation_frame = ctk.CTkFrame(
+        coverage_frame, fg_color=status_bg, corner_radius=6
+    )
+    recommendation_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+    recommendation_frame.columnconfigure(1, weight=1)
+    recommendation_frame.columnconfigure(3, weight=1)
+    ctk.CTkLabel(
+        recommendation_frame,
+        text="Screen-based visual coverage recommendation",
+        text_color=text_color,
+        font=ctk.CTkFont(size=12, weight="bold"),
+    ).grid(row=0, column=0, columnspan=4, sticky="w", padx=8, pady=(7, 0))
+    ctk.CTkLabel(
+        recommendation_frame,
+        text=(
+            "All measurements are in cm. Assumes the mouse's single eye is centred on and level with the screen."
+        ),
+        text_color="#B45309",
+        wraplength=405,
+        justify="left",
+    ).grid(row=1, column=0, columnspan=4, sticky="w", padx=8, pady=(2, 6))
+
+    def _add_recommendation_input(row, column, label, variable):
+        ctk.CTkLabel(
+            recommendation_frame, text=label, text_color=muted_text,
+            font=ctk.CTkFont(size=11),
+        ).grid(row=row, column=column, sticky="w", padx=(8, 4), pady=(0, 6))
+        ctk.CTkEntry(
+            recommendation_frame, textvariable=variable, width=78, height=28,
+            placeholder_text="cm",
+        ).grid(row=row, column=column + 1, sticky="ew", padx=(0, 8), pady=(0, 6))
+
+    _add_recommendation_input(2, 0, "Width (cm)", screen_width_cm_var)
+    _add_recommendation_input(2, 2, "Height (cm)", screen_height_cm_var)
+    _add_recommendation_input(3, 0, "Eye distance (cm)", viewing_distance_cm_var)
+    recommendation_preview = ctk.CTkLabel(
+        recommendation_frame,
+        text="Enter measurements to calculate a recommendation.",
+        text_color=muted_text,
+        font=ctk.CTkFont(size=11),
+        wraplength=200,
+        justify="left",
+    )
+    recommendation_preview.grid(row=3, column=2, columnspan=2, sticky="w", padx=(0, 8), pady=(0, 6))
+
     add_config_row(
         coverage_frame, "Visual Coverage", param_defaults.get("Visual Coverage", ""),
-        param_entries, 0, frame_color, ANALYSIS_LABELS,
+        param_entries, 1, frame_color, ANALYSIS_LABELS,
     )
     add_config_row(
         coverage_frame, "Analysis Coverage", param_defaults.get("Analysis Coverage", ""),
-        param_entries, 1, frame_color, ANALYSIS_LABELS,
+        param_entries, 2, frame_color, ANALYSIS_LABELS,
     )
+
+    def _format_coverage(coverage):
+        """Format degrees compactly while preserving useful precision."""
+        return "[" + ", ".join(f"{float(value):.6g}" for value in coverage) + "]"
+
+    last_valid_coverage = {
+        "Visual Coverage": _field_value(param_entries, "Visual Coverage"),
+        "Analysis Coverage": _field_value(param_entries, "Analysis Coverage"),
+    }
+
+    def _validate_coverage_entries(changed_key=None, show_error=False):
+        """Keep the analysis field inside the configured visual field."""
+        try:
+            visual = parse_literal(
+                _field_value(param_entries, "Visual Coverage"), "Visual Coverage"
+            )
+            analysis = parse_literal(
+                _field_value(param_entries, "Analysis Coverage"), "Analysis Coverage"
+            )
+            validate_coverage_pair(visual, analysis)
+        except Exception as exc:
+            if changed_key:
+                entry = param_entries[changed_key]
+                entry.delete(0, tk.END)
+                entry.insert(0, last_valid_coverage[changed_key])
+            if show_error:
+                messagebox.showerror("Invalid analysis coverage", str(exc))
+            return False
+        last_valid_coverage["Visual Coverage"] = _field_value(param_entries, "Visual Coverage")
+        last_valid_coverage["Analysis Coverage"] = _field_value(param_entries, "Analysis Coverage")
+        return True
+
+    def _apply_visual_coverage_recommendation():
+        """Calculate centred-screen angles and apply them only on request."""
+        try:
+            coverage = centered_screen_visual_coverage(
+                screen_width_cm_var.get(),
+                screen_height_cm_var.get(),
+                viewing_distance_cm_var.get(),
+            )
+        except Exception as exc:
+            messagebox.showerror("Visual coverage recommendation", str(exc))
+            return
+
+        visual_text = _format_coverage(coverage)
+        recommendation_preview.configure(text=f"Recommended: {visual_text}°")
+        visual_entry = param_entries["Visual Coverage"]
+        visual_entry.delete(0, tk.END)
+        visual_entry.insert(0, visual_text)
+
+        analysis_reset = not _validate_coverage_entries()
+        if analysis_reset:
+            analysis_entry = param_entries["Analysis Coverage"]
+            analysis_entry.delete(0, tk.END)
+            analysis_entry.insert(0, visual_text)
+        _validate_coverage_entries()
+        _refresh_sampling_status()
+        message = (
+            "WAVEN applied the recommended Visual Coverage. It assumes the mouse's single "
+            "eye is centred on and level with the active screen."
+        )
+        if analysis_reset:
+            message += "\n\nThe previous Analysis Coverage lay outside this visual field, so it was reset to the full visual coverage."
+        messagebox.showwarning("Centered-eye assumption", message)
+
+    apply_recommendation_button = ctk.CTkButton(
+        recommendation_frame,
+        text="Apply recommended coverage",
+        height=28,
+        fg_color=secondary_btn,
+        hover_color=secondary_hover,
+        command=_apply_visual_coverage_recommendation,
+    )
+    apply_recommendation_button.grid(row=4, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 8))
+    for key in ("Visual Coverage", "Analysis Coverage"):
+        param_entries[key].bind(
+            "<FocusOut>",
+            lambda _event, changed_key=key: _validate_coverage_entries(changed_key, show_error=True),
+            add="+",
+        )
 
     ctk.CTkLabel(
         frame_downsample,
@@ -8844,7 +9314,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     sampling_status_label = ctk.CTkLabel(
         frame_downsample,
-        text="Select a valid movie and Analysis Coverage to calculate the calibrated grid.",
+        text="Select a movie and Analysis Coverage to calculate the grid.",
         text_color=status_text,
         fg_color=status_bg,
         corner_radius=6,
@@ -8884,7 +9354,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         except Exception as exc:
             sampling_status_label.configure(
                 text=(
-                    "Select a valid movie and Analysis Coverage to calculate the calibrated grid. "
+                    "Select a movie and Analysis Coverage to calculate the grid. "
                     f"({exc})"
                 ),
                 text_color="#B45309",
@@ -9032,12 +9502,16 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         checkbox_height=18,
     ).pack(side=tk.RIGHT, padx=(12, 0))
 
-    def _run_guided_pipeline(export_all_neurons=False, export_individual_neurons=False):
+    def _run_guided_pipeline(
+        export_all_neurons=False,
+        export_individual_neurons=False,
+        allow_cache_overwrite=False,
+    ):
         """Run the required Coarse RF stages in dependency order."""
         steps = (
             ("Stimulus cache", create_downsampled_video_cache),
             ("Neural cache", create_neural_cache),
-            ("Coarse RF cache", lambda: run_wavelet("coarse_rf")),
+            ("Coarse RF cache", lambda: run_wavelet("coarse_rf", allow_overwrite=allow_cache_overwrite)),
             ("Coarse RF analysis", plot_data),
         )
         for index, (label, action) in enumerate(steps, start=1):
@@ -9051,6 +9525,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             if result is False:
                 raise RuntimeError(f"Guided pipeline stopped during {label}.")
         update_progress(100, "Guided Coarse RF pipeline", "Coarse RF results are ready")
+        schedule_on_ui(_refresh_cache_selectors)
         if export_all_neurons or export_individual_neurons:
             schedule_on_ui(
                 lambda: _queue_guided_exports(
@@ -9085,8 +9560,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         """Capture current settings and start the guided pipeline in one worker."""
         export_all_neurons = bool(guided_export_all_neurons_var.get())
         export_individual_neurons = bool(guided_export_individual_neurons_var.get())
+        cache_decision = _confirm_cache_replacement()
+        if cache_decision is None:
+            return
+        if cache_decision is False:
+            _activate_new_cache_versions()
+        allow_cache_overwrite = cache_decision is True
         run_in_thread(
-            lambda: _run_guided_pipeline(export_all_neurons, export_individual_neurons),
+            lambda: _run_guided_pipeline(
+                export_all_neurons,
+                export_individual_neurons,
+                allow_cache_overwrite,
+            ),
             "Guided Coarse RF pipeline",
         )()
 
@@ -9152,8 +9637,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     model_settings_hint = ctk.CTkLabel(
         model_settings_frame,
         text=(
-            "Trial count will be checked after Coarse RF loads the neural cache. "
-            "Use zero-based trial indices; 'auto' alternates train trials and holds out the rest."
+            "Trial count is checked when Coarse RF loads. Use zero-based indices; 'auto' alternates training and holdout trials."
         ),
         text_color=status_text,
         fg_color=status_bg,

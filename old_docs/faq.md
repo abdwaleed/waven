@@ -6,7 +6,7 @@ No. Waven falls back to CPU. A compatible CUDA GPU accelerates convolution and s
 
 ## How much RAM and free disk do I need?
 
-32 GB RAM or more is recommended for large experiments. Reserve at least twice the GUI estimate of the largest cache product, plus the raw movie, neural cache, and any products you will retain. See [Reusable Caches](reference/storage.md).
+32 GB RAM or more is recommended for large experiments. Reserve at least twice the GUI estimate of the largest cache product, plus the raw movie, neural cache, and any products you will retain. See [Cache Storage and Disk Planning](reference/storage.md).
 
 ## NPY or Zarr?
 
@@ -26,4 +26,4 @@ Yes. Cancel requests safe cooperative stopping at chunk, neuron, or iteration bo
 
 ## What does Save/Load pipeline_config.json do?
 
-It records/restores a GUI setup for later actions. It does not alter a background task that has already captured its settings, and it is not required to enter a new experiment. See [Restore GUI Settings](how-to/prepare-configuration.md).
+It records/restores GUI inputs and optional runtime choices for later actions. It does not alter a background task that has already captured its settings.

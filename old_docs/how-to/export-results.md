@@ -1,10 +1,6 @@
 # Export results
 
-Set **Export folder** at the top of the Export tab, then choose graph scopes and
-file types. Every export writes directly to that folder; it does not create
-nested package directories or ask for a destination again. Save a GUI settings
-snapshot later if you want to restore the same export selections; see
-[Restore GUI Settings](prepare-configuration.md).
+Exports write selected results directly into one folder; they do not create nested package directories. Choose the graph scope, select file types, then click the matching **Export** button.
 
 ## Scopes
 
@@ -16,11 +12,6 @@ snapshot later if you want to restore the same export selections; see
 
 The individual-neuron choices for Run Model and Run Full Model are disabled until their phase caches exist. Selecting them for every neuron can require a model fit per neuron, so it is intentionally explicit.
 
-The Guided Pipeline can also export the selected all-neuron and/or
-individual-neuron graphs after analysis. Its two checkboxes use these same
-Export-tab selections, including **Repeat selections for every analyzed
-neuron**.
-
 ## File formats
 
 | Format | File type | Purpose | Resource impact |
@@ -29,7 +20,7 @@ neuron**.
 | SVG | `.svg` | Editable vector graph suitable for publication. | Can be slower/larger for dense figures. |
 | PKL | `.pkl` | Graph data and analysis values for a trusted Python environment. | Optional; can be much larger and slower because it retains numerical payloads. |
 
-PNG and SVG are selected by default. PKL is opt-in so a normal visual export does not duplicate large numerical arrays in memory and on disk. NPY and Zarr are not export choices: they describe durable analysis caches; see [Reusable Caches](../reference/storage.md).
+PNG and SVG are selected by default. PKL is opt-in so a normal visual export does not duplicate large numerical arrays in memory and on disk. NPY and Zarr are not export choices: they describe durable analysis caches; see [Cache Storage and Disk Planning](../reference/storage.md).
 
 ## Names and orientation files
 

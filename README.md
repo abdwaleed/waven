@@ -18,8 +18,8 @@ python ui.py
 
 `environment.yml` is the CUDA-enabled environment. For a CPU-only machine,
 create a Python 3.10 conda environment and install `requirements-cpu.txt`
-instead. Launch `ui.py` from the repository root so its default
-`pipeline_config.json` and `{PROJECT_ROOT}` paths resolve correctly.
+instead. Launch `ui.py` from the repository root so its default paths resolve
+correctly.
 
 ## What to expect
 
@@ -35,9 +35,9 @@ The supported GUI workflow is convolution-only:
    PKL.
 
 Use **Run Guided Coarse RF Pipeline** in System Configuration to run steps
-1–4 after the inputs are configured. **Save pipeline_config.json** records the
-current GUI settings; **Load pipeline_config.json** restores them and remains
-available while long tasks run.
+1–4 after the inputs are configured. **Save pipeline_config.json** is an
+optional backup of the current GUI settings; **Load pipeline_config.json**
+restores that backup.
 
 For a new experiment, start with the ordered
 [First GUI Analysis guide](docs/tutorials/first-gui-analysis.md). It covers
@@ -58,12 +58,12 @@ storage, and disk planning without duplicating information across pages.
 
 ## Documentation
 
-The documentation site has one ordered path:
+The documentation site has one ordered GUI-first path:
 
-- [Onboarding and first analysis](docs/tutorials/first-gui-analysis.md)
-- [Configuration and scientific settings](docs/how-to/prepare-configuration.md)
-- [Storage, caches, and disk planning](docs/reference/storage.md)
-- [GUI workflow and optional speed settings](docs/reference/gui.md)
+- [First GUI Analysis](docs/tutorials/first-gui-analysis.md)
+- [GUI Onboarding](docs/tutorials/gui-onboarding.md)
+- [Reusable caches and disk planning](docs/reference/storage.md)
+- [Restore a saved GUI setup](docs/how-to/prepare-configuration.md)
 - [Inputs, outputs, and scientific contracts](docs/reference/data-contracts.md)
 - [Source architecture](docs/reference/source-architecture.md)
 
