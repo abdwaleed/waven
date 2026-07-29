@@ -28,6 +28,7 @@
       "amp": false
     },
     "export_path": "{PROJECT_ROOT}/your_experiment/output/exports",
+    "export_dpi": 200,
     "export_files": {
       "png": true,
       "svg": true,

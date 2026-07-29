@@ -19,7 +19,7 @@ import queue
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import sys
 import gc
 import traceback
@@ -65,6 +65,12 @@ from ..gui_support import (
     classify_export_record,
     classify_individual_axis,
     graph_payload,
+)
+from ..gui_support.export_rendering import (
+    DEFAULT_EXPORT_DPI,
+    normalise_export_dpi,
+    render_figure_snapshot,
+    render_individual_bundle,
 )
 from ..runtime.keep_awake import KeepAwake
 from ..runtime.task_control import (
@@ -304,6 +310,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             ("coarse_rf_frequency_mode", coarse_rf_frequency_mode_var),
             ("downsample_format", downsample_format_var),
             ("downsample_percent", downsample_percent_var),
+            ("export_dpi", export_dpi_var),
             ("export_path", export_path_var),
             ("filter_bank_cycles_per_sigma", filter_bank_cycles_per_sigma_var),
             ("filter_bank_density", filter_bank_density_var),
@@ -845,6 +852,13 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
         ):
             _set_entry_value(param_entries["Spks Path"], layout.neural_cache_dir)
+        if force:
+            try:
+                export_path_var.set(str(layout.output_dir / "exports"))
+            except NameError:
+                # The project root can be loaded before the Export panel's Tk
+                # variable has been created during initial GUI construction.
+                pass
 
     def _folder_from_entry(entries, key, default_folder=None):
         """Return a GUI folder value, falling back to a layout folder."""
@@ -1674,6 +1688,28 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             for key, default in defaults.items()
         }
 
+    def _selected_export_dpi():
+        """Return the persisted raster DPI without reading Tk from a worker."""
+        return normalise_export_dpi(
+            _worker_var_value("export_dpi", export_dpi_var, DEFAULT_EXPORT_DPI),
+            DEFAULT_EXPORT_DPI,
+        )
+
+    def _visual_only_export(file_options):
+        """Whether an export can use the fast process-safe visual renderer."""
+        return bool(file_options.get("png") or file_options.get("svg")) and not any(
+            file_options.get(key)
+            for key in ("arrays", "data_pickle", "figure_pickle", "manifest")
+        )
+
+    def _export_worker_count(default=2):
+        """Bound CPU rendering workers so large figures do not exhaust RAM."""
+        try:
+            workers = int(os.environ.get("WAVEN_EXPORT_WORKERS", str(default)))
+        except ValueError:
+            workers = default
+        return max(1, min(workers, 4))
+
     def _selected_export_packaging():
         """Flat exports are written directly into the user-selected folder."""
         return "folder"
@@ -1683,7 +1719,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         return "per_graph"
 
     def _configured_export_root():
-        """Return the configured graph-export folder without opening a dialog."""
+        """Return the base folder that will contain one folder per export task."""
         try:
             value = _worker_var_value("export_path", export_path_var, "").strip()
         except NameError:
@@ -1692,11 +1728,27 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             value = str(_project_layout().output_dir / "exports")
         return value
 
-    def _prepare_export_root():
-        """Create and return the configured graph-export folder when an export starts."""
-        export_root = _configured_export_root()
-        os.makedirs(export_root, exist_ok=True)
-        return export_root
+    def _prepare_export_root(export_label="export"):
+        """Create a unique subfolder for one export task without replacing prior results."""
+        export_base = Path(_configured_export_root())
+        export_base.mkdir(parents=True, exist_ok=True)
+        safe_label = "".join(
+            character if character.isalnum() or character in {"-", "_"} else "_"
+            for character in str(export_label).strip().lower()
+        ).strip("_") or "export"
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        suffix = 1
+        while True:
+            folder_name = f"{timestamp}_{safe_label}"
+            if suffix > 1:
+                folder_name += f"_{suffix}"
+            export_root = export_base / folder_name
+            try:
+                export_root.mkdir()
+            except FileExistsError:
+                suffix += 1
+                continue
+            return str(export_root)
 
     def _validate_export_file_selection():
         """Reject an export with no selected output products."""
@@ -1769,7 +1821,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
     def _export_neuron_prefix(record):
         """Return a stable ``shankX_unitX`` prefix when a graph belongs to one unit."""
-        payload = record.get("export_payload") or {}
+        payload = record.get("export_payload") or record.get("export_identity") or {}
+        if not payload:
+            figure = record.get("figure")
+            payload = getattr(figure, "_waven_export_payload", {}) if figure is not None else {}
         neuron_id = payload.get("neuron_id", payload.get("neuron_index"))
         if neuron_id is None:
             return "all_neurons"
@@ -1818,11 +1873,18 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         manifest_path = os.path.join(base_dir, f"{export_name}_manifest.json")
 
         file_options = record.get("file_options") or _selected_export_files()
+        export_dpi = int(record.get("export_dpi", _selected_export_dpi()))
         if file_options["png"]:
-            _time_export_stage(timing, "png", lambda: fig.savefig(png_path, dpi=200, bbox_inches="tight"))
+            _time_export_stage(
+                timing, "png",
+                lambda: fig.savefig(png_path, dpi=export_dpi, bbox_inches="tight", pad_inches=0.12),
+            )
             _record_export_file(timing, png_path)
         if file_options["svg"]:
-            _time_export_stage(timing, "svg", lambda: fig.savefig(svg_path, format="svg", bbox_inches="tight"))
+            _time_export_stage(
+                timing, "svg",
+                lambda: fig.savefig(svg_path, format="svg", bbox_inches="tight", pad_inches=0.12),
+            )
             _record_export_file(timing, svg_path)
 
         needs_graph_data = bool(file_options["arrays"] or file_options["data_pickle"] or file_options["manifest"])
@@ -1990,6 +2052,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         absent = object()
         cached_artist_data = getattr(fig, "_waven_cached_artist_data", absent)
         export_payload = getattr(fig, "_waven_export_payload", absent)
+        export_identity = {
+            key: export_payload[key]
+            for key in ("neuron_id", "neuron_index", "unit_id")
+            if isinstance(export_payload, dict) and key in export_payload
+        }
         try:
             if cached_artist_data is not absent:
                 delattr(fig, "_waven_cached_artist_data")
@@ -2014,8 +2081,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "export_payload": (
                 None if export_payload is absent or not needs_graph_data else export_payload
             ),
+            # File naming needs only this tiny subset even for a visual-only
+            # export; never retain a full STA/model array just for its prefix.
+            "export_identity": export_identity,
             "array_format": array_format,
             "file_options": selected_files,
+            "export_dpi": _selected_export_dpi(),
         }
 
     def _figure_from_export_snapshot(record):
@@ -2037,6 +2108,25 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             for record in records
         ]
 
+    def _snapshot_visual_job(record, base_dir, index=None):
+        """Build one process-safe whole-figure visual job from a UI snapshot."""
+        title = record.get("title") or "plot"
+        graph_name = _export_safe_name(title, maximum_length=68)
+        export_name = _flat_export_stem(record, graph_name)
+        file_options = record.get("file_options") or _selected_export_files()
+        outputs = {}
+        if file_options.get("png"):
+            outputs["png"] = os.path.join(base_dir, f"{export_name}.png")
+        if file_options.get("svg"):
+            outputs["svg"] = os.path.join(base_dir, f"{export_name}.svg")
+        return {
+            "figure_pickle_bytes": record["figure_pickle_bytes"],
+            "outputs": outputs,
+            "dpi": int(record.get("export_dpi", _selected_export_dpi())),
+            "index": index,
+            "title": title,
+        }
+
     def export_single_graph(record):
         """Function for export single graph.
 
@@ -2057,7 +2147,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
 
         def write_export():
             try:
-                export_root = _prepare_export_root()
+                export_root = _prepare_export_root(title)
                 print(f"[EXPORT] Writing graph 1/1: '{title}'")
                 graph_dir = _export_figure_record(snapshot, export_root, index=1)
                 print(f"[EXPORT] Wrote graph 1/1: {graph_dir}")
@@ -2098,23 +2188,59 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             f"[EXPORT] Queued {export_label} | graphs={len(snapshots)} | "
             + _describe_export_options(file_options, packaging)
         )
-        export_root = _configured_export_root()
+        export_root = _prepare_export_root(export_label)
+        use_parallel_visuals = _visual_only_export(file_options)
+        worker_count = _export_worker_count()
         def write_export():
             exported = []
             failures = []
             try:
-                os.makedirs(export_root, exist_ok=True)
-                for index, record in enumerate(snapshots, start=1):
-                    title = record.get("title") or f"graph {index}"
-                    print(f"[EXPORT] Writing displayed graph {index}/{len(snapshots)}: '{title}'")
-                    try:
-                        graph_dir = _export_figure_record(record, export_root, index=index)
-                        exported.append(graph_dir)
-                        print(f"[EXPORT] Wrote displayed graph {index}/{len(snapshots)}: {graph_dir}")
-                    except Exception as exc:
-                        failures.append({"index": index, "title": title, "error": str(exc)})
-                        print(f"[EXPORT] Skipped '{title}': {exc}")
-                    update_progress(100.0 * index / len(snapshots), "Exporting displayed graphs", f"{index}/{len(snapshots)}")
+                if use_parallel_visuals:
+                    print(
+                        f"[EXPORT] Rendering complete figures in {worker_count} process worker(s) "
+                        "(PNG/SVG only)."
+                    )
+                    pending = {}
+                    with ProcessPoolExecutor(max_workers=worker_count) as writer_pool:
+                        for index, record in enumerate(snapshots, start=1):
+                            title = record.get("title") or f"graph {index}"
+                            print(f"[EXPORT] Queued displayed graph {index}/{len(snapshots)}: '{title}'")
+                            future = writer_pool.submit(
+                                render_figure_snapshot,
+                                _snapshot_visual_job(record, export_root, index=index),
+                            )
+                            pending[future] = (index, title)
+                        completed = 0
+                        for future in as_completed(pending):
+                            index, title = pending[future]
+                            completed += 1
+                            try:
+                                result = future.result()
+                                exported.append(export_root)
+                                print(
+                                    f"[EXPORT] Wrote displayed graph {index}/{len(snapshots)}: "
+                                    f"{title} ({result['seconds']:.2f}s)"
+                                )
+                            except Exception as exc:
+                                failures.append({"index": index, "title": title, "error": str(exc)})
+                                print(f"[EXPORT] Skipped '{title}': {exc}")
+                            update_progress(
+                                100.0 * completed / len(snapshots),
+                                "Exporting displayed graphs",
+                                f"{completed}/{len(snapshots)}",
+                            )
+                else:
+                    for index, record in enumerate(snapshots, start=1):
+                        title = record.get("title") or f"graph {index}"
+                        print(f"[EXPORT] Writing displayed graph {index}/{len(snapshots)}: '{title}'")
+                        try:
+                            graph_dir = _export_figure_record(record, export_root, index=index)
+                            exported.append(graph_dir)
+                            print(f"[EXPORT] Wrote displayed graph {index}/{len(snapshots)}: {graph_dir}")
+                        except Exception as exc:
+                            failures.append({"index": index, "title": title, "error": str(exc)})
+                            print(f"[EXPORT] Skipped '{title}': {exc}")
+                        update_progress(100.0 * index / len(snapshots), "Exporting displayed graphs", f"{index}/{len(snapshots)}")
                 manifest = {
                     "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "count": len(exported),
@@ -2255,9 +2381,103 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             result["manifest"] = "data_manifest.json"
         return result
 
+    _HEADLESS_INDIVIDUAL_GRAPH_KINDS = {
+        "spike_train", "receptive_field", "elevation", "azimuth",
+        "orientation_correlation", "orientation_firing_rate", "size_tuning",
+        "spatial_frequency", "sta",
+    }
+
+    def _headless_individual_export_jobs(records, base_dir, selected_kinds, file_options, dpi):
+        """Build compact, selected-graph jobs without pickling any GUI figure.
+
+        The current display figures are inspected only to identify which graph
+        panels exist and retain their exact labels.  Their scientific payloads
+        are already attached during Coarse RF analysis, so worker processes
+        receive arrays/metadata rather than Matplotlib's interactive object
+        tree.  Returning ``None`` keeps an unsupported future graph on the
+        established compatibility exporter instead of silently changing it.
+        """
+        jobs = []
+        selected_kinds = set(selected_kinds)
+        for record in records:
+            figure = record.get("figure")
+            if figure is None:
+                return None
+            full_payload = record.get("export_payload") or getattr(
+                figure, "_waven_export_payload", None
+            )
+            for axis_index, axis in enumerate(figure.axes):
+                if not axis.get_visible():
+                    continue
+                title = axis.get_title().strip()
+                if not title:
+                    continue
+                graph_kind = classify_individual_axis(record.get("tab"), record.get("title"), title)
+                if graph_kind not in selected_kinds:
+                    continue
+                if graph_kind not in _HEADLESS_INDIVIDUAL_GRAPH_KINDS:
+                    return None
+                payload = graph_payload(full_payload, graph_kind)
+                if graph_kind == "spike_train":
+                    # The display line is already trial-averaged.  Do not copy
+                    # its potentially large trial-by-frame source matrix into
+                    # every process worker merely to draw that one line.
+                    payload.pop("trial_spikes", None)
+                elif graph_kind in {"orientation_correlation", "orientation_firing_rate"}:
+                    orientation_record = payload.get("orientation_export")
+                    if isinstance(orientation_record, dict):
+                        tuning = dict(orientation_record.get("tuning") or {})
+                        payload["orientation_export"] = {
+                            "tuning": {
+                                key: tuning[key]
+                                for key in ("orientations", "mean_values", "sem_values", "value_label")
+                                if key in tuning
+                            }
+                        }
+                    payload.pop("orientation_correlation_export", None)
+                    payload.pop("orientation_firing_rate_export", None)
+                if graph_kind == "sta":
+                    maps = np.asarray(payload.pop("sta_maps", ()), dtype=float)
+                    lag_index = axis_index
+                    if lag_index >= maps.shape[0]:
+                        # The STA dashboard may contain removed unused axes;
+                        # never attach an unrelated lag map to a file.
+                        continue
+                    lag_ms = np.asarray(payload.pop("sta_lag_ms", ()), dtype=float)
+                    payload.pop("sta_lag_frames", None)
+                    payload.pop("sta_variances", None)
+                    payload["sta_map"] = maps[lag_index]
+                    payload["sta_color_limits"] = (
+                        float(np.nanmin(maps)), float(np.nanmax(maps)),
+                    )
+                    if lag_index < lag_ms.size:
+                        # The displayed title already contains this label; the
+                        # field remains useful to data consumers/debug logs.
+                        payload["sta_lag_ms"] = float(lag_ms[lag_index])
+                graph_name = _flat_export_stem(record, _export_safe_name(title, maximum_length=68))
+                outputs = {}
+                if file_options.get("png"):
+                    outputs["png"] = os.path.join(base_dir, f"{graph_name}.png")
+                if file_options.get("svg"):
+                    outputs["svg"] = os.path.join(base_dir, f"{graph_name}.svg")
+                jobs.append(
+                    {
+                        "graph_kind": graph_kind,
+                        "title": title,
+                        "payload": payload,
+                        "outputs": outputs,
+                        # Maps benefit from a slightly taller colorbar canvas;
+                        # line plots retain a conventional centered artboard.
+                        "figsize": (6.4, 5.2)
+                        if graph_kind in {"receptive_field", "sta"}
+                        else (6.4, 4.8),
+                    }
+                )
+        return jobs
+
     def _export_individual_axes(
         records, base_dir, selected_kinds=None, array_format=None, file_options=None,
-        numeric_layout="per_graph",
+        numeric_layout="per_graph", dpi=None,
     ):
         """Write selected individual-neuron axes as one-graph export bundles.
 
@@ -2279,7 +2499,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         axis_root = base_dir
         os.makedirs(axis_root, exist_ok=True)
         exported = []
-        png_dpi = 200
+        png_dpi = normalise_export_dpi(dpi if dpi is not None else _selected_export_dpi())
         for record_index, record in enumerate(records, start=1):
             fig = _time_export_stage(timing, "restore", lambda record=record: _figure_from_export_snapshot(record))
             _time_export_stage(timing, "draw", fig.canvas.draw)
@@ -2296,53 +2516,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             )
             if not has_selected_axis:
                 continue
-            # A single dashboard commonly contributes many one-axis export
-            # files.  Rasterize it once and crop the selected axes, instead of
-            # rasterizing the entire dashboard again for every PNG.  The SVG
-            # remains vector-native and is still written by Matplotlib below.
-            full_png = None
-            if file_options["png"]:
-                try:
-                    figure_width, figure_height = fig.get_size_inches()
-                    estimated_bytes = int(figure_width * png_dpi * figure_height * png_dpi * 4)
-                    # A shared render avoids repeated full-dashboard draws, but
-                    # its decoded pixels are the largest transient allocation
-                    # in the exporter.  Keep that allocation bounded; users
-                    # processing unusually large figures can raise the cap.
-                    shared_png_limit_mb = float(os.environ.get("WAVEN_EXPORT_SHARED_PNG_MB", "64"))
-                    if estimated_bytes <= max(1, shared_png_limit_mb) * 1024 * 1024:
-                        png_buffer = io.BytesIO()
-                        _time_export_stage(timing, "png", lambda: fig.savefig(png_buffer, format="png", dpi=png_dpi))
-                        png_buffer.seek(0)
-                        def load_shared_png():
-                            image = Image.open(png_buffer)
-                            image.load()
-                            png_buffer.close()
-                            return image
-                        full_png = _time_export_stage(timing, "png", load_shared_png)
-                except Exception as exc:
-                    # Keep the established per-axis save path as a safe fallback
-                    # for an unusual backend or exceptionally large figure.
-                    print(f"[EXPORT] Shared PNG render unavailable; using per-axis renders: {exc}")
-
             def save_axis_png(path, bbox_inches):
-                if full_png is None:
-                    fig.savefig(path, dpi=png_dpi, bbox_inches=bbox_inches)
-                    return
-                left = int(np.floor(bbox_inches.x0 * png_dpi))
-                upper = int(np.floor((figure_height - bbox_inches.y1) * png_dpi))
-                right = int(np.ceil(bbox_inches.x1 * png_dpi))
-                lower = int(np.ceil((figure_height - bbox_inches.y0) * png_dpi))
-                width, height = full_png.size
-                crop_box = (max(0, left), max(0, upper), min(width, right), min(height, lower))
-                if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
-                    fig.savefig(path, dpi=png_dpi, bbox_inches=bbox_inches)
-                    return
-                cropped = full_png.crop(crop_box)
-                try:
-                    cropped.save(path, format="PNG")
-                finally:
-                    cropped.close()
+                fig.savefig(path, dpi=png_dpi, bbox_inches=bbox_inches, pad_inches=0)
 
             for axis_index, axis in enumerate(fig.axes):
                 if not axis.get_visible():
@@ -2355,8 +2530,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     continue
                 graph_name = _flat_export_stem(record, _export_safe_name(title, maximum_length=68))
                 graph_dir = axis_root
-                bbox = axis.get_tightbbox(renderer).expanded(1.08, 1.16)
-                bbox_inches = bbox.transformed(fig.dpi_scale_trans.inverted())
+                bbox = axis.get_tightbbox(renderer)
+                # The compatibility data-export path still uses dashboard axes.
+                # Measure after draw and add a real physical margin so no text
+                # is clipped or pressed against the output edge.
+                bbox_inches = bbox.transformed(fig.dpi_scale_trans.inverted()).padded(0.12)
                 visual_files = []
                 if file_options["png"]:
                     png_path = os.path.join(
@@ -2370,7 +2548,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         graph_dir, f"{graph_name}.svg",
                     )
                     _time_export_stage(
-                        timing, "svg", lambda: fig.savefig(svg_path, format="svg", bbox_inches=bbox_inches),
+                        timing, "svg", lambda: fig.savefig(
+                            svg_path, format="svg", bbox_inches=bbox_inches, pad_inches=0,
+                        ),
                     )
                     _record_export_file(timing, svg_path)
                     visual_files.append(os.path.relpath(svg_path, base_dir))
@@ -2511,8 +2691,6 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                         _record_export_file(timing, manifest_path)
                 exported.append(graph_dir)
                 timing["graphs"] += 1
-            if full_png is not None:
-                full_png.close()
             _release_export_figure(record, fig)
         if consolidated is not None:
             _write_consolidated_numeric_bundle(base_dir, consolidated, file_options, timing)
@@ -2550,8 +2728,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "Select 'Prepare Run Full Model Phase Caches' in Prepare Analysis Caches and create them first.",
             )
             return
-        export_root = _configured_export_root()
-        os.makedirs(export_root, exist_ok=True)
+        export_root = _prepare_export_root("all_individual_neurons")
         jobs = [("coarse_rf", rf_count, rf_draw, "Individual neuron")]
         sta_batch = individual_neuron_renderer.get("sta_batch") if "sta" in selected_kinds else None
         sta_batch_size = individual_neuron_renderer.get("sta_batch_size") if sta_batch is not None else None
@@ -2571,20 +2748,24 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         batch_entry_values, batch_variable_values = _capture_worker_ui_values()
         batch_array_format = "npy"
         batch_numeric_layout = _selected_export_numeric_layout()
-        try:
-            batch_workers = int(os.environ.get("WAVEN_EXPORT_WORKERS", "2"))
-        except ValueError:
-            batch_workers = 2
-        batch_workers = max(1, min(batch_workers, 4))
-        # A queued job already contains a serialized Matplotlib figure.  More
-        # queued snapshots do not increase writer throughput, but can double
-        # peak RAM, so keep at most one job per active writer.
+        batch_dpi = _selected_export_dpi()
+        batch_workers = _export_worker_count()
+        # Data-first jobs are plain NumPy arrays and metadata, so process
+        # workers gain genuine CPU parallelism.  Model graphs and numerical
+        # bundles retain the legacy writer because they deliberately export
+        # Matplotlib/data-pickle state not represented by a compact payload.
+        batch_data_first = _visual_only_export(batch_file_options) and not (
+            export_run_model or export_run_full_model
+        )
+        # Keep at most one prepared job per active writer; otherwise the GUI
+        # could retain several large STA payloads before workers begin.
         batch_queue_limit = batch_workers
         total_neurons = sum(job[1] for job in jobs)
         export_started = time.perf_counter()
         print(
             f"[EXPORT] Pipeline | workers={batch_workers} | queue={batch_queue_limit} | "
-            f"numeric_layout={batch_numeric_layout}"
+            f"renderer={'data-first processes' if batch_data_first else 'legacy threads'} | "
+            f"dpi={batch_dpi} | numeric_layout={batch_numeric_layout}"
         )
         state = {
             "job": 0,
@@ -2597,9 +2778,12 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "pending": {},
             "finished": 0,
             "finalizing": False,
-            "writer_pool": ThreadPoolExecutor(
-                max_workers=batch_workers, thread_name_prefix="waven-export",
+            "writer_pool": (
+                ProcessPoolExecutor(max_workers=batch_workers)
+                if batch_data_first
+                else ThreadPoolExecutor(max_workers=batch_workers, thread_name_prefix="waven-export")
             ),
+            "data_first": batch_data_first,
         }
 
         def report_finished(kind, count):
@@ -2631,7 +2815,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     print(f"[EXPORT] Skipped {kind} neuron {neuron_id}: {exc}")
                     report_finished(kind, 0)
                     continue
-                report_finished(kind, len(exported_graphs))
+                if isinstance(exported_graphs, dict):
+                    graph_count = int(exported_graphs.get("graphs", 0))
+                    print(
+                        f"[EXPORT] Rendered {graph_count} selected graph(s) for {kind} neuron {neuron_id} "
+                        f"in {float(exported_graphs.get('seconds', 0.0)):.2f}s."
+                    )
+                else:
+                    graph_count = len(exported_graphs)
+                report_finished(kind, graph_count)
 
         def finish_export():
             """Finalize only after every bounded worker job has been reaped."""
@@ -2825,15 +3017,31 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                     record for record in _active_export_records(tab_name)
                     if classify_export_record(record.get("tab"), record.get("title")) not in model_tuning_export_kinds
                 ]
-                snapshots = _snapshot_export_records(base_records)
-                snapshots.extend(model_snapshots or [])
-                future = state["writer_pool"].submit(
-                    _export_individual_axes,
-                    snapshots, neuron_dir, selected_kinds,
-                    array_format=batch_array_format,
-                    file_options=batch_file_options,
-                    numeric_layout=batch_numeric_layout,
-                )
+                if state["data_first"]:
+                    headless_jobs = _headless_individual_export_jobs(
+                        base_records, neuron_dir, selected_kinds,
+                        batch_file_options, batch_dpi,
+                    )
+                    if headless_jobs is None:
+                        raise RuntimeError(
+                            "A selected graph has no data-first renderer. "
+                            "Enable a data export format to use the compatibility exporter."
+                        )
+                    future = state["writer_pool"].submit(
+                        render_individual_bundle,
+                        {"graphs": headless_jobs, "dpi": batch_dpi},
+                    )
+                else:
+                    snapshots = _snapshot_export_records(base_records)
+                    snapshots.extend(model_snapshots or [])
+                    future = state["writer_pool"].submit(
+                        _export_individual_axes,
+                        snapshots, neuron_dir, selected_kinds,
+                        array_format=batch_array_format,
+                        file_options=batch_file_options,
+                        numeric_layout=batch_numeric_layout,
+                        dpi=batch_dpi,
+                    )
                 state["pending"][future] = (kind, neuron_id)
                 state["neuron_id"] += 1
                 root.after(1, export_next_graph_type)
@@ -5614,8 +5822,11 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "neuron_index": neuron_id,
                             "unit_id": raw_unit_id,
                             "rf2d": rf2d,
+                            "rf_extent_degrees": (xM, xm, ym, yM),
                             "azimuth_correlation_tuning": azimuth_tuning,
+                            "azimuth_degrees": np.linspace(xM, xm, azimuth_tuning.size),
                             "elevation_correlation_tuning": elevation_tuning[::-1],
+                            "elevation_degrees": np.linspace(ym, yM, elevation_tuning.size),
                             "orientation_correlation_tuning": ori_tun,
                             "orientation_correlation_ci_95": ori_ci_plot,
                             "orientation_firing_rate_tuning": rate_ori_tun,
@@ -5626,8 +5837,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                             "orientation_firing_rate_export": firing_rate_record,
                             "size_tuning": s_tuning,
                             "size_correlation_ci_95": size_ci,
+                            "size_degrees": np.asarray(sigmas_deg),
                             "frequency_tuning": f_tuning if has_frequency_axis else None,
                             "frequency_tuning_available": has_frequency_axis,
+                            "frequency_cpd": np.asarray(rf_frequencies) if has_frequency_axis else None,
                             "best_params": np.asarray(rfs_gabor[1])[:, neuron_id],
                             "retinotopy": np.asarray(rfs_gabor[2])[:, neuron_id],
                         },
@@ -6837,7 +7050,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showinfo("No Retinotopy Data", str(exc))
             print(f"Retinotopy export skipped: {exc}")
             return
-        path = os.path.join(_prepare_export_root(), "retinotopy_matrix.npy")
+        path = os.path.join(_prepare_export_root("retinotopy"), "retinotopy_matrix.npy")
         try:
             retinotopy = np.asarray(
                 state.get("rf_retinotopy", state.get("rfs_gabor", [None, None, None])[2])
@@ -6863,7 +7076,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             messagebox.showinfo("No Plots", "Run an analysis before exporting plots.")
             print("No embedded plots are available to export.")
             return
-        export_dir = _prepare_export_root()
+        export_dir = _prepare_export_root("svg_plots")
         exported = 0
         failures = []
         try:
@@ -6936,6 +7149,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 "suite2p_subject_dirs": suite2p_subject_dirs_var.get().strip(),
                 "suite2p_output_dir": suite2p_output_dir_var.get().strip(),
                 "export_path": export_path_var.get().strip(),
+                "export_dpi": _selected_export_dpi(),
                 "export_files": _selected_export_files(),
                 "export_selections": {
                     selection: {
@@ -7078,6 +7292,8 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
                 )
             if "export_path" in save_options:
                 export_path_var.set(str(save_options["export_path"]).strip())
+            if "export_dpi" in save_options:
+                export_dpi_var.set(str(normalise_export_dpi(save_options["export_dpi"])))
             for state_key, variable in (
                 ("active_coarse_cache_path", active_coarse_cache_path_var),
                 ("active_full_model_cache_path", active_full_model_cache_path_var),
@@ -7831,6 +8047,9 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         value=str(configured_guided_export.get("individual_neurons", "")).strip().lower() in {"1", "true", "yes", "on"}
     )
     export_path_var = tk.StringVar(value=str(gui_options.get("export_path", "")).strip())
+    export_dpi_var = tk.StringVar(
+        value=str(normalise_export_dpi(gui_options.get("export_dpi", DEFAULT_EXPORT_DPI)))
+    )
     active_coarse_cache_path_var = tk.StringVar(
         value=str(gui_options.get("active_coarse_cache_path", "")).strip()
     )
@@ -7857,7 +8076,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         try:
             if workflow == WORKFLOW_2P:
                 if not suite2p_dirs_frame.winfo_manager():
-                    suite2p_dirs_frame.pack(fill=tk.X, pady=(0, 8))
+                    suite2p_dirs_frame.pack(fill=tk.X, pady=(0, 8), after=workflow_frame)
             else:
                 suite2p_dirs_frame.pack_forget()
         except NameError:
@@ -7913,14 +8132,15 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     automation_frame.pack(fill=tk.X, pady=(0, 8))
     ctk.CTkLabel(
         automation_frame,
-        text="Guided pipeline",
+        text="Pipeline automation — run after configuration",
         text_color=text_color,
         font=ctk.CTkFont(size=12, weight="bold"),
     ).pack(anchor="w", padx=10, pady=(8, 2))
     ctk.CTkLabel(
         automation_frame,
         text=(
-            "Prepares the stimulus and neural caches, builds the Coarse RF cache, and runs Coarse RF analysis."
+            "After you configure the stimulus, neural source, filters, cache paths, and export choices throughout the GUI, "
+            "this runs the configured pipeline: prepares caches, builds the Coarse RF cache, and runs Coarse RF analysis."
         ),
         text_color=muted_text,
         justify="left",
@@ -7928,7 +8148,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     ).pack(anchor="w", padx=10, pady=(0, 6))
     btn_run_guided_pipeline = ctk.CTkButton(
         automation_frame,
-        text="Run Guided Coarse RF Pipeline",
+        text="Run Configured Coarse RF Pipeline",
         height=30,
         fg_color=success_btn,
         hover_color=success_hover,
@@ -7937,7 +8157,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     btn_run_guided_pipeline.pack(fill=tk.X, padx=10, pady=(0, 10))
     ctk.CTkLabel(
         automation_frame,
-        text="After analysis, also export:",
+        text="After the configured pipeline finishes, also export:",
         text_color=muted_text,
         font=ctk.CTkFont(size=11, weight="bold"),
     ).pack(anchor="w", padx=10, pady=(0, 2))
@@ -8184,13 +8404,14 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             "Rebuild the coarse Gabor kernels and Coarse RF power cache before analysis."
         )
 
-    ctk.CTkLabel(
+    shared_grid_note = ctk.CTkLabel(
         frame_session,
         text="One metadata-derived analysis grid is shared by Coarse RF, Run Model, and Run Full Model.",
         text_color=muted_text,
         wraplength=330,
         justify="left",
-    ).pack(fill=tk.X, pady=(8, 2), after=automation_frame)
+    )
+    shared_grid_note.pack(fill=tk.X, pady=(8, 2), after=automation_frame)
 
     runtime_toggle = ctk.CTkButton(
         frame_session,
@@ -8903,19 +9124,56 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
             default = existing_values.get(key, filtered_param_defaults.get(key, ""))
             add_config_row(frame_params, key, default, param_entries, section_row, frame_color, ANALYSIS_LABELS)
             section_row += 1
-    recovery_frame = ttk.LabelFrame(frame_session, text="Recovery & Resume", padding=(10, 8))
+    recovery_frame = ttk.LabelFrame(frame_session, text="Project & recovery folders", padding=(10, 8))
     recovery_frame.pack(fill=tk.X, pady=(8, 0))
     recovery_frame.columnconfigure(1, weight=1)
     add_config_row(
-        recovery_frame, "Recovery Cache Directory",
-        param_defaults.get("Recovery Cache Directory", ""),
+        recovery_frame, "Project Root",
+        param_defaults.get("Project Root", DEFAULT_COMMON_PARAMS.get("Project Root", "")),
         param_entries, 0, frame_color, ANALYSIS_LABELS,
     )
     add_config_row(
-        recovery_frame, "Project Root",
-        param_defaults.get("Project Root", DEFAULT_COMMON_PARAMS.get("Project Root", "")),
+        recovery_frame, "Recovery Cache Directory",
+        param_defaults.get("Recovery Cache Directory", ""),
         param_entries, 1, frame_color, ANALYSIS_LABELS,
     )
+
+    def _sync_export_folder_with_project_root(_event=None):
+        """Keep the export base folder inside the currently configured project."""
+        try:
+            export_path_var.set(str(_project_layout().output_dir / "exports"))
+        except Exception as exc:
+            print(f"Could not update export folder for the project root: {exc}")
+
+    param_entries["Project Root"].bind(
+        "<FocusOut>", _sync_export_folder_with_project_root, add="+"
+    )
+
+    # Place the session controls in the order users configure the pipeline:
+    # project paths first, persistent configuration next, optional performance
+    # controls, then the explicitly final automation action.
+    runtime_is_visible = bool(runtime_frame.winfo_manager())
+    for widget in (
+        workflow_frame,
+        session_actions,
+        runtime_toggle,
+        runtime_frame,
+        automation_frame,
+        shared_grid_note,
+        suite2p_dirs_frame,
+        recovery_frame,
+    ):
+        widget.pack_forget()
+    recovery_frame.pack(fill=tk.X, pady=(0, 8))
+    session_actions.pack(fill=tk.X, pady=(0, 8))
+    runtime_toggle.pack(fill=tk.X, pady=(0, 4))
+    if runtime_is_visible:
+        runtime_frame.pack(fill=tk.X, pady=(0, 8), after=runtime_toggle)
+    automation_frame.pack(fill=tk.X, pady=(16, 8))
+    shared_grid_note.pack(fill=tk.X, pady=(0, 8))
+    workflow_frame.pack(fill=tk.X, pady=(0, 8))
+    if workflow == WORKFLOW_2P:
+        suite2p_dirs_frame.pack(fill=tk.X, pady=(0, 8), after=workflow_frame)
     wavelet_paths_frame = ttk.LabelFrame(frame_processing, text="Cache folders", padding=(10, 8))
     wavelet_paths_frame.pack(fill=tk.X, pady=(0, 8), before=btn_submit_wavelet)
     wavelet_paths_frame.columnconfigure(1, weight=1)
@@ -9749,7 +10007,10 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
     export_path_frame.columnconfigure(0, weight=1)
     ctk.CTkLabel(
         export_path_frame,
-        text="All graph exports use this folder. Change it here instead of choosing a location for each export.",
+        text=(
+            "This is the export base folder. Every export task creates its own timestamped "
+            "subfolder here, so previous export results are preserved."
+        ),
         text_color=muted_text,
         wraplength=650,
         justify="left",
@@ -9758,7 +10019,7 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         export_path_frame,
         textvariable=export_path_var,
         height=30,
-        placeholder_text="Folder for exported graphs",
+        placeholder_text="Base folder for export-task subfolders",
     )
     export_path_entry.grid(row=1, column=0, sticky="ew")
 
@@ -9777,6 +10038,34 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         hover_color=secondary_hover,
         command=choose_export_path,
     ).grid(row=1, column=1, padx=(6, 0))
+
+    export_quality_frame = ttk.LabelFrame(frame_export, text="Image quality", padding=(10, 8))
+    export_quality_frame.pack(fill=tk.X, pady=(0, 10))
+    export_quality_frame.columnconfigure(1, weight=1)
+    ctk.CTkLabel(
+        export_quality_frame,
+        text="Export DPI",
+        text_color=text_color,
+    ).grid(row=0, column=0, sticky="w", padx=(0, 10))
+    ctk.CTkOptionMenu(
+        export_quality_frame,
+        values=("100", "150", "200", "300", "450", "600"),
+        variable=export_dpi_var,
+        width=120,
+        fg_color=choice_btn,
+        button_color=choice_btn,
+        button_hover_color=choice_hover,
+    ).grid(row=0, column=1, sticky="w")
+    ctk.CTkLabel(
+        export_quality_frame,
+        text=(
+            "100–150 DPI is faster for review; 200 is the default. Higher DPI affects PNGs "
+            "and raster elements embedded in SVGs; vector lines and text remain scalable."
+        ),
+        text_color=muted_text,
+        wraplength=520,
+        justify="left",
+    ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     configured_export_files = dict(gui_options.get("export_files") or {})
     configured_export_selections = dict(gui_options.get("export_selections") or {})
@@ -9926,21 +10215,35 @@ def run(param_defaults=None, gabor_param=None, workflow=None, gui_options=None):
         if not _validate_export_file_selection():
             return
         try:
-            snapshots = _snapshot_export_records(records)
+            file_options = _selected_export_files()
+            export_dpi = _selected_export_dpi()
+            selected_dir = _prepare_export_root("individual_neuron")
+            headless_jobs = (
+                _headless_individual_export_jobs(
+                    records, selected_dir, selected_kinds, file_options, export_dpi,
+                )
+                if _visual_only_export(file_options)
+                else None
+            )
+            snapshots = None if headless_jobs is not None else _snapshot_export_records(records)
         except Exception as exc:
             messagebox.showerror("Export Failed", f"Could not prepare individual graphs: {exc}")
             return
 
         def write_export():
-            selected_dir = _prepare_export_root()
-            exported = _export_individual_axes(
-                snapshots, selected_dir, selected_kinds, file_options=_selected_export_files(),
-            )
-            print(f"[DONE] Exported {len(exported)} individual graph(s) to: {selected_dir}")
+            if headless_jobs is not None:
+                result = render_individual_bundle({"graphs": headless_jobs, "dpi": export_dpi})
+                exported_count = int(result["graphs"])
+            else:
+                exported = _export_individual_axes(
+                    snapshots, selected_dir, selected_kinds, file_options=file_options, dpi=export_dpi,
+                )
+                exported_count = len(exported)
+            print(f"[DONE] Exported {exported_count} individual graph(s) to: {selected_dir}")
             if show_completion:
                 schedule_on_ui(
                     lambda: messagebox.showinfo(
-                        "Export Complete", f"Exported {len(exported)} graph(s).\n\n{selected_dir}"
+                        "Export Complete", f"Exported {exported_count} graph(s).\n\n{selected_dir}"
                     )
                 )
             return True

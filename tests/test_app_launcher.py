@@ -16,7 +16,7 @@ def test_load_launch_settings_merges_legacy_common_and_ephys_values(tmp_path):
                 "common": {"Project Root": "{PROJECT_ROOT}/experiment"},
                 "ephys": {"Sampling Rate (samples / sec)": "30000"},
                 "gabor": {"N_thetas": "12"},
-                "gui": {"theme": "dark"},
+                "gui": {"theme": "dark", "export_dpi": 150},
             }
         ),
         encoding="utf-8",
@@ -29,7 +29,7 @@ def test_load_launch_settings_merges_legacy_common_and_ephys_values(tmp_path):
     assert settings.param_defaults["Sampling Rate (samples / sec)"] == "30000"
     assert settings.param_defaults["Project Root"].endswith("/experiment")
     assert settings.gabor_defaults == {"N_thetas": "12"}
-    assert settings.gui_options == {"theme": "dark"}
+    assert settings.gui_options == {"theme": "dark", "export_dpi": 150}
 
 
 def test_launch_from_project_passes_resolved_settings_without_creating_a_gui(tmp_path):

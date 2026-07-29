@@ -1,7 +1,7 @@
 # GUI Onboarding
 
-This is the primary way to run WavEn. Enter your experiment in the GUI, work
-from top to bottom, and save `pipeline_config.json` only when you want a
+This is the primary way to run WavEn. Feel free to enter your experiment settings in the GUI
+as you read this guide, and save `pipeline_config.json` only when you want a
 restorable snapshot of those choices. If you prefer a JSON-first workflow, use
 [Restore GUI Settings](../how-to/prepare-configuration.md); the field meanings
 there are the same as the descriptions below.
@@ -23,18 +23,44 @@ input, cache, and output folders as defaults.
     `pipeline_config.json`, Performance & Hardware, and the Guided Pipeline
     button with its export checkboxes.
 
-| Control | Input type | Output | Output type | Relevance and configuration |
-| --- | --- | --- | --- | --- |
-| Project Root Folder | Writable directory | Conventional experiment tree | Folder tree | The root for `input/`, `cache/`, and `output/`. Set this before selecting generated-cache folders. |
-| Recovery Checkpoint Directory | Directory | Restartable task checkpoints | Small JSON/tile files | Lets a long task resume or report durable completed work. Leave at the project default unless checkpoints belong on another drive. |
-| Performance & Hardware | Checkboxes/dropdowns | Process-local speed choices | Runtime settings | Optional. Enable only features your hardware supports; scientific results and cache compatibility do not change. |
-| Run Guided Coarse RF Pipeline | Button + export checkboxes | Runs prerequisite stages in order | Prepared inputs, analysis, optional exports | A good first run after all inputs are set. It obeys the current cache choice and Export-tab selections. |
-| Save / Load `pipeline_config.json` | File action | A saved/restored GUI snapshot | JSON backup file | Optional convenience for a known-good session. It is not required to enter or run an experiment. |
+### Project Root Folder
+
+This is the root for `input/`, `cache/`, and `output/`. Set this folder ideally in an NVME SSD or at least any SSD. USB peripherals
+may cause read/write bottlenecks, however, so ensure the used disk drive is ideally installed as an internal system drive.
+
+### Recovery Checkpoint Directory
+
+If you set `Project Root Folder` above, this field auto-updates to point to the `output/` subfolder, if you recall from the [First GUI Analysis](first-gui-analysis.md) section. Otherwise, you can hardcode a specific desired recovery folder path. In both cases, the program
+will populate either folder with the same subfolders and files.
+
+### Save / Load `pipeline_config.json`
+
+Optional convenience for saving or loading the input configurations of a known-good session. It is not required to enter or run an experiment.
+
+### Performance & Hardware
+
+Multiple features here tend to speedup the code tremendously. For safety, all these features have fallbacks in case they fail.
+
+- **RAM acceleration cache (later analysis):** Keeps safely sized, repeatedly used model-phase and PSTH/STA arrays in memory to accelerate later analysis. Large arrays remain disk-backed automatically.
+
+- **Use compatible GPUs:** Enables parallel convolution across multiple CUDA GPUs only when their capabilities are sufficiently compatible. Incompatible or substantially slower GPUs are excluded to avoid slowing the run. The hardware status text at the bottom of this panel reports whether CUDA GPUs are detected and whether multi-GPU processing can have any effect on the current computer.
+
+- **Compile stable convolution kernels (experimental):** Uses torch.compile after a one-time warm-up to optimize repeated convolution operations. If compilation fails, processing falls back safely to normal execution. Apparently, this is only supported on Linux systems.
+
+- **Tensor Core convolution (fast precision):** Uses CUDA float16 autocasting for wavelet convolution on supported GPUs. Coarse-RF statistics retain their existing precision.
+
+- **Release RAM acceleration cache:** Immediately frees arrays held by the optional RAM cache without changing whether the RAM-cache option is enabled for future work.
+
+### Automate Guided Coarse RF Pipeline
+
+After configuring all the experimental configurations the stimulus, neural data source, visual coverage, sampling, Gabor filter bank, cache folders, and export selections throughout the GUI, use this section to **automate** "clicking the buttons" in the GUI.
+
+The automated pipeline prepares the stimulus cache, validates or creates the neural cache, builds the Coarse RF cache, and runs Coarse RF analysis. Optionally, it can export the all-neuron and individual-neuron graphs selected in the Export section after analysis completes. Review and save your pipeline_config.json before running, especially when creating a new cache version or processing a large dataset.
 
 ## 2. Stimulus Video
 
-Choose the movie, define its visual extent, then choose the analysis sampling.
-The GUI reads movie width, height, frame count, and FPS automatically.
+Choose the movie, define its visual extent, then choose the analysis visual coverage.
+The GUI reads movie width, height, frame count, and FPS automatically from metadata.
 
 !!! note "Screenshot blueprint: Stimulus Video"
     Show the Stimulus Movie Folder path at the top, Visual Field Coverage and

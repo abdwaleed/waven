@@ -46,25 +46,40 @@ def show_missing_dependency_error(exc):
     print(message, file=ORIGINAL_STDERR)
 
 
-try:
-    import waven
-    from waven.app.launcher import launch_from_project
+def main():
+    """Launch the GUI only in the parent process.
 
-    launch_from_project(PROJECT_ROOT)
-except SystemExit:
-    raise
-except ModuleNotFoundError as exc:
-    show_missing_dependency_error(exc)
-    raise SystemExit(1) from exc
-except Exception:
-    log_path = PROJECT_ROOT / "waven_launch_error.log"
-    details = traceback.format_exc()
-    log_path.write_text(details, encoding="utf-8")
-    message = (
-        "The waven GUI crashed during startup.\n\n"
-        f"Traceback saved to:\n{log_path}\n\n"
-        f"{details}"
-    )
-    show_startup_error("waven startup failed", message)
-    print(message, file=ORIGINAL_STDERR)
-    raise SystemExit(1)
+    Windows uses ``spawn`` for process workers.  Keeping launch code behind
+    this guard prevents every export renderer from recursively opening a new
+    GUI while it starts its own Python interpreter.
+    """
+    try:
+        import waven
+        from waven.app.launcher import launch_from_project
+
+        launch_from_project(PROJECT_ROOT)
+    except SystemExit:
+        raise
+    except ModuleNotFoundError as exc:
+        show_missing_dependency_error(exc)
+        raise SystemExit(1) from exc
+    except Exception:
+        log_path = PROJECT_ROOT / "waven_launch_error.log"
+        details = traceback.format_exc()
+        log_path.write_text(details, encoding="utf-8")
+        message = (
+            "The waven GUI crashed during startup.\n\n"
+            f"Traceback saved to:\n{log_path}\n\n"
+            f"{details}"
+        )
+        show_startup_error("waven startup failed", message)
+        print(message, file=ORIGINAL_STDERR)
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    # Required for frozen Windows builds and harmless for a normal Python run.
+    import multiprocessing
+
+    multiprocessing.freeze_support()
+    main()

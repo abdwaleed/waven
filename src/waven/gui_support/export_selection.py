@@ -105,9 +105,9 @@ def classify_individual_axis(tab: str, figure_title: str, axis_title: str) -> st
 
 _PAYLOAD_KEYS = {
     "spike_train": ("spike_train", "trial_spikes"),
-    "receptive_field": ("rf2d", "best_params"),
-    "elevation": ("elevation_correlation_tuning",),
-    "azimuth": ("azimuth_correlation_tuning",),
+    "receptive_field": ("rf2d", "rf_extent_degrees", "best_params"),
+    "elevation": ("elevation_correlation_tuning", "elevation_degrees"),
+    "azimuth": ("azimuth_correlation_tuning", "azimuth_degrees"),
     "orientation_correlation": (
         "orientation_correlation_tuning",
         "orientation_correlation_ci_95",
@@ -120,8 +120,8 @@ _PAYLOAD_KEYS = {
         "osi_source",
         "orientation_firing_rate_export",
     ),
-    "size_tuning": ("size_tuning", "size_correlation_ci_95"),
-    "spatial_frequency": ("frequency_tuning", "frequency_tuning_available"),
+    "size_tuning": ("size_tuning", "size_correlation_ci_95", "size_degrees"),
+    "spatial_frequency": ("frequency_tuning", "frequency_tuning_available", "frequency_cpd"),
     "sta": (
         "sta_maps", "sta_lag_frames", "sta_lag_ms", "sta_variances",
         "sta_peak_lag_frame", "sta_peak_lag_ms", "sta_peak_variance",

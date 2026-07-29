@@ -62,6 +62,23 @@ def test_single_graph_payload_excludes_sibling_dashboard_arrays():
     assert "elevation_correlation_tuning" not in graph
 
 
+def test_headless_axis_payload_keeps_its_explicit_coordinate_values():
+    payload = {
+        "source": "Inspect Single Neuron",
+        "neuron_id": 4,
+        "azimuth_correlation_tuning": [1, 2],
+        "azimuth_degrees": [-20, 20],
+        "elevation_correlation_tuning": [3, 4],
+        "elevation_degrees": [-10, 10],
+    }
+
+    graph = graph_payload(payload, "azimuth")
+
+    assert graph["azimuth_correlation_tuning"] == [1, 2]
+    assert graph["azimuth_degrees"] == [-20, 20]
+    assert "elevation_degrees" not in graph
+
+
 def test_model_tuning_payload_contains_only_the_created_curve():
     curve = {"x": [0.1, 0.2], "y": [1.0, 2.0]}
     payload = {
