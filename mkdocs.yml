@@ -67,7 +67,7 @@ nav:
       - Export Results: how-to/export-results.md
   - Understand and Maintain:
       - Scientific Intuition: explanation/pipeline-intuition.md
-      - Inputs, Outputs, and Cache Contracts: reference/data-contracts.md
-      - Source Architecture and Ownership: reference/source-architecture.md
-      - Maintainability Guide: explanation/maintainability.md
+      - Data and Cache Contracts: explanation/maintenance/data-and-cache-contracts.md
+      - System Architecture and Code Ownership: explanation/maintenance/system-architecture.md
+      - Maintaining WavEn: explanation/maintenance/maintaining-waven.md
   - FAQ: faq.md

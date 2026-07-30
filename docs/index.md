@@ -14,5 +14,5 @@ spatial sampling grid; convolutional Gabor filters describe localized
 orientation, size, frequency, and phase features on that grid; and
 time-aligned neural activity is correlated or modelled (for amplitude, phase, and drift) against those features.
 See [Scientific Intuition](explanation/pipeline-intuition.md) for the rationale
-and [Inputs, Outputs, and Cache Contracts](reference/data-contracts.md) for
+and [Data and Cache Contracts](explanation/maintenance/data-and-cache-contracts.md) for
 technical array contracts.

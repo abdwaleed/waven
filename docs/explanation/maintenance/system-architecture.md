@@ -1,4 +1,4 @@
-# Source architecture and ownership
+# System architecture and code ownership
 
 This page is the maintenance map for the current application. The supported
 interactive workflow is the convolution-only GUI launched by `ui.py`.
@@ -52,5 +52,5 @@ work belongs in the ownership boundaries above.
 5. Prefer a focused module for new pure computation. Do not grow `app/gui.py`
    with numerical algorithms that can be tested independently.
 
-See the [Maintainability Guide](../explanation/maintainability.md) for the
+See [Maintaining WavEn](maintaining-waven.md) for the
 practical change and validation checklist.

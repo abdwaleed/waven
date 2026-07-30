@@ -10,12 +10,6 @@ and [GUI Onboarding](../tutorials/gui-onboarding.md). If you prefer to prepare a
 JSON file by hand, use the mapping below; every description has the same
 meaning as its GUI control.
 
-!!! note "Screenshot blueprint: save and restore"
-    Insert a close screenshot of the **Load pipeline_config.json** and **Save
-    pipeline_config.json** buttons in System Configuration. Add arrows to the
-    file picker and a caption: “Save a known-good GUI setup; load it before a
-    similar session.”
-
 ## Save and load from the GUI
 
 1. Configure the session in the GUI and verify the selected cache version.

@@ -32,22 +32,27 @@ crop, grid, or filter bank.
 | Gabor convolution kernels | Yes, when the grid and Gabor parameters match. | They are independent of neural activity. |
 | Coarse RF power cache | Yes, when all stimulus-side compatibility inputs match. | It contains visual features, not neural responses. |
 | Run Model / Full Model phase caches | Yes, when their stimulus-side settings match. | They contain phase-aware visual features, not neural responses. |
-| Aligned neural `spikes` / `pos` cache | No. Create or validate a cache for the new recording. | It represents the specific neural data and frame alignment. |
+| Aligned neural `spikes` / `pos` cache | Only if you are reusing the same recording. | It represents the specific neural data and frame alignment. |
 | Coarse RF results, plots, and fitted models | Usually no. Re-run for the new neural recording. | They combine the selected visual cache with neural responses. |
 
 ## Cache libraries and versions
 
 The **Coarse RF Cache Library Folder** and **Full-Model Cache Library Folder**
-are libraries, not single-use folders.
+are libraries of different caches you rendered before, not single-use folders.
 
 ```text
 cache/wavelets/coarse/
 ├── stimulus_coarse_downsampled_p20.zarr     # shared prepared stimulus
 ├── coarse_rf_power.zarr                     # legacy/top-level cache version
-└── cache-20260726-153012/                   # preserved alternative version
-    ├── coarse_rf_power.zarr
-    ├── coarse_model_real.zarr               # if requested
-    └── coarse_model_imag.zarr               # if requested
+└── cache-20260726-153012/                   # 1st example version of cache
+    ├── coarse_rf_power.zarr                 # your example cache is here
+    ├── coarse_model_real.zarr               # if requested (run model or run full model)
+    └── coarse_model_imag.zarr               # if requested (run model or run full model)
+└── cache-20260726-153012/                   # 2nd example version of cache
+    ├── ...
+    ├── ...
+    └── ...
+└── ...
 ```
 
 When **Prepare Analysis Caches** finds existing products, the replacement dialog

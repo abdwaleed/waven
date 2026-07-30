@@ -28,7 +28,7 @@ The convolution kernel cache stores those filters compactly. Applying them to th
 
 ## Coarse RF first
 
-Coarse RF uses the phase-insensitive power product. It correlates each neuron's aligned response with candidate local feature time courses and identifies a preferred location/orientation/size (and frequency where applicable). This is a screening step: it narrows a large visual feature space to a plausible seed for inspection and optional nonlinear modelling.
+Coarse RF uses the phase-insensitive power product. It correlates each neuron's aligned response with candidate local feature time courses and identifies a preferred location/orientation/size (and frequency, IF you choose to make an independent frequency list in the `Gabor Parameters` step). Coarse RF is a screening step: it narrows a large visual feature space to a plausible seed for inspection and optional nonlinear modelling.
 
 Correlation maps and RF tuning curves are therefore *diagnostics of covariation*, not firing-rate units. A strong correlation says that a feature's variation over the movie tracks the response; it does not alone establish causality.
 

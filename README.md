@@ -64,8 +64,8 @@ The documentation site has one ordered GUI-first path:
 - [GUI Onboarding](docs/tutorials/gui-onboarding.md)
 - [Reusable caches and disk planning](docs/reference/storage.md)
 - [Restore a saved GUI setup](docs/how-to/prepare-configuration.md)
-- [Inputs, outputs, and scientific contracts](docs/reference/data-contracts.md)
-- [Source architecture](docs/reference/source-architecture.md)
+- [Data and cache contracts](docs/explanation/maintenance/data-and-cache-contracts.md)
+- [System architecture and code ownership](docs/explanation/maintenance/system-architecture.md)
 
 To preview the documentation locally:
 

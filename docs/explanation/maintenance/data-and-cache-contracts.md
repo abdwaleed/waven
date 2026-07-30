@@ -1,4 +1,4 @@
-# Inputs, outputs, and scientific contracts
+# Data and cache contracts
 
 This reference defines what each stage accepts and produces. Shapes are part of the contract: a cache is safe to reuse only when its time axis, spatial grid, and feature axes match the current experiment settings.
 
@@ -49,4 +49,4 @@ Waven records provenance and validates compatibility before reuse. It may read o
 
 ## Export contract
 
-Exports are derived from already calculated figures/results. PNG and SVG are visual representations. PKL is an optional Python-specific record of graph data and analysis values. Exporting does not change the source cache format or create NPY/Zarr graph exports. See [Export Results](../how-to/export-results.md).
+Exports are derived from already calculated figures/results. PNG and SVG are visual representations. PKL is an optional Python-specific record of graph data and analysis values. Exporting does not change the source cache format or create NPY/Zarr graph exports. See [Export Results](../../how-to/export-results.md).

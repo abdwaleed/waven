@@ -1,8 +1,8 @@
-# Maintainability guide
+# Maintaining WavEn
 
 The codebase is organised around explicit ownership boundaries so a change to a
 button label, cache format, or analysis calculation does not silently alter
-unrelated stages. Use [Source Architecture and Ownership](../reference/source-architecture.md)
+unrelated stages. Use [System Architecture and Code Ownership](system-architecture.md)
 to locate the correct module before editing.
 
 ## Safe change workflow
